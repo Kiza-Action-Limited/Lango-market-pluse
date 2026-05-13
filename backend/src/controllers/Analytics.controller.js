@@ -3,6 +3,7 @@ const Order = require('../models/Order.model');
 const User = require('../models/User.model');
 const Product = require('../models/Product.model');
 const Logistics = require('../models/Logistics.model');
+const mongoose = require('mongoose');
 
 /**
  * Generate daily analytics
@@ -47,11 +48,11 @@ exports.generateDailyAnalytics = async (req, res, next) => {
       }
     ]);
     
-    // User Analytics
+    // User Analytics for Lango Roles
     const previousDate = new Date(targetDate);
     previousDate.setDate(previousDate.getDate() - 1);
     
-    const [totalUsers, newUsers, activeUsers, roleStats, userTypeStats] = await Promise.all([
+    const [totalUsers, newUsers, activeUsers, roleStats, userTypeStats, regionStats] = await Promise.all([
       User.countDocuments(),
       User.countDocuments({ createdAt: { $gte: targetDate, $lt: nextDate } }),
       User.countDocuments({ lastLogin: { $gte: targetDate, $lt: nextDate } }),
@@ -60,7 +61,52 @@ exports.generateDailyAnalytics = async (req, res, next) => {
       ]),
       User.aggregate([
         { $group: { _id: '$userType', count: { $sum: 1 } } }
+      ]),
+      User.aggregate([
+        { $group: { _id: '$region', count: { $sum: 1 } } }
       ])
+    ]);
+    
+    // Farmer Analytics
+    const farmerStats = await User.aggregate([
+      { $match: { role: 'farmer', createdAt: { $gte: targetDate, $lt: nextDate } } },
+      {
+        $group: {
+          _id: null,
+          totalFarmers: { $sum: 1 },
+          totalHarvestVolume: { $sum: '$harvestVolume' },
+          avgRating: { $avg: '$rating' }
+        }
+      }
+    ]);
+    
+    // Top Performing Farmers
+    const topFarmers = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: targetDate, $lt: nextDate },
+          status: 'delivered'
+        }
+      },
+      {
+        $group: {
+          _id: '$farmerId',
+          totalSales: { $sum: '$total' },
+          totalOrders: { $sum: 1 },
+          productsSold: { $sum: { $sum: '$items.quantity' } }
+        }
+      },
+      { $sort: { totalSales: -1 } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'farmer'
+        }
+      },
+      { $unwind: '$farmer' }
     ]);
     
     // Order Analytics by Status
@@ -162,29 +208,15 @@ exports.generateDailyAnalytics = async (req, res, next) => {
         $project: {
           productId: '$_id',
           name: '$product.name',
+          category: '$product.category',
           quantitySold: 1,
           revenue: 1
         }
       }
     ]);
     
-    // Logistics Analytics
-    const logisticsStats = await Logistics.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: targetDate, $lt: nextDate }
-        }
-      },
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-    
-    // Revenue by Payment Method
-    const revenueByMethod = await Order.aggregate([
+    // Market Analytics
+    const marketVolume = await Order.aggregate([
       {
         $match: {
           createdAt: { $gte: targetDate, $lt: nextDate },
@@ -193,11 +225,17 @@ exports.generateDailyAnalytics = async (req, res, next) => {
       },
       {
         $group: {
-          _id: '$paymentMethod',
-          amount: { $sum: '$total' }
+          _id: null,
+          totalVolume: { $sum: { $sum: '$items.quantity' } }
         }
       }
     ]);
+    
+    // Convert region stats to Map with string keys
+    const regionMap = new Map();
+    regionStats.forEach(r => {
+      if (r._id) regionMap.set(String(r._id), r.count);
+    });
     
     // Create or update analytics record
     const analytics = await Analytics.findOneAndUpdate(
@@ -219,14 +257,35 @@ exports.generateDailyAnalytics = async (req, res, next) => {
           byRole: {
             farmer: roleStats.find(r => r._id === 'farmer')?.count || 0,
             wholesaler: roleStats.find(r => r._id === 'wholesaler')?.count || 0,
+            manufacturer: roleStats.find(r => r._id === 'manufacturer')?.count || 0,
             retailer: roleStats.find(r => r._id === 'retailer')?.count || 0,
-            consumer: roleStats.find(r => r._id === 'consumer')?.count || 0,
-            logistics: roleStats.find(r => r._id === 'logistics')?.count || 0
+            admin: roleStats.find(r => r._id === 'admin')?.count || 0
           },
           byUserType: {
             individual: userTypeStats.find(u => u._id === 'individual')?.count || 0,
+            cooperative: userTypeStats.find(u => u._id === 'cooperative')?.count || 0,
             business: userTypeStats.find(u => u._id === 'business')?.count || 0
-          }
+          },
+          byRegion: regionMap
+        },
+        farmers: {
+          total: farmerStats[0]?.totalFarmers || 0,
+          active: await User.countDocuments({ role: 'farmer', isActive: true }),
+          newFarmers: newUsers,
+          topPerformers: topFarmers.map(f => ({
+            farmerId: f._id,
+            name: f.farmer.name,
+            farmName: f.farmer.farmName,
+            totalSales: f.totalSales,
+            totalOrders: f.totalOrders,
+            rating: f.farmer.rating,
+            productsSold: f.productsSold
+          })),
+          byCropType: new Map(),
+          byRegion: new Map(),
+          averageRating: farmerStats[0]?.avgRating || 0,
+          totalHarvestVolume: farmerStats[0]?.totalHarvestVolume || 0,
+          revenueShare: ((farmerStats[0]?.totalHarvestVolume || 0) / (marketVolume[0]?.totalVolume || 1)) * 100
         },
         products: {
           total: totalProducts,
@@ -234,7 +293,8 @@ exports.generateDailyAnalytics = async (req, res, next) => {
           outOfStock,
           lowStock,
           topSelling: topProducts,
-          topCategories: []
+          topCategories: [],
+          byCategory: new Map()
         },
         orders: {
           byStatus: {
@@ -251,46 +311,65 @@ exports.generateDailyAnalytics = async (req, res, next) => {
             refunded: paymentStatusData.find(p => p._id === 'refunded')?.count || 0
           },
           averageProcessingTime: timeData[0]?.avgProcessingTime || 0,
-          averageDeliveryTime: timeData[0]?.avgDeliveryTime || 0
+          averageDeliveryTime: timeData[0]?.avgDeliveryTime || 0,
+          byRole: {
+            farmerToWholesaler: 0,
+            wholesalerToRetailer: 0,
+            manufacturerToDistributor: 0,
+            directToConsumer: 0
+          }
         },
-        logistics: {
-          totalShipments: logisticsStats.reduce((sum, l) => sum + l.count, 0),
-          delivered: logisticsStats.find(l => l._id === 'delivered')?.count || 0,
-          inTransit: logisticsStats.find(l => l._id === 'in_transit')?.count || 0,
-          failed: logisticsStats.find(l => l._id === 'failed')?.count || 0,
-          averageDeliveryTime: 0,
-          onTimeDelivery: 0,
+        market: {
+          totalMarketVolume: marketVolume[0]?.totalVolume || 0,
+          averagePrices: new Map(),
+          priceTrends: [],
+          demandForecast: new Map(),
+          seasonalTrends: new Map(),
+          popularRegions: []
+        },
+        supplyChain: {
+          efficiency: 0,
+          averageLeadTime: 0,
+          wastageRate: 0,
+          coldChainUtilization: 0,
+          logistics: {
+            totalShipments: 0,
+            delivered: 0,
+            inTransit: 0,
+            delayed: 0,
+            averageDeliveryTime: 0,
+            onTimeDelivery: 0
+          },
           byCarrier: new Map()
         },
         revenue: {
           total: salesData[0]?.totalRevenue || 0,
-          byPaymentMethod: revenueByMethod.reduce((map, item) => {
-            map.set(item._id, item.amount);
-            return map;
-          }, new Map()),
-          byUserType: new Map(),
+          byPaymentMethod: new Map(),
+          byRole: {
+            farmers: farmerStats[0]?.totalHarvestVolume || 0,
+            wholesalers: 0,
+            manufacturers: 0,
+            retailers: 0
+          },
           platformFee: 0,
-          deliveryFee: 0
+          commissionCollected: 0
         },
         platform: {
           conversionRate: 0,
           cartAbandonmentRate: 0,
           customerRetentionRate: 0,
-          returningCustomers: 0
+          returningCustomers: 0,
+          userSatisfaction: 0,
+          transactionSuccess: 0
         },
-        summary: {
-          visits: 0,
-          uniqueVisitors: 0,
-          pageViews: 0,
-          bounceRate: 0
-        }
+        regions: new Map()
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true, returnDocument: 'after' } // Fixed deprecated option
     );
     
     res.status(200).json({
       success: true,
-      message: 'Analytics generated successfully',
+      message: 'Analytics generated successfully for Lango Market',
       data: analytics
     });
   } catch (error) {
@@ -304,7 +383,7 @@ exports.generateDailyAnalytics = async (req, res, next) => {
  */
 exports.getAnalytics = async (req, res, next) => {
   try {
-    const { startDate, endDate, period = 'day' } = req.query;
+    const { startDate, endDate, period = 'day', role } = req.query;
     
     let query = {};
     if (startDate && endDate) {
@@ -314,13 +393,25 @@ exports.getAnalytics = async (req, res, next) => {
       };
     }
     
-    const analytics = await Analytics.find(query).sort({ date: 1 });
+    let analytics = await Analytics.find(query).sort({ date: 1 });
+    
+    // Filter by role if specified
+    if (role && role !== 'admin') {
+      analytics = analytics.map(a => ({
+        date: a.date,
+        sales: a.sales,
+        [`${role}s`]: a[`${role}s`],
+        revenue: a.revenue.byRole[`${role}s`],
+        market: a.market
+      }));
+    }
     
     // Calculate trends
     const trends = {
       revenue: analytics.map(a => ({ date: a.date, value: a.sales.totalRevenue })),
       orders: analytics.map(a => ({ date: a.date, value: a.sales.totalOrders })),
-      users: analytics.map(a => ({ date: a.date, value: a.users.new }))
+      users: analytics.map(a => ({ date: a.date, value: a.users.new })),
+      marketVolume: analytics.map(a => ({ date: a.date, value: a.market?.totalMarketVolume || 0 }))
     };
     
     // Summary for period
@@ -330,7 +421,8 @@ exports.getAnalytics = async (req, res, next) => {
       totalUsers: analytics[analytics.length - 1]?.users.total || 0,
       averageOrderValue: analytics.length > 0 
         ? analytics.reduce((sum, a) => sum + a.sales.averageOrderValue, 0) / analytics.length 
-        : 0
+        : 0,
+      totalMarketVolume: analytics.reduce((sum, a) => sum + (a.market?.totalMarketVolume || 0), 0)
     };
     
     res.status(200).json({
@@ -367,12 +459,38 @@ exports.getDashboardOverview = async (req, res, next) => {
     ]);
     
     // Get real-time stats
-    const [pendingOrders, activeUsers, lowStockProducts, inTransitDeliveries] = await Promise.all([
+    const [pendingOrders, activeUsers, lowStockProducts, inTransitDeliveries, farmersOnline] = await Promise.all([
       Order.countDocuments({ status: 'pending' }),
       User.countDocuments({ isActive: true, lastLogin: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } }),
       Product.countDocuments({ stock: { $lt: 10, $gt: 0 } }),
-      Logistics.countDocuments({ status: 'in_transit' })
+      Logistics.countDocuments({ status: 'in_transit' }),
+      User.countDocuments({ role: 'farmer', isActive: true, lastLogin: { $gte: new Date(Date.now() - 60 * 60 * 1000) } })
     ]);
+    
+    // Role-based KPIs
+    const roleKPIs = {
+      farmers: {
+        total: await User.countDocuments({ role: 'farmer' }),
+        active: await User.countDocuments({ role: 'farmer', isActive: true }),
+        online: farmersOnline,
+        revenueShare: todayData?.revenue.byRole.farmers || 0
+      },
+      wholesalers: {
+        total: await User.countDocuments({ role: 'wholesaler' }),
+        active: await User.countDocuments({ role: 'wholesaler', isActive: true }),
+        revenueShare: todayData?.revenue.byRole.wholesalers || 0
+      },
+      manufacturers: {
+        total: await User.countDocuments({ role: 'manufacturer' }),
+        active: await User.countDocuments({ role: 'manufacturer', isActive: true }),
+        revenueShare: todayData?.revenue.byRole.manufacturers || 0
+      },
+      retailers: {
+        total: await User.countDocuments({ role: 'retailer' }),
+        active: await User.countDocuments({ role: 'retailer', isActive: true }),
+        revenueShare: todayData?.revenue.byRole.retailers || 0
+      }
+    };
     
     res.status(200).json({
       success: true,
@@ -381,11 +499,13 @@ exports.getDashboardOverview = async (req, res, next) => {
         week: weekData,
         month: monthData,
         allTime: allTimeData,
+        roleKPIs,
         realtime: {
           pendingOrders,
           activeUsers,
           lowStockProducts,
-          inTransitDeliveries
+          inTransitDeliveries,
+          farmersOnline
         }
       }
     });
@@ -400,7 +520,7 @@ exports.getDashboardOverview = async (req, res, next) => {
  */
 exports.getSalesAnalytics = async (req, res, next) => {
   try {
-    const { period = 'month', year, month } = req.query;
+    const { period = 'month', year, month, farmerId, productCategory } = req.query;
     
     let matchStage = {};
     
@@ -412,7 +532,11 @@ exports.getSalesAnalytics = async (req, res, next) => {
       };
     }
     
-    const salesData = await Order.aggregate([
+    if (farmerId) {
+      matchStage.farmerId = new mongoose.Types.ObjectId(farmerId);
+    }
+    
+    let salesData = await Order.aggregate([
       { $match: matchStage },
       {
         $group: {
@@ -429,9 +553,144 @@ exports.getSalesAnalytics = async (req, res, next) => {
       { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } }
     ]);
     
+    // Add category filter if specified
+    if (productCategory) {
+      salesData = salesData.filter(data => data.category === productCategory);
+    }
+    
     res.status(200).json({
       success: true,
       data: salesData
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get farmer analytics
+ * GET /api/v1/analytics/farmers
+ */
+exports.getFarmerAnalytics = async (req, res, next) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    const query = {};
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+    
+    const analytics = await Analytics.find(query).select('date farmers').sort({ date: 1 });
+    
+    const summary = {
+      totalFarmers: analytics[analytics.length - 1]?.farmers.total || 0,
+      averageRating: analytics.length > 0 ? analytics.reduce((sum, a) => sum + (a.farmers.averageRating || 0), 0) / analytics.length : 0,
+      totalHarvestVolume: analytics.reduce((sum, a) => sum + (a.farmers.totalHarvestVolume || 0), 0),
+      topPerformers: analytics[analytics.length - 1]?.farmers.topPerformers || []
+    };
+    
+    res.status(200).json({
+      success: true,
+      data: analytics,
+      summary
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get manufacturer analytics
+ * GET /api/v1/analytics/manufacturers
+ */
+exports.getManufacturerAnalytics = async (req, res, next) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    const query = {};
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+    
+    const analytics = await Analytics.find(query).select('date manufacturers').sort({ date: 1 });
+    
+    const summary = {
+      totalManufacturers: analytics[analytics.length - 1]?.manufacturers.total || 0,
+      productionVolume: analytics.reduce((sum, a) => sum + (a.manufacturers.productionVolume || 0), 0),
+      topPerformers: analytics[analytics.length - 1]?.manufacturers.topPerformers || []
+    };
+    
+    res.status(200).json({
+      success: true,
+      data: analytics,
+      summary
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get market trends
+ * GET /api/v1/analytics/market-trends
+ */
+exports.getMarketTrends = async (req, res, next) => {
+  try {
+    const { category, region } = req.query;
+    
+    const analytics = await Analytics.find()
+      .sort({ date: -1 })
+      .limit(30)
+      .select('date market sales');
+    
+    const trends = {
+      volume: analytics.map(a => ({ date: a.date, value: a.market?.totalMarketVolume || 0 })),
+      revenue: analytics.map(a => ({ date: a.date, value: a.sales.totalRevenue })),
+      priceTrends: analytics[0]?.market.priceTrends || []
+    };
+    
+    res.status(200).json({
+      success: true,
+      data: trends,
+      currentMarket: analytics[0]?.market || null
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get supply chain analytics
+ * GET /api/v1/analytics/supply-chain
+ */
+exports.getSupplyChainAnalytics = async (req, res, next) => {
+  try {
+    const analytics = await Analytics.find()
+      .sort({ date: -1 })
+      .limit(7)
+      .select('date supplyChain');
+    
+    const efficiency = analytics.length > 0 ? analytics.reduce((sum, a) => sum + (a.supplyChain?.efficiency || 0), 0) / analytics.length : 0;
+    const avgLeadTime = analytics.length > 0 ? analytics.reduce((sum, a) => sum + (a.supplyChain?.averageLeadTime || 0), 0) / analytics.length : 0;
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        weeklyData: analytics,
+        averages: {
+          efficiency,
+          averageLeadTime: avgLeadTime,
+          wastageRate: analytics[0]?.supplyChain.wastageRate || 0,
+          coldChainUtilization: analytics[0]?.supplyChain.coldChainUtilization || 0
+        },
+        logistics: analytics[0]?.supplyChain.logistics || null
+      }
     });
   } catch (error) {
     next(error);
