@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import { FaArrowLeft, FaEnvelope, FaLock, FaEye, FaEyeSlash } from 'react-icons/fa';
 import { authService } from '../services/authService';
 import { validateEmail, validatePassword } from '../utils/validators';
-import { mockAdminUsers } from '../data/mockData';
 
 const ForgotPassword = () => {
   const [searchParams] = useSearchParams();
@@ -19,9 +18,6 @@ const ForgotPassword = () => {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
-  const matchesMockEmail = (value) =>
-    mockAdminUsers.some((user) => String(user?.email || '').toLowerCase() === String(value || '').toLowerCase());
-
   const handleSendReset = async (e) => {
     e.preventDefault();
     if (!validateEmail(email)) {
@@ -31,14 +27,8 @@ const ForgotPassword = () => {
     const cleanEmail = email.trim().toLowerCase();
     setLoading(true);
     try {
-      let accountExists = false;
-
-      try {
-        const accountMatch = await authService.checkEmailAccount(cleanEmail);
-        accountExists = !!accountMatch?.exists;
-      } catch (checkError) {
-        accountExists = matchesMockEmail(cleanEmail);
-      }
+      const accountMatch = await authService.checkEmailAccount(cleanEmail);
+      const accountExists = !!accountMatch?.exists;
 
       if (!accountExists) {
         toast.error('No account found with this email address');

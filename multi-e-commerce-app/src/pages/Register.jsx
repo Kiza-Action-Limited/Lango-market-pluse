@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
 import { useAuth } from '../context/AuthContext';
+import { authService } from '../services/authService';
 import {
   FaUser,
   FaEnvelope,
@@ -8,22 +10,43 @@ import {
   FaStore,
   FaBrain,
   FaArrowRight,
+  FaArrowLeft,
   FaEye,
   FaEyeSlash,
   FaPhone,
+  FaCheckCircle,
 } from 'react-icons/fa';
 import marketPulseLogo from '../assets/Marketpulse-logo.png';
+import { createPrefetchHandlers } from '../utils/prefetch';
+import {
+  mergeRegistrationData,
+  resetRegistrationProgress,
+  setRegistrationStep,
+} from '../redux/slices/uiSlice';
+
+const DEFAULT_REGISTRATION_DATA = {
+  verificationMethod: 'email',
+  verificationValue: '',
+  verificationCode: '',
+  isVerified: false,
+  name: '',
+  phone: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  role: 'buyer',
+  businessType: '',
+  businessLogoUrl: '',
+};
 
 const Register = () => {
+  const dispatch = useDispatch();
+  const registrationProgress = useSelector((state) => state?.ui?.registrationProgress);
+  const persistedStep = registrationProgress?.step;
+  const persistedData = registrationProgress?.data;
   const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    role: 'buyer',
-    businessType: '',
-    businessLogoUrl: '',
+    ...DEFAULT_REGISTRATION_DATA,
+    ...(persistedData || {}),
   });
   const [businessLogoName, setBusinessLogoName] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,11 +54,31 @@ const Register = () => {
   const [showPasswordStrength, setShowPasswordStrength] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const { register } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [step, setStep] = useState(Number(persistedStep) || 1);
 
   const businessTypes = ['Wholesaler', 'Manufacturer', 'Retailer', 'Farmer', 'Other Business'];
+
+  useEffect(() => {
+    dispatch(mergeRegistrationData(formData));
+  }, [dispatch, formData]);
+
+  useEffect(() => {
+    dispatch(setRegistrationStep(step));
+  }, [dispatch, step]);
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setCooldownSeconds((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownSeconds]);
 
   useEffect(() => {
     const roleParam = searchParams.get('role');
@@ -61,10 +104,104 @@ const Register = () => {
   };
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    if (name === 'verificationMethod') {
+      setFormData((prev) => ({
+        ...prev,
+        verificationMethod: value,
+        verificationValue: '',
+        verificationCode: '',
+        isVerified: false,
+      }));
+      setOtpSent(false);
+      setCooldownSeconds(0);
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleSendVerificationCode = async () => {
+    const method = formData.verificationMethod;
+    const value = formData.verificationValue.trim();
+    const kenyaPhoneRegex = /^\+?254[0-9]{9}$/;
+
+    if (method === 'email') {
+      if (!/^\S+@\S+\.\S+$/.test(value)) {
+        setError('Enter a valid email for verification');
+        return;
+      }
+      setFormData((prev) => ({ ...prev, email: value.toLowerCase() }));
+    } else {
+      if (!kenyaPhoneRegex.test(value)) {
+        setError('Phone verification needs format 2547XXXXXXXX or +2547XXXXXXXX');
+        return;
+      }
+      setFormData((prev) => ({ ...prev, phone: value }));
+    }
+    setVerificationLoading(true);
+    try {
+      await authService.sendOtp({ channel: method, value });
+      const cooldown = await authService.getOtpCooldown({ channel: method, value });
+      setCooldownSeconds(Number(cooldown?.cooldownSeconds) || 0);
+      setOtpSent(true);
+      setFormData((prev) => ({ ...prev, verificationCode: '', isVerified: false }));
+      setError('');
+    } catch (sendError) {
+      const message = sendError?.response?.data?.message || 'Failed to send verification code';
+      setError(message);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const handleVerifyCode = async () => {
+    if (!otpSent) {
+      setError('Send verification code first');
+      return;
+    }
+    const enteredCode = formData.verificationCode.trim();
+    if (!/^\d{6}$/.test(enteredCode)) {
+      setError('Enter a valid 6-digit code');
+      return;
+    }
+    setVerificationLoading(true);
+    try {
+      await authService.verifyOtp({
+        channel: formData.verificationMethod,
+        value: formData.verificationValue.trim(),
+        code: enteredCode,
+      });
+      setFormData((prev) => ({ ...prev, isVerified: true }));
+      setStep((prev) => Math.min(4, prev + 1));
+      setError('');
+    } catch (verifyError) {
+      const message = verifyError?.response?.data?.message || 'Verification failed';
+      setError(message);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    const channel = formData.verificationMethod;
+    const value = formData.verificationValue.trim();
+    if (!value) return;
+    setVerificationLoading(true);
+    try {
+      await authService.resendOtp({ channel, value });
+      const cooldown = await authService.getOtpCooldown({ channel, value });
+      setCooldownSeconds(Number(cooldown?.cooldownSeconds) || 0);
+      setError('');
+    } catch (resendError) {
+      const message = resendError?.response?.data?.message || 'Failed to resend verification code';
+      setError(message);
+    } finally {
+      setVerificationLoading(false);
+    }
   };
 
   const handleBusinessLogoChange = (e) => {
@@ -113,14 +250,62 @@ const Register = () => {
 
   const passwordStrength = getPasswordStrength(formData.password);
 
+  const validateStep = (targetStep) => {
+    if (targetStep === 2) {
+      if (!formData.isVerified) {
+        setError('Verify your email or phone number first');
+        return false;
+      }
+    }
+
+    if (targetStep === 3) {
+      if (!formData.role) {
+        setError('Please choose Buyer or Seller');
+        return false;
+      }
+      if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim()) {
+        setError('Please complete full name, email, and phone number');
+        return false;
+      }
+    }
+
+    if (targetStep === 4 && formData.role === 'seller') {
+      if (!formData.businessType) {
+        setError('Please select your business type');
+        return false;
+      }
+      if (!formData.businessLogoUrl) {
+        setError('Please upload your business logo');
+        return false;
+      }
+    }
+    setError('');
+    return true;
+  };
+
+  const nextStep = () => {
+    const target = Math.min(4, step + 1);
+    if (validateStep(target)) setStep(target);
+  };
+
+  const prevStep = () => {
+    setError('');
+    setStep((prev) => Math.max(1, prev - 1));
+  };
+
+  const steps = useMemo(
+    () => [
+      { id: 1, label: 'Verify' },
+      { id: 2, label: 'Account' },
+      { id: 3, label: 'Business' },
+      { id: 4, label: 'Security' },
+    ],
+    []
+  );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
-    if (!formData.role) {
-      setError('Please choose Buyer or Seller');
-      return;
-    }
 
     if (formData.role === 'seller' && !formData.businessType) {
       setError('Please select your business type');
@@ -156,6 +341,7 @@ const Register = () => {
 
     const result = await register(registerData);
     if (result.success) {
+      dispatch(resetRegistrationProgress());
       const requestedPlan = searchParams.get('plan');
       if (registerData.role === 'seller') {
         navigate(
@@ -169,7 +355,6 @@ const Register = () => {
     } else {
       setError(result.error);
     }
-
     setLoading(false);
   };
 
@@ -208,6 +393,15 @@ const Register = () => {
             <p className="mt-2 text-sm text-[#6B7280] italic">Lango Lako la Biashara Smart</p>
           </div>
 
+          <div className="flex items-center gap-2">
+            {steps.map((item) => (
+              <div key={item.id} className="flex-1">
+                <div className={`h-2 rounded-full ${step >= item.id ? 'bg-[#F97316]' : 'bg-gray-200'}`} />
+                <p className="mt-1 text-xs text-[#6B7280]">{item.label}</p>
+              </div>
+            ))}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {accountCards.map((card) => {
               const Icon = card.icon;
@@ -232,165 +426,241 @@ const Register = () => {
           <form className="space-y-5 rounded-xl border border-gray-200 bg-white p-5" onSubmit={handleSubmit}>
             {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
 
-            <p className="text-sm font-semibold text-[#111827]">
-              {formData.role === 'seller' ? 'Seller registration form' : 'Buyer registration form'}
-            </p>
+            {step === 1 && (
+              <div className="space-y-4">
+                <p className="text-sm font-semibold text-[#111827]">Verify your contact first</p>
+                {!otpSent && (
+                  <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Contact</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleChange({ target: { name: 'verificationMethod', value: 'email' } })}
+                        className={`py-2 rounded-lg border text-sm ${
+                          formData.verificationMethod === 'email'
+                            ? 'border-[#F97316] bg-[#F97316]/10 text-[#F97316]'
+                            : 'border-gray-300 text-[#374151]'
+                        }`}
+                      >
+                        Verify with Email
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleChange({ target: { name: 'verificationMethod', value: 'phone' } })}
+                        className={`py-2 rounded-lg border text-sm ${
+                          formData.verificationMethod === 'phone'
+                            ? 'border-[#F97316] bg-[#F97316]/10 text-[#F97316]'
+                            : 'border-gray-300 text-[#374151]'
+                        }`}
+                      >
+                        Verify with Number
+                      </button>
+                    </div>
 
-            <div className="space-y-4">
-              <div className="relative">
-                <FaUser className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
-                <input
-                  type="text"
-                  name="name"
-                  required
-                  value={formData.name}
-                  onChange={handleChange}
-                  className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827]"
-                  placeholder="Full Name"
-                />
-              </div>
+                    <div className="relative">
+                      {formData.verificationMethod === 'email' ? (
+                        <FaEnvelope className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                      ) : (
+                        <FaPhone className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                      )}
+                      <input
+                        type={formData.verificationMethod === 'email' ? 'email' : 'tel'}
+                        name="verificationValue"
+                        required
+                        value={formData.verificationValue}
+                        onChange={handleChange}
+                        className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                        placeholder={formData.verificationMethod === 'email' ? 'Email address' : 'Phone number (2547XXXXXXXX)'}
+                      />
+                    </div>
 
-              <div className="relative">
-                <FaEnvelope className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
-                <input
-                  type="email"
-                  name="email"
-                  required
-                  value={formData.email}
-                  onChange={handleChange}
-                  className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827]"
-                  placeholder="Email address"
-                />
-              </div>
-
-              <div className="relative">
-                <FaPhone className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
-                <input
-                  type="tel"
-                  name="phone"
-                  required
-                  value={formData.phone}
-                  onChange={handleChange}
-                  className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827]"
-                  placeholder="Phone number (2547XXXXXXXX)"
-                />
-              </div>
-
-              {formData.role === 'seller' && (
-                <div className="space-y-3">
-                  <div className="relative">
-                    <FaStore className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
-                    <select
-                      name="businessType"
-                      value={formData.businessType}
-                      onChange={handleChange}
-                      required
-                      className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827] appearance-none"
+                    <button
+                      type="button"
+                      onClick={handleSendVerificationCode}
+                      disabled={verificationLoading}
+                      className="w-full py-2 rounded-lg border border-[#F97316] text-[#F97316] font-semibold hover:bg-[#F97316]/10 disabled:opacity-50"
                     >
-                      <option value="">Select business type</option>
-                      {businessTypes.map((type) => (
-                        <option key={type} value={type.toLowerCase().replace(/\s+/g, '_')}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
+                      {verificationLoading ? 'Sending...' : 'Send Verification Code'}
+                    </button>
                   </div>
+                )}
 
-                  <div className="rounded-lg border border-gray-300 p-3">
-                    <label htmlFor="businessLogo" className="block text-sm font-medium text-[#111827] mb-2">
-                      Business logo <span className="text-red-500">*</span>
-                    </label>
+                {otpSent && (
+                  <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">OTP Verification</p>
                     <input
-                      id="businessLogo"
-                      type="file"
-                      accept="image/*"
-                      required={formData.role === 'seller'}
-                      onChange={handleBusinessLogoChange}
-                      className="block w-full text-sm text-[#374151] file:mr-3 file:rounded-md file:border-0 file:bg-[#F97316]/10 file:px-3 file:py-2 file:text-[#F97316] file:font-semibold hover:file:bg-[#F97316]/20"
+                      type="text"
+                      name="verificationCode"
+                      value={formData.verificationCode}
+                      onChange={handleChange}
+                      className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                      placeholder="Enter 6-digit code"
                     />
-                    <p className="mt-2 text-xs text-[#6B7280]">Upload a clear logo (max 2MB).</p>
-                    {businessLogoName && <p className="mt-1 text-xs text-[#16A34A]">Selected: {businessLogoName}</p>}
+                    <button
+                      type="button"
+                      onClick={handleVerifyCode}
+                      disabled={verificationLoading}
+                      className="w-full py-2 rounded-lg bg-[#16A34A] text-white font-semibold hover:bg-[#15803D] disabled:opacity-50"
+                    >
+                      {verificationLoading ? 'Verifying...' : 'Verify Contact'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResendCode}
+                      disabled={verificationLoading || cooldownSeconds > 0}
+                      className="w-full py-2 rounded-lg border border-gray-300 text-[#374151] font-semibold hover:bg-gray-100 disabled:opacity-50"
+                    >
+                      {cooldownSeconds > 0 ? `Resend in ${cooldownSeconds}s` : 'Resend Code'}
+                    </button>
                   </div>
-                </div>
-              )}
+                )}
 
-              <div className="relative">
-                <FaLock className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  required
-                  value={formData.password}
-                  onChange={handleChange}
-                  onFocus={() => setShowPasswordStrength(true)}
-                  onBlur={() => setShowPasswordStrength(false)}
-                  className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827]"
-                  placeholder="Password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-[#F97316]"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <FaEyeSlash size={14} /> : <FaEye size={14} />}
-                </button>
-                {showPasswordStrength && formData.password && (
-                  <div className="absolute right-10 top-1/2 -translate-y-1/2">
-                    <span className={`text-xs font-medium ${passwordStrength.color}`}>{passwordStrength.label}</span>
+                {formData.isVerified && (
+                  <p className="text-sm text-[#166534] flex items-center gap-2">
+                    <FaCheckCircle /> Verified successfully
+                  </p>
+                )}
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="space-y-4">
+                <div className="relative">
+                  <FaUser className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    value={formData.name}
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                    placeholder="Full Name"
+                  />
+                </div>
+                <div className="relative">
+                  <FaEnvelope className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                  <input
+                    type="email"
+                    name="email"
+                    required
+                    value={formData.email}
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                    placeholder="Email address"
+                  />
+                </div>
+                <div className="relative">
+                  <FaPhone className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                  <input
+                    type="tel"
+                    name="phone"
+                    required
+                    value={formData.phone}
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                    placeholder="Phone number (2547XXXXXXXX)"
+                  />
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="space-y-4">
+                {formData.role === 'seller' ? (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <FaStore className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                      <select
+                        name="businessType"
+                        value={formData.businessType}
+                        onChange={handleChange}
+                        required
+                        className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827] appearance-none"
+                      >
+                        <option value="">Select business type</option>
+                        {businessTypes.map((type) => (
+                          <option key={type} value={type.toLowerCase().replace(/\s+/g, '_')}>
+                            {type}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="rounded-lg border border-gray-300 p-3">
+                      <label htmlFor="businessLogo" className="block text-sm font-medium text-[#111827] mb-2">
+                        Business logo <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        id="businessLogo"
+                        type="file"
+                        accept="image/*"
+                        required
+                        onChange={handleBusinessLogoChange}
+                        className="block w-full text-sm text-[#374151] file:mr-3 file:rounded-md file:border-0 file:bg-[#F97316]/10 file:px-3 file:py-2 file:text-[#F97316] file:font-semibold hover:file:bg-[#F97316]/20"
+                      />
+                      <p className="mt-2 text-xs text-[#6B7280]">Upload a clear logo (max 2MB).</p>
+                      {businessLogoName && <p className="mt-1 text-xs text-[#16A34A]">Selected: {businessLogoName}</p>}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-[#16A34A]/5 border border-[#16A34A]/20 rounded-lg text-sm text-[#166534]">
+                    Buyer account selected. You can continue to create your password.
                   </div>
                 )}
               </div>
+            )}
 
-              {formData.password && (
-                <div className="mt-1">
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4].map((level) => (
-                      <div
-                        key={level}
-                        className={`h-1 flex-1 rounded-full transition-all ${
-                          level <= passwordStrength.score
-                            ? passwordStrength.score <= 1
-                              ? 'bg-red-500'
-                              : passwordStrength.score <= 2
-                              ? 'bg-[#F97316]'
-                              : passwordStrength.score <= 3
-                              ? 'bg-[#FB923C]'
-                              : 'bg-[#16A34A]'
-                            : 'bg-gray-200'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-xs text-[#6B7280] mt-1">Use 8+ chars with letters, numbers and symbols</p>
+            {step === 4 && (
+              <div className="space-y-4">
+                <div className="relative">
+                  <FaLock className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    required
+                    value={formData.password}
+                    onChange={handleChange}
+                    onFocus={() => setShowPasswordStrength(true)}
+                    onBlur={() => setShowPasswordStrength(false)}
+                    className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                    placeholder="Password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-[#F97316]"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <FaEyeSlash size={14} /> : <FaEye size={14} />}
+                  </button>
+                  {showPasswordStrength && formData.password && (
+                    <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                      <span className={`text-xs font-medium ${passwordStrength.color}`}>{passwordStrength.label}</span>
+                    </div>
+                  )}
                 </div>
-              )}
 
-              <div className="relative">
-                <FaLock className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
-                <input
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  name="confirmPassword"
-                  required
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827]"
-                  placeholder="Confirm Password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword((prev) => !prev)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-[#F97316]"
-                  aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showConfirmPassword ? <FaEyeSlash size={14} /> : <FaEye size={14} />}
-                </button>
+                <div className="relative">
+                  <FaLock className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    name="confirmPassword"
+                    required
+                    value={formData.confirmPassword}
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                    placeholder="Confirm Password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-[#F97316]"
+                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmPassword ? <FaEyeSlash size={14} /> : <FaEye size={14} />}
+                  </button>
+                </div>
               </div>
-
-              {formData.confirmPassword && formData.password !== formData.confirmPassword && (
-                <p className="text-xs text-red-500 mt-1">Passwords do not match</p>
-              )}
-            </div>
+            )}
 
             <div className="p-3 bg-linear-to-r from-[#FB923C]/5 to-[#F97316]/5 rounded-lg border border-[#FB923C]/20">
               <div className="flex items-center gap-2 mb-1">
@@ -402,23 +672,34 @@ const Register = () => {
               </p>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex justify-center items-center gap-2 py-3 px-4 text-sm font-semibold rounded-lg text-white bg-[#F97316] hover:bg-[#F97316]/90 disabled:opacity-50 transition-colors"
-            >
-              {loading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Creating account...
-                </>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={prevStep}
+                disabled={step === 1 || loading}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-[#374151] disabled:opacity-50"
+              >
+                <FaArrowLeft size={12} /> Back
+              </button>
+
+              {step < 4 ? (
+                <button
+                  type="button"
+                  onClick={nextStep}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg text-white bg-[#F97316] hover:bg-[#F97316]/90"
+                >
+                  Continue <FaArrowRight size={12} />
+                </button>
               ) : (
-                <>
-                  {formData.role === 'seller' ? 'Sign up as Seller' : 'Sign up as Buyer'}
-                  <FaArrowRight size={14} />
-                </>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg text-white bg-[#F97316] hover:bg-[#F97316]/90 disabled:opacity-50"
+                >
+                  {loading ? 'Creating account...' : formData.role === 'seller' ? 'Sign up as Seller' : 'Sign up as Buyer'}
+                </button>
               )}
-            </button>
+            </div>
           </form>
 
           <p className="text-center text-sm text-[#6B7280]">
@@ -426,6 +707,7 @@ const Register = () => {
             <Link
               to={`/login?role=${formData.role || 'buyer'}`}
               className="font-medium text-[#F97316] hover:text-[#F97316]/80 transition-colors"
+              {...createPrefetchHandlers('/login')}
             >
               Sign in as {formData.role === 'seller' ? 'Seller' : 'Buyer'}
             </Link>

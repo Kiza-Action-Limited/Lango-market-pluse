@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { FaEnvelope, FaLock, FaBrain, FaArrowRight, FaEye, FaEyeSlash, FaUser, FaStore } from 'react-icons/fa';
 import marketPulseLogo from '../assets/Marketpulse-logo.png';
+import { createPrefetchHandlers } from '../utils/prefetch';
+
+const ADMIN_LOGIN_EMAIL = String(import.meta.env.VITE_ADMIN_LOGIN_EMAIL || 'admin@langomarket.com').toLowerCase();
 
 const Login = () => {
   const [identifier, setIdentifier] = useState('');
@@ -37,14 +41,33 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const cleanIdentifier = identifier.trim();
+    const cleanPassword = password;
+    if (!cleanIdentifier || !cleanPassword) return;
+
+    if (cleanIdentifier.toLowerCase() === ADMIN_LOGIN_EMAIL) {
+      toast.error('Unauthorised credential!.');
+      return;
+    }
+
     setLoading(true);
 
-    const result = await login(identifier, password);
+    const result = await login(cleanIdentifier, cleanPassword);
     if (result.success) {
-      if (accountType === 'admin') {
+      const resolvedRole = String(result?.user?.role || '').toLowerCase();
+      const resolvedBusinessType = String(result?.user?.businessType || '').toLowerCase();
+      const isAdminUser = resolvedRole === 'admin';
+      const isSellerUser =
+        resolvedRole === 'seller' ||
+        ['wholesaler', 'retailer', 'farmer', 'manufacturer'].includes(resolvedRole) ||
+        ['wholesaler', 'retailer', 'farmer', 'manufacturer'].includes(resolvedBusinessType);
+
+      if (isAdminUser) {
         navigate('/admin');
+      } else if (isSellerUser) {
+        navigate('/seller');
       } else {
-        navigate(accountType === 'seller' ? '/seller' : '/');
+        navigate('/');
       }
     }
 
@@ -196,6 +219,7 @@ const Login = () => {
             <Link
               to={`/register?role=${accountType}`}
               className="font-medium text-[#F97316] hover:text-[#F97316]/80 transition-colors"
+              {...createPrefetchHandlers('/register')}
             >
               Create {accountType === 'seller' ? 'Seller' : 'Buyer'} account
             </Link>

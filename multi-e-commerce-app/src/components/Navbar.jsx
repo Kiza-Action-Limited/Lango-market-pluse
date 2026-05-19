@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { FaBars, FaChevronDown, FaSearch, FaShoppingCart, FaTimes, FaUser } from 'react-icons/fa';
+import { createPrefetchHandlers } from '../utils/prefetch';
 
 const categoryOptions = [
   { label: 'All Categories', to: '/products' },
@@ -71,7 +72,7 @@ const Navbar = () => {
   return (
     <header ref={menuRef} className="fixed top-0 inset-x-0 z-50 w-full shadow-sm">
       <div className="bg-[#F2871A] text-white">
-        <div className="mx-auto max-w-[1366px] px-3 py-2 flex flex-wrap md:flex-nowrap items-center gap-3 text-sm">
+        <div className="mx-auto max-w-341.5 px-3 py-2 flex flex-wrap md:flex-nowrap items-center gap-3 text-sm">
           <Link to="/" className="flex items-center gap-2 min-w-max hover:opacity-90" onClick={closeAllMenus}>
             <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-[#0B2D55] border-2 border-[#06182f]" />
             <span className="font-extrabold text-sm sm:text-lg leading-none tracking-wide bg-[#0B2D55] px-2 py-1 rounded-sm">
@@ -96,10 +97,10 @@ const Navbar = () => {
                     <>
                       <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Profile</Link>
                       {isSeller && (
-                        <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Seller Dashboard</Link>
+                        <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
                       )}
                       {isAdmin && (
-                        <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Admin Dashboard</Link>
+                        <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin')}>Admin Dashboard</Link>
                       )}
                       <Link to="/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
                       <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
@@ -107,15 +108,15 @@ const Navbar = () => {
                     </>
                   ) : (
                     <>
-                      <Link to="/login" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Sign in</Link>
-                      <Link to="/register" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Create account</Link>
+                      <Link to="/login" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/login')}>Sign in</Link>
+                      <Link to="/register" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/register')}>Create account</Link>
                     </>
                   )}
                 </div>
               )}
             </div>
 
-            <Link to="/products" className="font-semibold hover:opacity-90">Shop</Link>
+            <Link to="/products" className="font-semibold hover:opacity-90" {...createPrefetchHandlers('/products')}>Shop</Link>
 
             <div className="relative">
               <button
@@ -162,7 +163,7 @@ const Navbar = () => {
               )}
             </div>
 
-            <Link to="/register?role=seller" className="font-semibold hover:opacity-90">
+            <Link to="/register?role=seller" className="font-semibold hover:opacity-90" {...createPrefetchHandlers('/register')}>
               Sell on Lango Market Pulse
             </Link>
 
@@ -222,10 +223,10 @@ const Navbar = () => {
                   <>
                     <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Profile</Link>
                     {isSeller && (
-                      <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Seller Dashboard</Link>
+                      <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
                     )}
                     {isAdmin && (
-                      <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Admin Dashboard</Link>
+                      <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin')}>Admin Dashboard</Link>
                     )}
                     <Link to="/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
                     <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
@@ -233,14 +234,14 @@ const Navbar = () => {
                   </>
                 ) : (
                   <>
-                    <Link to="/login" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Sign in</Link>
-                    <Link to="/register" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Create account</Link>
+                    <Link to="/login" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/login')}>Sign in</Link>
+                    <Link to="/register" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/register')}>Create account</Link>
                   </>
                 )}
               </div>
             )}
 
-            <Link to="/products" className="block font-semibold" onClick={closeAllMenus}>Shop</Link>
+            <Link to="/products" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/products')}>Shop</Link>
 
             <button onClick={() => toggleDropdown('categoryMobile')} className="w-full bg-[#E97A12] px-3 py-2 rounded flex items-center justify-between">
               <span>All</span>
@@ -277,7 +278,7 @@ const Navbar = () => {
               </div>
             )}
 
-            <Link to="/register?role=seller" className="block font-semibold" onClick={closeAllMenus}>
+            <Link to="/register?role=seller" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/register')}>
               Sell on Lango Market Pulse
             </Link>
           </div>

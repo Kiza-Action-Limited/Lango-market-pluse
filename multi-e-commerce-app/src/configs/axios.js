@@ -38,7 +38,15 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const requestUrl = String(error?.config?.url || '');
+    const isAuthAttempt =
+      requestUrl.includes('/v1/auth/login') ||
+      requestUrl.includes('/v1/auth/register') ||
+      requestUrl.includes('/v1/auth/otp/') ||
+      requestUrl.includes('/v1/auth/forgot-password') ||
+      requestUrl.includes('/v1/auth/reset-password');
+
+    if (error.response?.status === 401 && !isAuthAttempt) {
       localStorage.removeItem('token');
       window.location.href = '/login';
     }

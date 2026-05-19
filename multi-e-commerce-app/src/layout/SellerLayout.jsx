@@ -1,5 +1,5 @@
 // src/layouts/SellerLayout.jsx
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { FaTachometerAlt, FaPlus, FaBox, FaShoppingCart, FaCrown, FaBroadcastTower, FaUser, FaSignOutAlt, FaHome } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
@@ -73,7 +73,20 @@ const SellerLayout = () => {
           <h1 className="text-xl font-semibold text-gray-900">{pageTitle}</h1>
         </header>
         <div className="flex-1 overflow-y-auto">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="p-6">
+                <div className="h-8 w-56 rounded bg-gray-200 skeleton-shimmer mb-4" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <div key={idx} className="h-40 rounded-xl bg-white border border-gray-100 skeleton-shimmer" />
+                  ))}
+                </div>
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </div>
     </div>

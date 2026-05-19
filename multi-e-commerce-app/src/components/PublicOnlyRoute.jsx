@@ -1,10 +1,9 @@
-// src/components/SellerRoute.jsx
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const SellerRoute = () => {
-  const { isAuthenticated, isSeller, isAdmin, loading } = useAuth();
+const PublicOnlyRoute = () => {
+  const { isAuthenticated, isAdmin, isSeller, loading } = useAuth();
 
   if (loading) {
     return (
@@ -14,10 +13,10 @@ const SellerRoute = () => {
     );
   }
 
-  if (!isAuthenticated) return <Navigate to="/login?role=seller" replace />;
+  if (!isAuthenticated) return <Outlet />;
   if (isAdmin) return <Navigate to="/admin" replace />;
-  if (!isSeller) return <Navigate to="/" replace />;
-  return <Outlet />;
+  if (isSeller) return <Navigate to="/seller" replace />;
+  return <Navigate to="/" replace />;
 };
 
-export default SellerRoute;
+export default PublicOnlyRoute;

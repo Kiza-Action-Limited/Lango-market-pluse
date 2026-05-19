@@ -64,13 +64,7 @@ const SellerDashboard = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const isSectionLoading = loading;
 
   const intelligenceCards = [
     {
@@ -160,7 +154,15 @@ const SellerDashboard = () => {
           </Link>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {intelligenceCards.map((card) => {
+          {isSectionLoading
+            ? Array.from({ length: 4 }).map((_, idx) => (
+                <div key={`intel-skeleton-${idx}`} className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="h-5 w-40 rounded bg-gray-200 skeleton-shimmer mb-3" />
+                  <div className="h-4 w-full rounded bg-gray-200 skeleton-shimmer mb-2" />
+                  <div className="h-4 w-4/5 rounded bg-gray-200 skeleton-shimmer" />
+                </div>
+              ))
+            : intelligenceCards.map((card) => {
             const enabled = hasFeature(card.key);
             return (
               <div
@@ -192,7 +194,9 @@ const SellerDashboard = () => {
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold mb-4">Digital CFO Health Meter</h2>
           <div className="mb-3 text-sm text-gray-600">Frontend estimate using current seller revenue</div>
-          <div className="text-3xl font-bold mb-2">{formatCurrency(cfoNetProfit)}</div>
+          <div className="text-3xl font-bold mb-2">
+            {isSectionLoading ? <span className="inline-block h-9 w-44 rounded bg-gray-200 skeleton-shimmer" /> : formatCurrency(cfoNetProfit)}
+          </div>
           <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden mb-2">
             <div
               className={`h-full ${healthState === 'Green' ? 'bg-green-500' : healthState === 'Yellow' ? 'bg-yellow-500' : 'bg-red-500'}`}
@@ -209,7 +213,13 @@ const SellerDashboard = () => {
 
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold mb-4">Alerts (Scarcity + Expiry)</h2>
-          {lowStockItems.length === 0 && expiringSoonItems.length === 0 ? (
+          {isSectionLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <div key={`alert-skeleton-${idx}`} className="h-16 rounded bg-gray-100 skeleton-shimmer" />
+              ))}
+            </div>
+          ) : lowStockItems.length === 0 && expiringSoonItems.length === 0 ? (
             <p className="text-gray-500">No active alerts right now.</p>
           ) : (
             <div className="space-y-3">
@@ -240,7 +250,7 @@ const SellerDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Total Products</p>
-              <p className="text-3xl font-bold text-primary">{stats.totalProducts}</p>
+              <p className="text-3xl font-bold text-primary">{isSectionLoading ? '-' : stats.totalProducts}</p>
             </div>
             <FaBox className="text-4xl text-gray-300" />
           </div>
@@ -250,7 +260,7 @@ const SellerDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Total Orders</p>
-              <p className="text-3xl font-bold text-primary">{stats.totalOrders}</p>
+              <p className="text-3xl font-bold text-primary">{isSectionLoading ? '-' : stats.totalOrders}</p>
             </div>
             <FaShoppingCart className="text-4xl text-gray-300" />
           </div>
@@ -260,7 +270,7 @@ const SellerDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Total Revenue</p>
-              <p className="text-3xl font-bold text-primary">{formatCurrency(stats.totalRevenue)}</p>
+              <p className="text-3xl font-bold text-primary">{isSectionLoading ? '-' : formatCurrency(stats.totalRevenue)}</p>
             </div>
             <FaDollarSign className="text-4xl text-gray-300" />
           </div>
@@ -270,7 +280,7 @@ const SellerDashboard = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Pending Orders</p>
-              <p className="text-3xl font-bold text-primary">{stats.pendingOrders}</p>
+              <p className="text-3xl font-bold text-primary">{isSectionLoading ? '-' : stats.pendingOrders}</p>
             </div>
             <FaChartLine className="text-4xl text-gray-300" />
           </div>
@@ -280,7 +290,13 @@ const SellerDashboard = () => {
       {/* Recent Orders */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-8">
         <h2 className="text-xl font-semibold mb-4">Recent Orders</h2>
-        {recentOrders.length === 0 ? (
+        {isSectionLoading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, idx) => (
+              <div key={`orders-skeleton-${idx}`} className="h-12 rounded bg-gray-100 skeleton-shimmer" />
+            ))}
+          </div>
+        ) : recentOrders.length === 0 ? (
           <p className="text-gray-500 text-center py-8">No orders yet</p>
         ) : (
           <div className="overflow-x-auto">
@@ -329,7 +345,21 @@ const SellerDashboard = () => {
       {/* Products List */}
       <div className="bg-white rounded-lg shadow-md p-6">
         <h2 className="text-xl font-semibold mb-4">My Products</h2>
-        {products.length === 0 ? (
+        {isSectionLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.from({ length: 6 }).map((_, idx) => (
+              <div key={`products-skeleton-${idx}`} className="border rounded-lg overflow-hidden">
+                <div className="w-full h-48 bg-gray-200 skeleton-shimmer" />
+                <div className="p-4">
+                  <div className="h-5 w-3/4 rounded bg-gray-200 skeleton-shimmer mb-2" />
+                  <div className="h-4 w-1/2 rounded bg-gray-200 skeleton-shimmer mb-2" />
+                  <div className="h-4 w-1/3 rounded bg-gray-200 skeleton-shimmer mb-3" />
+                  <div className="h-8 w-full rounded bg-gray-200 skeleton-shimmer" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : products.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-gray-500 mb-4">You haven't added any products yet</p>
             <Link to="/seller/add-product" className="btn-primary">

@@ -351,16 +351,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     }
   };
 
-  if (loading && !refreshing) {
-    return (
-      <div className="flex justify-center items-center h-96">
-        <div className="text-center">
-          <FaSpinner className="animate-spin text-5xl text-[#F97316] mx-auto mb-4" />
-          <p className="text-gray-600">Loading dashboard data...</p>
-        </div>
-      </div>
-    );
-  }
+  const isSectionLoading = loading && !refreshing;
 
   // ==================== DASHBOARD SECTION ====================
   if (section === 'dashboard') {
@@ -414,7 +405,15 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           
           {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-            {dashboardStats.map((stat, index) => (
+            {isSectionLoading
+              ? Array.from({ length: 10 }).map((_, idx) => (
+                  <div key={`dash-skeleton-${idx}`} className="bg-white rounded-xl shadow-md p-6">
+                    <div className="h-4 w-24 rounded bg-gray-200 skeleton-shimmer mb-3" />
+                    <div className="h-8 w-20 rounded bg-gray-200 skeleton-shimmer mb-2" />
+                    <div className="h-3 w-28 rounded bg-gray-200 skeleton-shimmer" />
+                  </div>
+                ))
+              : dashboardStats.map((stat, index) => (
               <button
                 key={index}
                 type="button"
@@ -438,7 +437,26 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           </div>
 
           {/* Analytics Section */}
-          {analytics && (
+          {isSectionLoading ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              <div className="bg-white rounded-xl shadow-md p-6">
+                <div className="h-6 w-48 rounded bg-gray-200 skeleton-shimmer mb-4" />
+                <div className="space-y-3">
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <div key={`analytics-left-${idx}`} className="h-16 rounded bg-gray-100 skeleton-shimmer" />
+                  ))}
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-md p-6">
+                <div className="h-6 w-48 rounded bg-gray-200 skeleton-shimmer mb-4" />
+                <div className="space-y-3">
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <div key={`analytics-right-${idx}`} className="h-16 rounded bg-gray-100 skeleton-shimmer" />
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : analytics && (
             <>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 {/* Sales by User Type */}

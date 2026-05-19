@@ -5,6 +5,18 @@ import { getPremiumProfiles } from '../utils/premiumSellerProfile';
 import { mergeSupplierPredictions, predictSuppliersLocal } from '../utils/supplierPrediction';
 
 const POLL_MS = 45000;
+const dedupeSuppliers = (suppliers = []) => {
+  const seen = new Set();
+  return suppliers.filter((supplier) => {
+    const key = `${String(supplier?.id || '').trim().toLowerCase()}::${String(supplier?.name || '')
+      .trim()
+      .toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const withOrderTerms = (supplier) => {
   const t = String(supplier?.businessType || '').toLowerCase();
   const moqOptions =
@@ -93,7 +105,7 @@ export const useRealtimeManufacturers = () => {
     () => buildSupplierCards(products, users, premiumProfiles, businesses),
     [products, users, premiumProfiles, businesses]
   );
-  const mergedSuppliers = useMemo(() => baseSuppliers.map(withOrderTerms), [baseSuppliers]);
+  const mergedSuppliers = useMemo(() => dedupeSuppliers(baseSuppliers.map(withOrderTerms)), [baseSuppliers]);
 
   const getSuppliersWithPrediction = useCallback(
     async (query = '') => {
@@ -132,11 +144,11 @@ export const useRealtimeManufacturers = () => {
         Array.isArray(response?.products) ? response.products : Array.isArray(response?.data?.products) ? response.data.products : null;
 
       if (directSuppliers && directSuppliers.length) {
-        return directSuppliers;
+        return dedupeSuppliers(directSuppliers);
       }
 
       if (candidateProducts && candidateProducts.length) {
-        return buildSupplierCards(candidateProducts, users, premiumProfiles);
+        return dedupeSuppliers(buildSupplierCards(candidateProducts, users, premiumProfiles));
       }
 
       return [];

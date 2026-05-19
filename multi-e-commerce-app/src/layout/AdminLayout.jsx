@@ -1,5 +1,5 @@
 // src/layouts/AdminLayout.jsx
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   FaTachometerAlt,
@@ -130,7 +130,20 @@ const AdminLayout = () => {
         </header>
 
         <main className="min-h-[calc(100vh-4rem)] pt-16">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="p-6">
+                <div className="h-8 w-64 rounded bg-gray-200 skeleton-shimmer mb-4" />
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {Array.from({ length: 6 }).map((_, idx) => (
+                    <div key={idx} className="h-36 rounded-xl bg-white border border-gray-100 skeleton-shimmer" />
+                  ))}
+                </div>
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>
