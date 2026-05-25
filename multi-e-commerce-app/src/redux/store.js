@@ -1,10 +1,8 @@
 // src/redux/store.js
 import { configureStore } from '@reduxjs/toolkit';
 import { persistStore, persistReducer } from 'redux-persist';
-import storage from 'redux-persist/lib/storage';
 import { combineReducers } from 'redux';
 
-// Import reducers
 import authReducer from './slices/authSlice';
 import userReducer from './slices/userSlice';
 import cartReducer from './slices/cartSlice';
@@ -13,10 +11,34 @@ import orderReducer from './slices/orderSlice';
 import notificationReducer from './slices/notificationSlice';
 import uiReducer from './slices/uiSlice';
 
-const persistConfig = {
-  key: 'root',
+const createPersistStorage = () => {
+  if (typeof window === 'undefined') {
+    return {
+      getItem: () => Promise.resolve(null),
+      setItem: (_key, value) => Promise.resolve(value),
+      removeItem: () => Promise.resolve(),
+    };
+  }
+
+  return {
+    getItem: (key) => Promise.resolve(window.localStorage.getItem(key)),
+    setItem: (key, value) => {
+      window.localStorage.setItem(key, value);
+      return Promise.resolve(value);
+    },
+    removeItem: (key) => {
+      window.localStorage.removeItem(key);
+      return Promise.resolve();
+    },
+  };
+};
+
+const storage = createPersistStorage();
+
+const uiPersistConfig = {
+  key: 'ui',
   storage,
-  whitelist: ['auth', 'user', 'cart'], // only persist these
+  whitelist: ['theme', 'registrationProgress', 'profileReminder'],
 };
 
 const rootReducer = combineReducers({
@@ -26,8 +48,14 @@ const rootReducer = combineReducers({
   products: productReducer,
   orders: orderReducer,
   notifications: notificationReducer,
-  ui: uiReducer,
+  ui: persistReducer(uiPersistConfig, uiReducer),
 });
+
+const persistConfig = {
+  key: 'root',
+  storage,
+  whitelist: ['auth', 'user', 'cart', 'ui'],
+};
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
 
@@ -36,7 +64,9 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       serializableCheck: {
-        ignoredActions: ['persist/PERSIST', 'persist/REHYDRATE'],
+        ignoredActions: ['persist/PERSIST', 'persist/REHYDRATE', 'persist/REGISTER'],
+        ignoredActionPaths: ['register'],
+        ignoredPaths: ['register'],
       },
     }),
 });

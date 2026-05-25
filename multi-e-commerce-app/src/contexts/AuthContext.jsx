@@ -65,7 +65,7 @@ export const AuthProvider = ({ children }) => {
       setToken(token);
       setUser(user);
       toast.success('Login successful! Welcome back!');
-      return { success: true };
+      return { success: true, user };
     } catch (error) {
       const errorMessage = handleApiError(error);
       toast.error(errorMessage.message || 'Login failed');

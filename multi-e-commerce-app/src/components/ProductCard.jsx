@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { FaShoppingCart, FaStar } from 'react-icons/fa';
+import { FaShoppingCart, FaStar, FaImage } from 'react-icons/fa';
 import { useCart } from '../context/CartContext';
 import { formatCurrency } from '../utils/formatters';
 import { getMinimumOrderQuantity } from '../utils/moq';
@@ -19,10 +19,9 @@ const ProductCard = ({ product }) => {
     ? Math.round(((Number(product.originalPrice) - Number(product.price)) / Number(product.originalPrice)) * 100)
     : 0;
 
-  const isMultiCampus = !product?.seller?.campus;
-  const campusLabel = product?.seller?.campus || 'USIU';
+  const campusLabel = product?.seller?.campus || '';
   const sellerType = product?.seller?.businessType ? String(product.seller.businessType).toUpperCase() : null;
-  const buttonLabel = isMqqRestricted ? `Add ${minOrderQty}+ to Cart` : 'Add to Cart';
+  const buttonLabel = isMqqRestricted ? `Add to Cart (MOQ ${minOrderQty}+)` : 'Add to Cart';
 
   const handleAddToCart = (e) => {
     e.preventDefault();
@@ -37,13 +36,16 @@ const ProductCard = ({ product }) => {
           {primaryImageUrl ? (
             <img src={primaryImageUrl} alt={product.name} className="w-full h-full object-cover" />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-400">No Image</div>
+            <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+              <FaImage className="text-2xl mb-2" />
+              <span className="text-xs">Image unavailable</span>
+            </div>
           )}
         </div>
 
         <div className="absolute left-2 top-2 flex items-start gap-1">
           <span className="rounded-md bg-white/95 px-2 py-1 text-[10px] font-semibold text-[#111827] border border-gray-200">
-            Discovery
+            {sellerType || 'Marketplace'}
           </span>
           {hasDiscount && (
             <span className="rounded-md bg-[#F97316] px-2 py-1 text-[10px] font-semibold text-white">-{discountPct}%</span>
@@ -68,16 +70,8 @@ const ProductCard = ({ product }) => {
 
       <div className="p-2.5">
         <div className="mb-1 flex items-center gap-1.5 text-[10px] text-gray-600">
-          {isMultiCampus ? (
-            <>
-              <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium">Multi</span>
-            </>
-          ) : (
-            <>
-              <span>KE</span>
-              <span>{campusLabel}</span>
-            </>
-          )}
+          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium">KE</span>
+          <span>{campusLabel || 'Online Seller'}</span>
         </div>
 
         <Link to={`/products/${productId}`}>
@@ -97,7 +91,6 @@ const ProductCard = ({ product }) => {
         <div className="flex items-center gap-1 text-[11px] text-gray-500">
           <FaStar className="text-[#F59E0B]" size={11} />
           <span>({rating})</span>
-          {sellerType && <span className="ml-auto text-[10px] text-gray-400">{sellerType}</span>}
         </div>
 
         {isMqqRestricted && <div className="mt-1 text-[10px] text-[#F97316] font-semibold">MOQ {minOrderQty}+ pieces</div>}

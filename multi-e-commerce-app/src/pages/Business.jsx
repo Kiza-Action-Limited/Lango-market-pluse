@@ -253,9 +253,9 @@ const Business = () => {
       {activeMode === 'AI Mode' && (
         <section className="max-w-screen-2xl mx-auto px-4 pt-4">
           <div className="bg-white rounded-xl border border-[#FB923C]/30 p-4">
-            <h3 className="text-lg font-semibold text-[#111827]">AI Mode (Mock Intelligence)</h3>
+            <h3 className="text-lg font-semibold text-[#111827]">AI Mode</h3>
             <p className="text-sm text-[#6B7280] mt-1">
-              Ask AI for sourcing guidance. Insights are generated from your current mock + live supplier dataset.
+              Ask AI for sourcing guidance. Insights are generated from your live supplier dataset.
             </p>
 
             <div className="flex flex-wrap gap-2 mt-3">

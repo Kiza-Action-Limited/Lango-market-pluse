@@ -146,7 +146,17 @@ exports.sendPhoneVerificationOtp = async (req, res) => {
     }
 
     const { phone } = req.body;
-    const result = await sendPhoneOtp(phone);
+    const normalizedPhone = String(phone || '').trim();
+    const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Phone number already exists. Please use another number or sign in.',
+        code: 'PHONE_ALREADY_EXISTS',
+      });
+    }
+
+    const result = await sendPhoneOtp(normalizedPhone);
     
     res.status(200).json({
       success: true,
@@ -211,7 +221,17 @@ exports.sendEmailVerificationOtp = async (req, res) => {
     }
 
     const { email } = req.body;
-    const result = await sendEmailOtpCode(email);
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email already exists. Please use another email or sign in.',
+        code: 'EMAIL_ALREADY_EXISTS',
+      });
+    }
+
+    const result = await sendEmailOtpCode(normalizedEmail);
     
     res.status(200).json({
       success: true,
@@ -308,9 +328,27 @@ exports.resendOtpCode = async (req, res) => {
     
     let result;
     if (channel === 'phone') {
-      result = await sendPhoneOtp(identifier);
+      const normalizedPhone = String(identifier || '').trim();
+      const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          message: 'Phone number already exists. Please use another number or sign in.',
+          code: 'PHONE_ALREADY_EXISTS',
+        });
+      }
+      result = await sendPhoneOtp(normalizedPhone);
     } else if (channel === 'email') {
-      result = await sendEmailOtpCode(identifier);
+      const normalizedEmail = String(identifier || '').trim().toLowerCase();
+      const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          message: 'Email already exists. Please use another email or sign in.',
+          code: 'EMAIL_ALREADY_EXISTS',
+        });
+      }
+      result = await sendEmailOtpCode(normalizedEmail);
     } else {
       return res.status(400).json({
         success: false,
@@ -353,7 +391,17 @@ exports.sendPhoneOtp = async (req, res) => {
     }
 
     const { phone } = req.body;
-    const result = await sendPhoneOtp(phone);
+    const normalizedPhone = String(phone || '').trim();
+    const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Phone number already exists. Please use another number or sign in.',
+        code: 'PHONE_ALREADY_EXISTS',
+      });
+    }
+
+    const result = await sendPhoneOtp(normalizedPhone);
     
     res.status(200).json({
       success: true,
@@ -421,7 +469,17 @@ exports.resendPhoneOtp = async (req, res) => {
     }
 
     const { phone } = req.body;
-    const result = await sendPhoneOtp(phone);
+    const normalizedPhone = String(phone || '').trim();
+    const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Phone number already exists. Please use another number or sign in.',
+        code: 'PHONE_ALREADY_EXISTS',
+      });
+    }
+
+    const result = await sendPhoneOtp(normalizedPhone);
     
     res.status(200).json({
       success: true,
@@ -453,7 +511,17 @@ exports.sendEmailOtp = async (req, res) => {
     }
 
     const { email } = req.body;
-    const result = await sendEmailOtpCode(email);
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email already exists. Please use another email or sign in.',
+        code: 'EMAIL_ALREADY_EXISTS',
+      });
+    }
+
+    const result = await sendEmailOtpCode(normalizedEmail);
     
     res.status(200).json({
       success: true,
@@ -520,7 +588,17 @@ exports.resendEmailOtp = async (req, res) => {
     }
 
     const { email } = req.body;
-    const result = await sendEmailOtpCode(email);
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email already exists. Please use another email or sign in.',
+        code: 'EMAIL_ALREADY_EXISTS',
+      });
+    }
+
+    const result = await sendEmailOtpCode(normalizedEmail);
     
     res.status(200).json({
       success: true,

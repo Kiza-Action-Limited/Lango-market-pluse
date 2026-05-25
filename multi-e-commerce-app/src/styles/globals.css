@@ -1,6 +1,14 @@
 /* src/styles/globals.css */
-@tailwind/preflight;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #F97316;
+  --color-primary-dark: #EA580C;
+  --color-primary-light: #FB923C;
+  --color-intelligence: #FB923C;
+  --color-secondary: #FFFFFF;
+  --color-dark: #000000;
+}
 
 @layer base {
   :root {

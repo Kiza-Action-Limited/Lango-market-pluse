@@ -1,5 +1,12 @@
 import api from '../config/axios';
 
+const normalizePhoneForLogin = (value) => {
+  const digitsOnly = String(value || '').replace(/[^\d+]/g, '');
+  if (digitsOnly.startsWith('+')) return digitsOnly.slice(1);
+  if (digitsOnly.startsWith('0') && digitsOnly.length === 10) return `254${digitsOnly.slice(1)}`;
+  return digitsOnly;
+};
+
 const normalizeAuthResponse = (payload) => {
   const data = payload?.data || payload || {};
   return {
@@ -12,9 +19,17 @@ const normalizeAuthResponse = (payload) => {
 
 export const authService = {
   login: async (identifier, password) => {
+    const trimmedIdentifier = String(identifier || '').trim();
+    const isEmail = trimmedIdentifier.includes('@');
+    const normalizedPhone = normalizePhoneForLogin(trimmedIdentifier);
     const body = {
       password,
-      ...(identifier?.includes('@') ? { email: identifier } : { phone: identifier }),
+      identifier: isEmail ? trimmedIdentifier.toLowerCase() : normalizedPhone,
+      ...(isEmail
+        ? { email: trimmedIdentifier.toLowerCase() }
+        : {
+            phone: normalizedPhone,
+          }),
     };
     const response = await api.post('/v1/auth/login', body);
     return normalizeAuthResponse(response.data);
@@ -84,5 +99,38 @@ export const authService = {
   resendVerification: async (email) => {
     const response = await api.post('/v1/auth/resend-verification', { email });
     return response.data;
-  }
+  },
+
+  sendOtp: async ({ channel, value }) => {
+    if (channel === 'email') {
+      const response = await api.post('/v1/auth/otp/email/send', { email: value });
+      return response.data;
+    }
+    const response = await api.post('/v1/auth/otp/phone/send', { phone: value });
+    return response.data;
+  },
+
+  verifyOtp: async ({ channel, value, code }) => {
+    if (channel === 'email') {
+      const response = await api.post('/v1/auth/otp/email/verify', { email: value, code });
+      return response.data;
+    }
+    const response = await api.post('/v1/auth/otp/phone/verify', { phone: value, code });
+    return response.data;
+  },
+
+  resendOtp: async ({ channel, value }) => {
+    const response = await api.post('/v1/auth/otp/resend', {
+      channel,
+      identifier: value,
+    });
+    return response.data;
+  },
+
+  getOtpCooldown: async ({ channel, value }) => {
+    const response = await api.get(
+      `/v1/auth/otp/cooldown/${encodeURIComponent(channel)}/${encodeURIComponent(value)}`
+    );
+    return response.data;
+  },
 };

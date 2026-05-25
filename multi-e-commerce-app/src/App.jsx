@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect } from 'react';
+import React, { lazy, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
@@ -9,14 +9,13 @@ import { SubscriptionProvider } from './context/SubscriptionContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { prefetchHomeData } from './services/homeDataService';
 
-import MainLayout from './layouts/MainLayout';
-import AdminLayout from './layouts/AdminLayout';
-import SellerLayout from './layouts/SellerLayout';
-
 import ProtectedRoute from './components/ProtectedRoute';
 import SellerRoute from './components/SellerRoute';
 import AdminRoute from './components/AdminRoute';
-import AppShellSkeleton from './components/AppShellSkeleton';
+import PublicOnlyRoute from './components/PublicOnlyRoute';
+import MainLayout from './layouts/MainLayout';
+import AdminLayout from './layouts/AdminLayout';
+import SellerLayout from './layouts/SellerLayout';
 
 const Home = lazy(() => import('./pages/Home'));
 const Login = lazy(() => import('./pages/Login'));
@@ -60,6 +59,7 @@ const AdminContactQueue = lazy(() => import('./pages/AdminContactQueue'));
 const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
 const AdminProfile = lazy(() => import('./pages/AdminProfile'));
 const AdminLogistics = lazy(() => import('./pages/AdminLogistics'));
+const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 
 function App() {
   useEffect(() => {
@@ -74,12 +74,13 @@ function App() {
             <NotificationProvider>
               <SubscriptionProvider>
                 <Toaster position="top-right" />
-                <Suspense fallback={<AppShellSkeleton />}>
-                  <Routes>
-                    <Route path="/" element={<MainLayout />}>
+                <Routes>
+                  <Route path="/" element={<MainLayout />}>
                       <Route index element={<Home />} />
-                      <Route path="login" element={<Login />} />
-                      <Route path="register" element={<Register />} />
+                      <Route element={<PublicOnlyRoute />}>
+                        <Route path="login" element={<Login />} />
+                        <Route path="register" element={<Register />} />
+                      </Route>
                       <Route path="forgot-password" element={<ForgotPassword />} />
                       <Route path="products" element={<Products />} />
                       <Route path="business" element={<Business />} />
@@ -122,9 +123,11 @@ function App() {
                         </Route>
                       </Route>
 
+                      <Route path="admin" element={<AdminLogin />} />
+
                       <Route element={<AdminRoute />}>
                         <Route path="admin" element={<AdminLayout />}>
-                          <Route index element={<AdminDashboard />} />
+                          <Route path="dashboard" element={<AdminDashboard />} />
                           <Route path="users" element={<AdminUsers />} />
                           <Route path="categories" element={<AdminCategories />} />
                           <Route path="orders" element={<AdminOrders />} />
@@ -137,9 +140,8 @@ function App() {
                       </Route>
 
                       <Route path="*" element={<NotFound />} />
-                    </Route>
-                  </Routes>
-                </Suspense>
+                  </Route>
+                </Routes>
               </SubscriptionProvider>
             </NotificationProvider>
           </CartProvider>

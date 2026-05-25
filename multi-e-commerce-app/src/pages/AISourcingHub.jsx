@@ -22,30 +22,6 @@ function autoSelectTask(query) {
   return 'product';
 }
 
-async function mockAI(query, task) {
-  await new Promise((resolve) => setTimeout(resolve, 1500));
-  const taskName = TASKS.find((t) => t.id === task)?.label || 'general';
-
-  return {
-    products:
-      task === 'manufacturer' || task === 'product'
-        ? [
-            { name: 'EcoBottle 500ml', price: 4.5, supplier: 'GreenManufacturer Inc.' },
-            { name: 'TravelSip Collapsible', price: 3.2, supplier: 'TravelGear Ltd.' },
-          ]
-        : undefined,
-    analysis:
-      task === 'bestsellers' ? `Top bestsellers in "${query}" are eco-friendly and under $20.` : undefined,
-    designSuggestion:
-      task === 'design' ? 'Create a minimalist bottle with bamboo lid and pastel colors.' : undefined,
-    evaluation:
-      task === 'evaluate' ? 'Top supplier has 4.7/5 stars from 1200 reviews. Reliable.' : undefined,
-    answer: !['manufacturer', 'product', 'bestsellers', 'design', 'evaluate'].includes(task)
-      ? `I can help with ${taskName} tasks. Please refine your query.`
-      : undefined,
-  };
-}
-
 export default function AISourcingHub() {
   const [input, setInput] = useState('');
   const [selectedTask, setSelectedTask] = useState(null);
@@ -72,20 +48,18 @@ export default function AISourcingHub() {
     setResults(null);
 
     try {
-      let data;
-
-      if (AI_API_ENDPOINT) {
-        const response = await fetch(AI_API_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: input, task: taskToUse }),
-        });
-
-        if (!response.ok) throw new Error('Backend error');
-        data = await response.json();
-      } else {
-        data = await mockAI(input, taskToUse);
+      if (!AI_API_ENDPOINT) {
+        throw new Error('AI backend endpoint is not configured');
       }
+
+      const response = await fetch(AI_API_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: input, task: taskToUse }),
+      });
+
+      if (!response.ok) throw new Error('Backend error');
+      const data = await response.json();
 
       setResults(data);
       toast.success('AI analysis complete!');
@@ -144,7 +118,7 @@ export default function AISourcingHub() {
           </button>
         </div>
         <div className="text-xs text-gray-400 mt-2 flex justify-between">
-          <span>AI agentic engine | {AI_API_ENDPOINT ? 'Connected to backend' : 'Mock mode (no backend)'}</span>
+          <span>AI agentic engine | {AI_API_ENDPOINT ? 'Connected to backend' : 'Backend not configured'}</span>
           <span>Go beyond search - let AI handle your sourcing workflow</span>
         </div>
       </form>

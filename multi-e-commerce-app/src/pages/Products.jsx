@@ -238,8 +238,15 @@ const Products = ({ seller = false }) => {
         {/* Products Grid */}
         <div className="flex-1">
           {loading ? (
-            <div className="flex justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 9 }).map((_, idx) => (
+                <div key={idx} className="rounded-xl bg-white border border-gray-100 p-4">
+                  <div className="h-44 rounded-md bg-gray-200 skeleton-shimmer" />
+                  <div className="mt-4 h-4 w-4/5 rounded bg-gray-200 skeleton-shimmer" />
+                  <div className="mt-2 h-4 w-2/3 rounded bg-gray-200 skeleton-shimmer" />
+                  <div className="mt-4 h-8 w-1/2 rounded bg-gray-200 skeleton-shimmer" />
+                </div>
+              ))}
             </div>
           ) : products.length === 0 ? (
             <div className="text-center py-12">

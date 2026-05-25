@@ -26,6 +26,7 @@ const Home = () => {
           <HomeBelowFold
             categories={data?.categories || []}
             businessPartners={data?.businessPartners || []}
+            loading={loading}
           />
         </Suspense>
       </LazyOnVisible>
