@@ -21,9 +21,10 @@ module.exports = {
 
   // Subscription plans
   SUBSCRIPTION_TIERS: {
-    FREE: 'free',
-    V3: 'v3',
-    V4: 'v4',
+    SOLO: 'solo',
+    SMART: 'smart',
+    GROWTH: 'growth',
+    MIZIGO: 'mizigo',
   },
 
   // Transaction types

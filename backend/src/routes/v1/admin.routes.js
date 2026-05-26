@@ -30,6 +30,11 @@ router.get('/products', adminController.getAllProducts);
 
 // Logistics Management
 router.get('/logistics', adminController.getLogistics);
+router.get('/logistics/applications', adminController.getLogisticsApplications);
+router.put('/logistics/applications/:userId/review', param('userId').isMongoId(), [
+  body('action').isIn(['approve', 'reject']),
+  body('notes').optional().isString(),
+], adminController.reviewLogisticsApplication);
 router.put('/logistics/:logisticsId/tracking', param('logisticsId').isMongoId(), [
   body('status').isIn(['pending', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'failed']),
   body('location').optional().isString(),

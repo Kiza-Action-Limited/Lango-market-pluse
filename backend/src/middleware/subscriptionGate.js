@@ -1,12 +1,15 @@
 const planService = require('../services/subscription/plan.service');
+const { PLAN_IDS, TIER_ORDER } = require('../config/subscriptionPlans');
 
 /**
  * Middleware to check if user's subscription plan allows access to a feature.
- * @param {string} requiredTier - Minimum tier required: 'v3' or 'v4' (free is always allowed for basic)
+ * @param {string|string[]} requiredTier - Minimum tier(s) required.
  * @param {string} [feature] - Specific feature name (e.g., 'groupBuying', 'scarcityAlerts')
  * @returns {Function} Express middleware
  */
 const subscriptionGate = (requiredTier, feature = null) => {
+  const requiredTiers = Array.isArray(requiredTier) ? requiredTier : [requiredTier];
+
   return async (req, res, next) => {
     try {
       const user = req.user;
@@ -17,17 +20,28 @@ const subscriptionGate = (requiredTier, feature = null) => {
         });
       }
 
-      const userTier = user.subscriptionTier || 'free';
+      if (user.role === 'admin') {
+        return next();
+      }
 
-      // Tier hierarchy: free < v3 < v4
-      const tierOrder = { free: 0, v3: 1, v4: 2 };
-      const hasRequiredTier = tierOrder[userTier] >= tierOrder[requiredTier];
+      const userTier = planService.normalizePlan(user.subscriptionTier || PLAN_IDS.SOLO);
+      const normalizedRequired = requiredTiers.map((tier) => planService.normalizePlan(tier));
+
+      const hasRequiredTier = normalizedRequired.some((tier) => {
+        if (tier === PLAN_IDS.MIZIGO) {
+          return userTier === PLAN_IDS.MIZIGO;
+        }
+        if (userTier === PLAN_IDS.MIZIGO) {
+          return false;
+        }
+        return (TIER_ORDER[userTier] || 0) >= (TIER_ORDER[tier] || 0);
+      });
 
       if (!hasRequiredTier) {
         return res.status(403).json({
           success: false,
-          message: `This feature requires ${requiredTier.toUpperCase()} plan or higher. Please upgrade.`,
-          requiredTier,
+          message: `This feature requires one of: ${normalizedRequired.join(', ')}.`,
+          requiredTier: normalizedRequired,
           currentTier: userTier,
         });
       }

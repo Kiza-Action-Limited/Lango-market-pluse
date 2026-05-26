@@ -36,10 +36,16 @@ const SellerPremiumPayment = () => {
   const activatePlan = async () => {
     setActivating(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      switchPlan(selectedPlan.id);
-      toast.success(`${selectedPlan.name} activated successfully`);
-      navigate(`/seller/subscription-plans?plan=${encodeURIComponent(selectedPlan.id)}`);
+      const result = await switchPlan(selectedPlan.id, {
+        paymentMethod: 'mpesa',
+        paymentCompleted: true,
+        paymentReference: `ui-${selectedPlan.id}-${Date.now()}`,
+      });
+
+      if (result?.success) {
+        toast.success(`${selectedPlan.name} activated successfully`);
+        navigate(`/seller/subscription-plans?plan=${encodeURIComponent(selectedPlan.id)}`);
+      }
     } finally {
       setActivating(false);
     }

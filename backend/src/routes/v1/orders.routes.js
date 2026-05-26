@@ -11,7 +11,7 @@ router.post('/', [
   body('product').isMongoId(),
   body('quantity').isFloat({ min: 0.001 }),
   body('deliveryAddress').optional().isString(),
-], subscriptionGate('v3'), orderController.createOrder);
+], subscriptionGate('solo'), orderController.createOrder);
 
 router.get('/', [
   query('status').optional().isIn(['pending_payment', 'payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed', 'cancelled', 'disputed']),

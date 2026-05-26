@@ -1,4 +1,6 @@
 const mongoose = require('mongoose');
+const User = require('./User.model');
+const Transaction = require('./Transaction.model');
 
 // ─── Sub-schemas ────────────────────────────────────────────────────────────
 
@@ -78,6 +80,13 @@ const logisticsSchema = new mongoose.Schema({
   driverName: { type: String, trim: true },
   driverPhone: { type: String, trim: true },
   fleet: { type: mongoose.Schema.Types.ObjectId, ref: 'Fleet' }, // only for hired_driver
+  fleetOwner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  payoutRecipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  payoutRecipientType: {
+    type: String,
+    enum: ['driver', 'fleet_owner'],
+    default: 'driver'
+  },
 
   // ── 3-Way QR Handshake ──────────────────────────────────────────────────
   /**
@@ -223,6 +232,16 @@ logisticsSchema.methods.recordDeliveryScan = async function ({ scannedBy, lat, l
   this.step3_autoRelease.scheduledAt = autoReleaseAt;
 
   // Calculate escrow splits
+  if (!this.payoutRecipient) {
+    if (this.driverType === 'hired_driver' && this.fleetOwner) {
+      this.payoutRecipient = this.fleetOwner;
+      this.payoutRecipientType = 'fleet_owner';
+    } else if (this.driver) {
+      this.payoutRecipient = this.driver;
+      this.payoutRecipientType = 'driver';
+    }
+  }
+
   _calculatePayouts(this);
 
   await this.updateStatus('delivered', null, 'Buyer scanned driver QR on delivery', scannedBy);
@@ -244,11 +263,42 @@ logisticsSchema.methods.releaseEscrow = async function (triggeredBy = 'auto') {
   if (this.escrow.disputeOpenedAt) {
     throw new Error('Cannot auto-release: a dispute is open');
   }
+  if (!this.payoutRecipient) {
+    throw new Error('Cannot release escrow: payout recipient is not configured');
+  }
+
+  const recipient = await User.findById(this.payoutRecipient);
+  if (!recipient) {
+    throw new Error('Cannot release escrow: payout recipient not found');
+  }
 
   this.escrow.status = 'released';
   this.escrow.releasedAt = new Date();
   this.step3_autoRelease.releasedAt = new Date();
   this.step3_autoRelease.triggeredBy = triggeredBy;
+
+  const payoutAmount = Number(this.escrow.driverPayout || 0);
+  const sinkingAmount = Number(this.escrow.sinkingFundDeduction || 0);
+  const commissionAmount = Number(this.escrow.platformCommission || 0);
+
+  recipient.walletBalance = Number(recipient.walletBalance || 0) + payoutAmount;
+  recipient.sinkingFundBalance = Number(recipient.sinkingFundBalance || 0) + sinkingAmount;
+  await recipient.save();
+
+  await Transaction.create({
+    user: recipient._id,
+    type: 'escrow_release',
+    amount: payoutAmount,
+    balanceAfter: recipient.walletBalance,
+    reference: String(this._id),
+    description: `Logistics payout release for trip ${this.orderNumber}`,
+    metadata: new Map([
+      ['driverType', this.driverType],
+      ['payoutRecipientType', this.payoutRecipientType],
+      ['sinkingFundDeduction', sinkingAmount],
+      ['platformCommission', commissionAmount],
+    ]),
+  });
 
   await this.save();
   return this;
@@ -376,16 +426,10 @@ function _calculatePayouts(logisticsDoc) {
 
   e.platformCommission = parseFloat((total * rate).toFixed(2));
 
-  const remainder = total - e.platformCommission;
-
-  // 60% seller / 40% driver of the remainder (adjust to your business rules)
-  const rawDriverPayout  = parseFloat((remainder * 0.40).toFixed(2));
-  const rawSellerPayout  = parseFloat((remainder * 0.60).toFixed(2));
-
-  // 10% of driver payout → Maintenance / Sinking Fund
-  e.sinkingFundDeduction = parseFloat((rawDriverPayout * 0.10).toFixed(2));
-  e.driverPayout         = parseFloat((rawDriverPayout - e.sinkingFundDeduction).toFixed(2));
-  e.sellerPayout         = rawSellerPayout;
+  const grossDriverPayout = parseFloat((total - e.platformCommission).toFixed(2));
+  e.sinkingFundDeduction = parseFloat((grossDriverPayout * 0.10).toFixed(2));
+  e.driverPayout = parseFloat((grossDriverPayout - e.sinkingFundDeduction).toFixed(2));
+  e.sellerPayout = 0;
 }
 
 function _generateQrPayload(prefix, logisticsId) {
@@ -395,3 +439,4 @@ function _generateQrPayload(prefix, logisticsId) {
 }
 
 module.exports = mongoose.model('Logistics', logisticsSchema);
+

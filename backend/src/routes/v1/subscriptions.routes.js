@@ -12,15 +12,15 @@ router.use(authMiddleware);
 
 router.get('/me', subscriptionController.getMySubscription);
 router.post('/subscribe', [
-  body('planId').isIn(['free', 'v3', 'v4']),
-  body('paymentMethod').isIn(['mpesa']),
+  body('planId').isIn(['free', 'v3', 'v4', 'solo', 'smart', 'growth', 'mizigo']),
+  body('paymentMethod').optional().isIn(['mpesa']),
   body('paymentCompleted').optional().isBoolean(),
   body('paymentReference').optional().isString().isLength({ min: 3 }),
 ], subscriptionController.subscribe);
 
 router.delete('/me', subscriptionController.cancelSubscription);
 router.put('/change-plan', [
-  body('newPlanId').isIn(['v3', 'v4']),
+  body('newPlanId').isIn(['solo', 'smart', 'growth', 'mizigo']),
 ], subscriptionController.changePlan);
 
 // Webhook (no auth, public endpoint for external billing)

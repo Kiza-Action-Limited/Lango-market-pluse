@@ -1,388 +1,219 @@
-// import { TRADER_PLANS, MIZIGO_PLANS, processTripPayment, qrDeliveryScan } from './path/to/file';
-
-
-// ===============================
-// 1. SUBSCRIPTION PLANS (Rearranged to match new table)
-// ===============================
-export const SUBSCRIPTION_TRACKS = {
+﻿export const SUBSCRIPTION_TRACKS = {
   TRADER: 'trader',
   MIZIGO: 'mizigo',
 };
 
+export const PLAN_IDS = {
+  SOLO: 'solo',
+  SMART: 'smart',
+  GROWTH: 'growth',
+  MIZIGO: 'mizigo',
+};
+
+export const LEGACY_PLAN_ALIASES = {
+  free: PLAN_IDS.SOLO,
+  v3: PLAN_IDS.SMART,
+  v4: PLAN_IDS.GROWTH,
+  trader_solo: PLAN_IDS.SOLO,
+  trader_smart: PLAN_IDS.SMART,
+  trader_growth: PLAN_IDS.GROWTH,
+  mizigo_solo: PLAN_IDS.MIZIGO,
+  mizigo_pro: PLAN_IDS.MIZIGO,
+  mizigo_enterprise: PLAN_IDS.MIZIGO,
+};
+
 export const SUBSCRIPTION_FEATURES = {
-  // Core
-  INVENTORY_LEDGER: 'inventory-ledger',
-  METADATA_BUCKET: 'metadata-bucket',
-  ESCROW_CLIENT: 'escrow-client',
-  MANUAL_CRM: 'manual-crm',
-  REVENUE_TRACKER: 'revenue-tracker',
-  QR_HANDSHAKE: 'qr-handshake',
-  AUTO_SYNC: 'auto-sync',
+  INVENTORY_LEDGER: 'inventory_ledger',
+  QR_AUTO_SYNC: 'qr_auto_sync',
+  CRM_CAPTURE: 'crm_capture',
+  ACTIVE_SMS_CAMPAIGNS: 'active_sms_campaigns',
+  SMS_CREDITS_500: 'sms_credits_500',
+  SMS_CREDITS_2000: 'sms_credits_2000',
+  NET_PROFIT_GAUGE: 'net_profit_gauge',
+  REGIONAL_GUARDIAN: 'regional_guardian',
+  STAFF_RBAC: 'staff_rbac',
+  BILL_GUARDIAN: 'bill_guardian',
+  DAILY_BURN_TRACKER: 'daily_burn_tracker',
+  ASSET_TRACKING: 'asset_tracking',
+  AUDIT_PDF: 'audit_pdf',
+  MIZIGO_QR_HANDSHAKE: 'mizigo_qr_handshake',
+  MIZIGO_GROUP_MATCHER: 'mizigo_group_matcher',
+  MIZIGO_EXPRESS_ALERT: 'mizigo_express_alert',
+  TAKE_HOME_GAUGE: 'take_home_gauge',
+  SINKING_FUND: 'sinking_fund',
+  VERIFIED_TRIP_PDF: 'verified_trip_pdf',
 
-  // New table features
-  INVENTORY_UNLIMITED: 'inventory-unlimited',
-  CRM_ACTIVE: 'crm-active',
-  SMS_CREDITS_500: 'sms-credits-500',
-  SMS_CREDITS_2000: 'sms-credits-2000',
-  CFO_BASIC: 'cfo-basic',
-  CFO_SMART: 'cfo-smart',
-  CFO_AUDIT: 'cfo-audit',
-  STAFF_ROLES: 'staff-roles',
-  DAILY_BURN: 'daily-burn',
-  ASSET_TRACKING: 'asset-tracking',
-  REPORTS_VITALS: 'reports-vitals',
-  REPORTS_PERFORMANCE: 'reports-performance',
-  REPORTS_AUDIT: 'reports-audit',
-
-  // Logistics / Mizigo specific
-  WALLET_SPLITTER: 'wallet-splitter',
-  RADIAL_EXPRESS_ALERTS: 'radial-express-alerts',
-  GROUP_BUY_MATCHER: 'group-buy-matcher',
-  THREE_WAY_QR_HANDSHAKE: 'three-way-qr-handshake',
-  TAKE_HOME_GAUGE: 'take-home-gauge',
-  MILEAGE_SERVICE_ALERT: 'mileage-service-alert',
-  VERIFIED_TRIP_PDF: 'verified-trip-pdf',
-  SINKING_FUND: 'sinking-fund',
-  LIVE_STATUS_BRIDGE: 'live-status-bridge',
+  // Dashboard aliases used across older UI blocks.
+  GUARDIAN_REGIONAL_ALARM: 'regional_guardian',
+  CFO_LITE_HOOK: 'net_profit_gauge',
+  CLEARANCE_AGENT: 'active_sms_campaigns',
+  CASHFLOW_PREDICTION: 'bill_guardian',
 };
 
 const F = SUBSCRIPTION_FEATURES;
 
-// Updated TRADER_PLANS to match the new table (Solo, Smart, Growth)
-
 export const TRADER_PLANS = [
   {
-    id: 'trader_solo',
+    id: PLAN_IDS.SOLO,
     track: SUBSCRIPTION_TRACKS.TRADER,
     name: 'Solo',
-    priceLabel: 'KSh 500',
-    targetUser: 'Micro-Retail/Farmer',
-    differentiator: 'Manual Operations',
-    description: 'Essential digital ledger and transaction tools.',
+    priceLabel: 'KES 500 / month',
+    targetUser: 'Farmers · Small Manufacturers · Micro-Retailers',
+    differentiator: 'Digital Ledger',
+    description: 'Record stock and sales with a clean digital paper trail.',
     featureKeys: [
-      F.INVENTORY_LEDGER,     // 30 unique items
-      F.AUTO_SYNC,
-      F.MANUAL_CRM,           // Capture only (No SMS)
-      F.REVENUE_TRACKER,      // Basic (Gross Profit)
-      F.QR_HANDSHAKE,
-      F.REPORTS_VITALS,       // Vitals PDF (Sales/Purch)
+      F.INVENTORY_LEDGER,
+      F.QR_AUTO_SYNC,
+      F.CRM_CAPTURE,
     ],
     limits: { inventoryLimit: 30, smsCredits: 0 },
   },
   {
-    id: 'trader_smart',
+    id: PLAN_IDS.SMART,
     track: SUBSCRIPTION_TRACKS.TRADER,
     name: 'Smart',
-    priceLabel: 'KSh 2,500',
-    targetUser: 'Growing Wholesaler',
-    differentiator: 'Predictive Maneuverability',
-    description: 'Active CRM and performance dashboards.',
+    priceLabel: 'KES 2,500 / month',
+    targetUser: 'Growing Retailers · Wholesalers · Distributors',
+    differentiator: 'Assistant Tier',
+    description: 'Add outbound SMS tools and stronger profit visibility.',
     featureKeys: [
-      F.INVENTORY_UNLIMITED,
-      F.AUTO_SYNC,
-      F.CRM_ACTIVE,           // Restock/Alerts
+      F.INVENTORY_LEDGER,
+      F.QR_AUTO_SYNC,
+      F.CRM_CAPTURE,
+      F.ACTIVE_SMS_CAMPAIGNS,
       F.SMS_CREDITS_500,
-      F.CFO_SMART,            // Net Profit Gauge
-      F.QR_HANDSHAKE,
-      F.REPORTS_PERFORMANCE,  // Performance PDF (ROI)
+      F.NET_PROFIT_GAUGE,
+      F.REGIONAL_GUARDIAN,
     ],
     limits: { inventoryLimit: Infinity, smsCredits: 500 },
   },
   {
-    id: 'trader_growth',
+    id: PLAN_IDS.GROWTH,
     track: SUBSCRIPTION_TRACKS.TRADER,
     name: 'Growth',
-    priceLabel: 'KSh 6,500',
-    targetUser: 'Large Factory/Estate',
-    differentiator: 'Macro-Intelligence & Audit',
-    description: 'Full wealth tracking, staff roles, and asset management.',
+    priceLabel: 'KES 6,500 / month',
+    targetUser: 'Large Manufacturers · Wholesalers · Property Owners',
+    differentiator: 'Control Tier',
+    description: 'Staff, bills, burn, asset tracking, and full audit control.',
     featureKeys: [
-      F.INVENTORY_UNLIMITED,
-      F.AUTO_SYNC,
-      F.CRM_ACTIVE,
+      F.INVENTORY_LEDGER,
+      F.QR_AUTO_SYNC,
+      F.CRM_CAPTURE,
+      F.ACTIVE_SMS_CAMPAIGNS,
       F.SMS_CREDITS_2000,
-      F.CFO_AUDIT,            // Wealth Tracker
-      F.STAFF_ROLES,
-      F.DAILY_BURN,           // Lunch, Fuel, etc.
-      F.ASSET_TRACKING,       // Land & Buildings
-      F.QR_HANDSHAKE,
-      F.REPORTS_AUDIT,        // Audit PDF (Net Worth)
+      F.NET_PROFIT_GAUGE,
+      F.REGIONAL_GUARDIAN,
+      F.STAFF_RBAC,
+      F.BILL_GUARDIAN,
+      F.DAILY_BURN_TRACKER,
+      F.ASSET_TRACKING,
+      F.AUDIT_PDF,
     ],
     limits: { inventoryLimit: Infinity, smsCredits: 2000 },
   },
 ];
 
-// MIZIGO_PLANS (Logistics focus – Owner‑Operator / Fleet)
 export const MIZIGO_PLANS = [
   {
-    id: 'mizigo_solo',
+    id: PLAN_IDS.MIZIGO,
     track: SUBSCRIPTION_TRACKS.MIZIGO,
-    name: 'Owner‑Operator',
-    priceLabel: 'Entry',
-    differentiator: 'Manual Booking & Verification',
-    description: 'For independent drivers managing one truck.',
+    name: 'Mizigo',
+    priceLabel: '5% - 10% commission per verified delivery',
+    targetUser: 'Truck Drivers · Fleet Owners',
+    differentiator: 'Logistics Bridge',
+    description: 'No monthly fee. Commission only on verified delivery scans.',
     featureKeys: [
-      F.DIGITAL_WAYBILL,
-      F.QR_HANDSHAKE,
-      F.UNIFIED_BOOKING_QUEUE,
-      F.REVENUE_TRACKER,
+      F.MIZIGO_QR_HANDSHAKE,
+      F.MIZIGO_GROUP_MATCHER,
+      F.MIZIGO_EXPRESS_ALERT,
       F.TAKE_HOME_GAUGE,
-      F.VERIFIED_TRIP_PDF,
-    ],
-  },
-  {
-    id: 'mizigo_pro',
-    track: SUBSCRIPTION_TRACKS.MIZIGO,
-    name: 'Fleet Pro',
-    priceLabel: 'Custom',
-    differentiator: 'Reactive Efficiency',
-    description: 'Load factor optimisation & shared‑cost automation.',
-    featureKeys: [
-
-      F.DIGITAL_WAYBILL,
-      F.QR_HANDSHAKE,
-      F.UNIFIED_BOOKING_QUEUE,
-      F.REVENUE_TRACKER,
-      F.GROUP_BUY_MATCHER,
-      F.SHARED_COST_CALCULATOR,
-      F.ROUTE_INTELLIGENCE_LITE,
-      F.MIZIGO_CFO_HOOK,
-      F.TAKE_HOME_GAUGE,
-      F.MILEAGE_SERVICE_ALERT,
       F.SINKING_FUND,
       F.VERIFIED_TRIP_PDF,
-
     ],
-  },
-  {
-    id: 'mizigo_enterprise',
-    track: SUBSCRIPTION_TRACKS.MIZIGO,
-    name: 'Fleet Enterprise',
-    priceLabel: 'Custom',
-    differentiator: 'Predictive Logistics & Asset Protection',
-    description: 'Predictive routing, maintenance, scarcity bridge.',
-    featureKeys: [
-      F.DIGITAL_WAYBILL,
-      F.QR_HANDSHAKE,
-      F.UNIFIED_BOOKING_QUEUE,
-      F.REVENUE_TRACKER,
-      F.GROUP_BUY_MATCHER,
-      F.SHARED_COST_CALCULATOR,
-      F.ROUTE_INTELLIGENCE_LITE,
-      F.MIZIGO_CFO_HOOK,
-      F.PREDICTIVE_ROUTE_INTELLIGENCE,
-      F.CAPEX_MAINTENANCE_GUARD,
-      F.MACRO_SCARCITY_BRIDGE,
-      F.FLEET_API,
-      F.TAKE_HOME_GAUGE,
-      F.MILEAGE_SERVICE_ALERT,
-      F.SINKING_FUND,
-      F.VERIFIED_TRIP_PDF,
-      F.LIVE_STATUS_BRIDGE,
-
-    ],
+    limits: { inventoryLimit: 0, smsCredits: 0 },
   },
 ];
 
 export const ALL_PLANS = [...TRADER_PLANS, ...MIZIGO_PLANS];
 
+const TIER_ORDER = {
+  [PLAN_IDS.SOLO]: 1,
+  [PLAN_IDS.SMART]: 2,
+  [PLAN_IDS.GROWTH]: 3,
+};
+
 export const FEATURE_LABELS = {
-  [F.INVENTORY_LEDGER]: 'Inventory ledger (up to 30 SKUs)',
-  [F.INVENTORY_UNLIMITED]: 'Unlimited inventory items',
-  [F.AUTO_SYNC]: 'Auto-sync across buyer/seller devices',
-  [F.MANUAL_CRM]: 'Manual CRM – capture only (no SMS)',
-  [F.CRM_ACTIVE]: 'Active CRM – restock alerts & campaigns',
-  [F.SMS_CREDITS_500]: '500 SMS credits per month',
-  [F.SMS_CREDITS_2000]: '2,000 SMS credits per month',
-  [F.CFO_BASIC]: 'Basic CFO dashboard (gross profit)',
-  [F.CFO_SMART]: 'Smart CFO dashboard (net profit gauge)',
-  [F.CFO_AUDIT]: 'Audit CFO dashboard (wealth tracker)',
-  [F.STAFF_ROLES]: 'Staff & owner roles',
-  [F.DAILY_BURN]: 'Daily burn logging (fuel, lunch, airtime)',
-  [F.ASSET_TRACKING]: 'Asset tracking (land & buildings)',
-  [F.REPORTS_VITALS]: 'Vitals PDF (sales / purchases)',
-  [F.REPORTS_PERFORMANCE]: 'Performance PDF (ROI analysis)',
-  [F.REPORTS_AUDIT]: 'Audit PDF (net worth statement)',
-  [F.QR_HANDSHAKE]: 'QR handshake',
-  [F.WALLET_SPLITTER]: 'Wallet splitter (owner vs hired driver)',
-  [F.RADIAL_EXPRESS_ALERTS]: 'Radial express alerts (10km radius)',
-  [F.GROUP_BUY_MATCHER]: 'Group‑buy matcher (80% capacity fill)',
-  [F.THREE_WAY_QR_HANDSHAKE]: '3‑way QR handshake (escrow release)',
-  [F.TAKE_HOME_GAUGE]: '“Take‑Home” gauge (revenue – fuel – daily burn)',
-  [F.MILEAGE_SERVICE_ALERT]: 'Mileage & service alert',
-  [F.VERIFIED_TRIP_PDF]: 'Verified trip PDF (loan‑ready)',
-  [F.SINKING_FUND]: 'Sinking fund (10% locked for maintenance)',
-  [F.LIVE_STATUS_BRIDGE]: 'Live status bridge (shared progress bar)',
-  // ... (keep any existing labels you had)
+  [F.INVENTORY_LEDGER]: 'Inventory ledger with 30 SKU cap (Solo)',
+  [F.QR_AUTO_SYNC]: 'Auto QR sync for sales and stock movement',
+  [F.CRM_CAPTURE]: 'Passive CRM capture',
+  [F.ACTIVE_SMS_CAMPAIGNS]: 'Active CRM and outbound SMS campaigns',
+  [F.SMS_CREDITS_500]: '500 SMS credits per cycle',
+  [F.SMS_CREDITS_2000]: '2,000 SMS credits per cycle',
+  [F.NET_PROFIT_GAUGE]: 'Net Profit Gauge',
+  [F.REGIONAL_GUARDIAN]: 'Regional Guardian scarcity alerts',
+  [F.STAFF_RBAC]: 'Staff sub-accounts (OWNER/CLERK RBAC)',
+  [F.BILL_GUARDIAN]: 'Bill Guardian alerts',
+  [F.DAILY_BURN_TRACKER]: 'Daily operational burn tracker',
+  [F.ASSET_TRACKING]: 'Asset and net worth tracking',
+  [F.AUDIT_PDF]: 'Full audit PDF reporting',
+  [F.MIZIGO_QR_HANDSHAKE]: '3-way QR logistics handshake',
+  [F.MIZIGO_GROUP_MATCHER]: 'Group trip matcher',
+  [F.MIZIGO_EXPRESS_ALERT]: 'Radial express alert (10km)',
+  [F.TAKE_HOME_GAUGE]: 'Driver take-home gauge',
+  [F.SINKING_FUND]: '10% sinking fund auto-lock',
+  [F.VERIFIED_TRIP_PDF]: 'Verified trip PDF',
 };
 
-// ===============================
-// 2. LOGISTICS IMPLEMENTATION (Mizigo Core) – Plain JS
-// ===============================
-
-
-export function processTripPayment(trip, driver) {
-  const commission = trip.revenue * 0.05; // platform fee 5%
-  const netRevenue = trip.revenue - commission;
-
-  if (!driver.employerId) {
-    return { driverPayout: netRevenue, ownerPayout: 0 };
-  } else {
-    return { driverPayout: 0, ownerPayout: netRevenue };
-  }
-}
-
-// ---------- 2.2 Radial Express Alert (Geo‑based push) ----------
-function getDriversWithinRadius(lat, lng, radiusKm) {
-  return ['driver_1', 'driver_2'];
-}
-
-export function sendExpressAlert(request) {
-  if (request.urgency === 'express') {
-    const nearbyDrivers = getDriversWithinRadius(request.pickupLat, request.pickupLng, 10);
-    console.log(`🚨 Express alert sent to drivers: ${nearbyDrivers.join(', ')}`);
-  }
-}
-
-// ---------- 2.3 Group‑Buy Matcher (Batch consolidation) ----------
-export function matchGroupBuy(orders, truckCapacity) {
-  const batches = [];
-  let currentBatch = [];
-  let currentVolume = 0;
-
-  for (const order of orders) {
-    if (currentVolume + order.volume <= truckCapacity * 0.8) {
-      currentBatch.push(order);
-      currentVolume += order.volume;
-    } else {
-      if (currentBatch.length) batches.push(currentBatch);
-      currentBatch = [order];
-      currentVolume = order.volume;
-    }
-  }
-  if (currentBatch.length) batches.push(currentBatch);
-
-  // Only return batches that are at least 80% full
-  return batches.filter(batch => {
-    const batchVolume = batch.reduce((sum, o) => sum + o.volume, 0);
-    return batchVolume / truckCapacity >= 0.8;
-  });
-}
-
-// ---------- 2.4 3‑Way QR Handshake + Escrow Release ----------
-export const TripStatus = {
-  AWAITING_PICKUP: 'awaiting_pickup',
-  IN_TRANSIT: 'in_transit',
-  ARRIVING_SOON: 'arriving_soon',
-  DELIVERED: 'delivered',
+export const FEATURE_TOOLTIPS = {
+  [F.INVENTORY_LEDGER]: 'Plan 1 Solo allows up to 30 SKUs. Upgrade to Smart for unlimited SKUs.',
+  [F.ACTIVE_SMS_CAMPAIGNS]: 'Upgrade to Smart to send SMS campaigns and restock alerts.',
+  [F.SMS_CREDITS_500]: 'Smart includes 500 SMS credits each cycle.',
+  [F.SMS_CREDITS_2000]: 'Growth includes 2,000 SMS credits each cycle.',
+  [F.REGIONAL_GUARDIAN]: 'Regional scarcity alarms start at Smart.',
+  [F.STAFF_RBAC]: 'OWNER/CLERK access control is available on Growth.',
+  [F.BILL_GUARDIAN]: 'Growth includes 10-day bill alerts.',
+  [F.ASSET_TRACKING]: 'Asset and net worth tracking is unlocked on Growth.',
+  [F.MIZIGO_QR_HANDSHAKE]: 'Mizigo plan required for logistics QR handshake and commission payouts.',
+  [F.TAKE_HOME_GAUGE]: 'Mizigo tracks net take-home for each trip in real time.',
 };
 
-const tripsDB = new Map();
+export const normalizePlanId = (planId) => {
+  const normalized = String(planId || '').toLowerCase().trim();
+  if (!normalized) return PLAN_IDS.SOLO;
+  return LEGACY_PLAN_ALIASES[normalized] || normalized;
+};
 
-function releaseEscrow(trip) {
-  // Pay seller and driver/owner simultaneously
-  console.log(`💰 Escrow released for trip ${trip.id}: Seller ${trip.sellerId}, Driver ${trip.driverId}`);
-}
+export const getPlanById = (planId) => {
+  const normalized = normalizePlanId(planId);
+  return ALL_PLANS.find((plan) => plan.id === normalized) || null;
+};
 
-export function qrPickupScan(tripId, scannerRole) {
-  const trip = tripsDB.get(tripId);
-  if (!trip) throw new Error('Trip not found');
-  if (scannerRole === 'driver' && trip.status === TripStatus.AWAITING_PICKUP) {
-    trip.status = TripStatus.IN_TRANSIT;
-    console.log(`✅ Pickup verified. Trip ${tripId} is IN_TRANSIT.`);
-  }
-}
+export const getPlanTierLevel = (planId) => {
+  const normalized = normalizePlanId(planId);
+  return TIER_ORDER[normalized] || 0;
+};
 
-export function qrDeliveryScan(tripId, scannerRole) {
-  const trip = tripsDB.get(tripId);
-  if (!trip) throw new Error('Trip not found');
-  if (scannerRole === 'buyer' && trip.status === TripStatus.IN_TRANSIT) {
-    trip.status = TripStatus.DELIVERED;
-    // Trigger escrow release
-    releaseEscrow(trip);
-    console.log(`🎉 Delivery verified. Escrow released: KSh ${trip.escrowAmount}`);
-  }
-}
+export const isTraderPlan = (planId) => {
+  const normalized = normalizePlanId(planId);
+  return normalized === PLAN_IDS.SOLO || normalized === PLAN_IDS.SMART || normalized === PLAN_IDS.GROWTH;
+};
 
-// Helper to add a trip to the DB (for testing / integration)
-export function addTripToDB(trip) {
-  tripsDB.set(trip.id, trip);
-}
-
-// ---------- 2.5 CFO Daily Burn & Sinking Fund ----------
-const driverFinanceDB = new Map();
-
-export function addTripEarnings(driverId, tripRevenue) {
-  const finance = driverFinanceDB.get(driverId);
-  if (!finance) return;
-
-  const sinkingContribution = tripRevenue * 0.10;
-  finance.sinkingFund += sinkingContribution;
-  console.log(`💾 Locked ${sinkingContribution} into sinking fund for driver ${driverId}`);
-}
-
-export function logDailyBurn(driverId, type, amount) {
-  const finance = driverFinanceDB.get(driverId);
-  if (finance) {
-    finance.dailyBurn[type] += amount;
-    console.log(`📝 ${type}: KSh ${amount} logged for driver ${driverId}`);
-  }
-}
-
-export function initDriverFinance(driverId) {
-  driverFinanceDB.set(driverId, {
-    driverId,
-    dailyBurn: { fuel: 0, lunch: 0, airtime: 0 },
-    sinkingFund: 0,
-    totalOdometer: 0,
-  });
-}
-
-// ---------- 2.6 Mileage Service Alert ----------
-export function updateOdometer(driverId, newKm) {
-  const finance = driverFinanceDB.get(driverId);
-  if (!finance) return;
-  const prevKm = finance.totalOdometer;
-  finance.totalOdometer = newKm;
-
-  // Check if 5,000 km interval crossed
-  if (Math.floor(newKm / 5000) > Math.floor(prevKm / 5000)) {
-    console.log(`🔧 Oil change due! Use your sinking fund (KSh ${finance.sinkingFund}) to pay.`);
-  }
-}
-
-// ---------- 2.7 Performance Report (Monthly PDF) ----------
-export function generatePerformanceReport(driverId, month) {
-  // In real code: aggregate from trip logs, daily burns, odometer, etc.
-  const finance = driverFinanceDB.get(driverId);
-  return {
-    totalRevenue: 125000,
-    totalFuelCost: 45000,
-    efficiency: 125000 / 45000,
-    onTimeRate: 94.5,
-    sinkingFundBalance: finance?.sinkingFund || 0,
-    vehicleValue: 850000,
+export const getUpgradePlanForFeature = (featureKey) => {
+  const featureToPlan = {
+    [F.ACTIVE_SMS_CAMPAIGNS]: PLAN_IDS.SMART,
+    [F.SMS_CREDITS_500]: PLAN_IDS.SMART,
+    [F.REGIONAL_GUARDIAN]: PLAN_IDS.SMART,
+    [F.STAFF_RBAC]: PLAN_IDS.GROWTH,
+    [F.BILL_GUARDIAN]: PLAN_IDS.GROWTH,
+    [F.ASSET_TRACKING]: PLAN_IDS.GROWTH,
+    [F.AUDIT_PDF]: PLAN_IDS.GROWTH,
+    [F.MIZIGO_QR_HANDSHAKE]: PLAN_IDS.MIZIGO,
+    [F.MIZIGO_GROUP_MATCHER]: PLAN_IDS.MIZIGO,
+    [F.MIZIGO_EXPRESS_ALERT]: PLAN_IDS.MIZIGO,
+    [F.TAKE_HOME_GAUGE]: PLAN_IDS.MIZIGO,
   };
-}
 
-// ---------- 2.8 Live Status Bridge (Shared Progress Bar) ----------
-export class LiveStatusBridge {
-  constructor() {
-    this.subscribers = new Map();
-  }
+  const planId = featureToPlan[featureKey];
+  return planId ? getPlanById(planId) : null;
+};
 
-  subscribe(tripId, callback) {
-    if (!this.subscribers.has(tripId)) this.subscribers.set(tripId, []);
-    this.subscribers.get(tripId).push(callback);
-  }
-
-  updateStatus(tripId, newStatus) {
-    const trip = tripsDB.get(tripId);
-    if (trip) trip.status = newStatus;
-    const callbacks = this.subscribers.get(tripId) || [];
-    callbacks.forEach(cb => cb(newStatus));
-    console.log(`📡 Live status for trip ${tripId}: ${newStatus}`);
-  }
-}
-
-export const liveStatus = new LiveStatusBridge();

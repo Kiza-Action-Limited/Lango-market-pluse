@@ -67,8 +67,8 @@ const UserSchema = new mongoose.Schema(
     },
     subscriptionTier: {
       type: String,
-      enum: ['free', 'v3', 'v4'],
-      default: 'free',
+      enum: ['free', 'v3', 'v4', 'solo', 'smart', 'growth', 'mizigo'],
+      default: 'solo',
       index: true,
     },
     subscriptionExpiry: {
@@ -83,6 +83,69 @@ const UserSchema = new mongoose.Schema(
     escrowBalance: {
       type: Number,
       default: 0, // Amount held in escrow
+    },
+    smsCredits: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    staffRole: {
+      type: String,
+      enum: ['OWNER', 'CLERK'],
+      default: 'OWNER',
+    },
+    sinkingFundBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    logisticsProfile: {
+      verificationStatus: {
+        type: String,
+        enum: ['unverified', 'pending', 'verified', 'rejected'],
+        default: 'unverified',
+      },
+      documentType: {
+        type: String,
+        enum: ['national_id', 'business_permit'],
+        default: null,
+      },
+      documentNumber: String,
+      vehiclePlate: String,
+      cargoCapacityKg: {
+        type: Number,
+        min: 0,
+      },
+      driverMode: {
+        type: String,
+        enum: ['owner_operator', 'hired_driver'],
+      },
+      fleetOwner: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      verifiedAt: Date,
+      applicationSubmittedAt: Date,
+      reviewedAt: Date,
+      reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      reviewNotes: String,
+      documents: [
+        {
+          documentType: {
+            type: String,
+            enum: ['national_id', 'business_permit'],
+          },
+          url: String,
+          publicId: String,
+          uploadedAt: {
+            type: Date,
+            default: Date.now,
+          },
+        },
+      ],
     },
     location: {
       type: {

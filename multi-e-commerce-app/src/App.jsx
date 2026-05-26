@@ -50,6 +50,8 @@ const SellerOrders = lazy(() => import('./pages/SellerOrders'));
 const RegionalScarcityBoard = lazy(() => import('./pages/RegionalScarcityBoard'));
 const SellerPremiumVerification = lazy(() => import('./pages/SellerPremiumVerification'));
 const SellerPremiumPayment = lazy(() => import('./pages/SellerPremiumPayment'));
+const LogisticsApplication = lazy(() => import('./pages/LogisticsApplication'));
+const LogisticsStatus = lazy(() => import('./pages/LogisticsStatus'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminUsers = lazy(() => import('./pages/AdminUsers'));
 const AdminCategories = lazy(() => import('./pages/AdminCategories'));
@@ -105,6 +107,8 @@ function App() {
                         <Route path="orders/:id/track" element={<OrderTracking />} />
                         <Route path="profile" element={<Profile />} />
                         <Route path="wishlist" element={<Wishlist />} />
+                        <Route path="logistics/apply" element={<LogisticsApplication />} />
+                        <Route path="logistics/status" element={<LogisticsStatus />} />
                       </Route>
 
                       <Route element={<SellerRoute />}>

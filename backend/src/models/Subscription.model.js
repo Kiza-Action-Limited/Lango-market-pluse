@@ -10,7 +10,7 @@ const SubscriptionSchema = new mongoose.Schema(
     },
     plan: {
       type: String,
-      enum: ['free', 'v3', 'v4'],
+      enum: ['free', 'v3', 'v4', 'solo', 'smart', 'growth', 'mizigo'],
       required: true,
     },
     status: {
@@ -24,7 +24,7 @@ const SubscriptionSchema = new mongoose.Schema(
     },
     endDate: {
       type: Date,
-      required: true,
+      default: null,
     },
     autoRenew: {
       type: Boolean,
@@ -39,11 +39,19 @@ const SubscriptionSchema = new mongoose.Schema(
       type: Map,
       of: Boolean,
       default: {
-        escrow: false,
-        groupBuying: false,
-        scarcityAlerts: false,
-        predictiveAnalytics: false,
-        prioritySupport: false,
+        qrAutoSync: true,
+        basicCfoDashboard: true,
+        crmCapture: true,
+        activeSmsCampaigns: false,
+        restockAlerts: false,
+        regionalGuardian: false,
+        netProfitGauge: false,
+        staffRbac: false,
+        billGuardian: false,
+        assetTracking: false,
+        dailyBurnTracker: false,
+        fullAuditPdf: false,
+        checkCredits: false,
       },
     },
   },
@@ -54,7 +62,9 @@ const SubscriptionSchema = new mongoose.Schema(
 
 // Virtual to check if active
 SubscriptionSchema.virtual('isActive').get(function () {
-  return this.status === 'active' && new Date() < this.endDate;
+  if (this.status !== 'active') return false;
+  if (!this.endDate) return true;
+  return new Date() < this.endDate;
 });
 
 SubscriptionSchema.index({ endDate: 1 });

@@ -2,11 +2,16 @@ const Product = require('../models/product.model');
 const { validationResult } = require('express-validator');
 const planService = require('../services/subscription/plan.service');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary.config');
+const { PLAN_IDS } = require('../config/subscriptionPlans');
 
 const PLAN_PRODUCT_LIMITS = {
-  free: 5,
-  v3: 50,
+  free: 30,
+  v3: Number.MAX_SAFE_INTEGER,
   v4: Number.MAX_SAFE_INTEGER,
+  [PLAN_IDS.SOLO]: 30,
+  [PLAN_IDS.SMART]: Number.MAX_SAFE_INTEGER,
+  [PLAN_IDS.GROWTH]: Number.MAX_SAFE_INTEGER,
+  [PLAN_IDS.MIZIGO]: 0,
 };
 
 const SELLER_ROLES = new Set(['seller', 'farmer']);
@@ -15,12 +20,12 @@ const getEffectivePlan = async (userId) => {
   try {
     const subscription = await planService.getUserSubscription(userId);
     if (subscription?.isActive) {
-      return subscription.plan;
+      return planService.normalizePlan(subscription.plan);
     }
-    return 'free';
+    return PLAN_IDS.SOLO;
   } catch (error) {
     console.error('Error getting effective plan:', error);
-    return 'free';
+    return PLAN_IDS.SOLO;
   }
 };
 

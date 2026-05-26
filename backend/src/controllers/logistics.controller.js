@@ -1,6 +1,8 @@
 const Logistics = require('../models/Logistics.model');
 const Order     = require('../models/Order.model');
 const User      = require('../models/User.model');
+const { uploadToCloudinary } = require('../config/cloudinary.config');
+const { validationResult } = require('express-validator');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -11,6 +13,214 @@ const extractGps = (body) => ({
   lat: parseFloat(body.lat  ?? body.latitude  ?? 0),
   lng: parseFloat(body.lng  ?? body.longitude ?? 0)
 });
+
+const ensureDriverOwnsTrip = (logistics, user) => {
+  if (!user) return 'Authentication required';
+  if (user.role === 'admin') return null;
+  if (user.role !== 'logistics') return 'Only logistics users can perform this action';
+
+  if (!logistics.driver) {
+    return 'This shipment has not been accepted by a driver yet.';
+  }
+
+  if (String(logistics.driver) !== String(user._id || user.id)) {
+    return 'You are not assigned to this shipment.';
+  }
+
+  return null;
+};
+
+const uploadLogisticsDocument = async (file, userId, documentType) => {
+  if (!file?.buffer) return null;
+
+  const result = await uploadToCloudinary(
+    file.buffer,
+    `logistics/${userId}/documents`,
+    file.mimetype
+  );
+
+  return {
+    documentType,
+    url: result.secure_url,
+    publicId: result.public_id,
+    uploadedAt: new Date(),
+  };
+};
+
+// ─── Logistics Application Flow ───────────────────────────────────────────────
+
+/**
+ * POST /api/v1/logistics/apply
+ * Registers a user into the logistics verification pipeline.
+ */
+exports.applyAsLogistics = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const {
+      driverMode = 'owner_operator',
+      vehiclePlate,
+      cargoCapacityKg,
+      documentType,
+      documentNumber,
+      fleetOwnerId,
+    } = req.body;
+
+    if (!vehiclePlate || !cargoCapacityKg || !documentType || !documentNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'vehiclePlate, cargoCapacityKg, documentType, and documentNumber are required.',
+      });
+    }
+
+    const files = req.files || {};
+    const nationalIdImage = files.nationalIdImage?.[0];
+    const businessPermitImage = files.businessPermitImage?.[0];
+
+    if (!nationalIdImage && !businessPermitImage) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one document image is required (nationalIdImage or businessPermitImage).',
+      });
+    }
+
+    const uploadedDocs = [];
+    if (nationalIdImage) {
+      const doc = await uploadLogisticsDocument(nationalIdImage, user._id, 'national_id');
+      if (doc) uploadedDocs.push(doc);
+    }
+    if (businessPermitImage) {
+      const doc = await uploadLogisticsDocument(businessPermitImage, user._id, 'business_permit');
+      if (doc) uploadedDocs.push(doc);
+    }
+
+    user.role = 'logistics';
+    user.businessType = 'logistics';
+    user.subscriptionTier = 'mizigo';
+    user.logisticsProfile = {
+      ...(user.logisticsProfile?.toObject?.() || user.logisticsProfile || {}),
+      verificationStatus: 'pending',
+      documentType,
+      documentNumber,
+      vehiclePlate: String(vehiclePlate).trim().toUpperCase(),
+      cargoCapacityKg: Number(cargoCapacityKg),
+      driverMode,
+      fleetOwner: driverMode === 'hired_driver' && fleetOwnerId ? fleetOwnerId : undefined,
+      documents: uploadedDocs.length ? uploadedDocs : (user.logisticsProfile?.documents || []),
+      applicationSubmittedAt: new Date(),
+      reviewedAt: null,
+      reviewedBy: null,
+      reviewNotes: '',
+      verifiedAt: null,
+    };
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Logistics application submitted successfully. Awaiting admin verification.',
+      data: {
+        verificationStatus: user.logisticsProfile.verificationStatus,
+        applicationSubmittedAt: user.logisticsProfile.applicationSubmittedAt,
+        driverMode: user.logisticsProfile.driverMode,
+        vehiclePlate: user.logisticsProfile.vehiclePlate,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/v1/logistics/me/application
+ * Returns the current logistics application state.
+ */
+exports.getMyLogisticsApplication = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id).select(
+      'role businessType logisticsProfile subscriptionTier'
+    );
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        role: user.role,
+        businessType: user.businessType,
+        subscriptionTier: user.subscriptionTier,
+        logisticsProfile: user.logisticsProfile || { verificationStatus: 'unverified' },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * PUT /api/v1/logistics/:id/accept
+ * Approved logistics drivers accept a pending order assignment.
+ */
+exports.acceptLogisticsOrder = async (req, res, next) => {
+  try {
+    const logistics = await Logistics.findById(req.params.id);
+    if (!logistics) return notFound(res);
+
+    if (logistics.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot accept order in "${logistics.status}" status.`,
+      });
+    }
+
+    if (logistics.driver && String(logistics.driver) !== String(req.user._id)) {
+      return res.status(409).json({
+        success: false,
+        message: 'This order is already accepted by another driver.',
+      });
+    }
+
+    const driver = await User.findById(req.user.id);
+    if (!driver) return res.status(404).json({ success: false, message: 'Driver not found' });
+
+    logistics.driver = driver._id;
+    logistics.driverName = driver.fullName || driver.name;
+    logistics.driverPhone = driver.phone;
+
+    const driverMode = driver.logisticsProfile?.driverMode || 'owner_operator';
+    logistics.driverType = driverMode;
+    if (driverMode === 'hired_driver') {
+      logistics.fleetOwner = driver.logisticsProfile?.fleetOwner || null;
+      logistics.payoutRecipient = logistics.fleetOwner || null;
+      logistics.payoutRecipientType = 'fleet_owner';
+    } else {
+      logistics.payoutRecipient = driver._id;
+      logistics.payoutRecipientType = 'driver';
+    }
+
+    logistics.trackingHistory.push({
+      status: 'pending',
+      location: logistics.currentLocation,
+      notes: 'Driver accepted logistics order',
+      timestamp: new Date(),
+      updatedBy: driver._id,
+    });
+
+    await logistics.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Order accepted successfully. Proceed to pickup QR scan.',
+      data: logistics,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 // ─── Create ───────────────────────────────────────────────────────────────────
 
@@ -24,7 +234,7 @@ exports.createLogistics = async (req, res, next) => {
     const {
       orderId, driverType = 'owner_operator',
       shippingAddress, weight, dimensions, notes,
-      escrowAmount, commissionRate
+      escrowAmount, commissionRate, driverId, fleetOwnerId
     } = req.body;
 
     const order = await Order.findById(orderId);
@@ -35,18 +245,27 @@ exports.createLogistics = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Logistics record already exists for this order' });
     }
 
+    const normalizedCommission = commissionRate === undefined ? 0.075 : Number(commissionRate);
+    if (Number.isNaN(normalizedCommission) || normalizedCommission < 0.05 || normalizedCommission > 0.10) {
+      return res.status(400).json({ success: false, message: 'Commission rate must be between 5% and 10%.' });
+    }
+
     const logistics = new Logistics({
       order:           orderId,
       orderNumber:     order.orderNumber,
       driverType,
+      driver:          driverId || null,
+      fleetOwner:      fleetOwnerId || null,
+      payoutRecipient: driverType === 'hired_driver' ? (fleetOwnerId || null) : (driverId || null),
+      payoutRecipientType: driverType === 'hired_driver' ? 'fleet_owner' : 'driver',
       shippingAddress: shippingAddress || order.shippingAddress,
       weight,
       dimensions,
       notes,
       status:          'pending',
       escrow: {
-        totalAmount:          escrowAmount || order.total || 0,
-        platformCommissionRate: commissionRate || 0.075
+        totalAmount:          escrowAmount || order.totalAmount || 0,
+        platformCommissionRate: normalizedCommission
       }
     });
 
@@ -81,6 +300,11 @@ exports.scanPickup = async (req, res, next) => {
     const { qrPayload } = req.body;
     const logistics = await Logistics.findById(req.params.id);
     if (!logistics) return notFound(res);
+
+    const ownershipError = ensureDriverOwnsTrip(logistics, req.user);
+    if (ownershipError) {
+      return res.status(403).json({ success: false, message: ownershipError });
+    }
 
     // Validate QR payload matches
     if (logistics.sellerQrCode !== qrPayload) {
@@ -220,6 +444,14 @@ exports.getAllLogistics = async (req, res, next) => {
       if (endDate)   q.createdAt.$lte = new Date(endDate);
     }
 
+    if (req.user.role === 'logistics') {
+      const userId = req.user._id || req.user.id;
+      q.$or = [
+        { driver: userId },
+        { status: 'pending', driver: null },
+      ];
+    }
+
     const [logistics, total, stats] = await Promise.all([
       Logistics.find(q)
         .populate('order', 'orderNumber total customer')
@@ -279,7 +511,7 @@ exports.getLogisticsByOrder = async (req, res, next) => {
  */
 exports.assignDriver = async (req, res, next) => {
   try {
-    const { driverId, driverName, driverPhone, driverType } = req.body;
+    const { driverId, driverName, driverPhone, driverType, fleetOwnerId } = req.body;
     const logistics = await Logistics.findById(req.params.id);
     if (!logistics) return notFound(res);
 
@@ -288,8 +520,14 @@ exports.assignDriver = async (req, res, next) => {
       if (!driver || driver.role !== 'logistics') {
         return res.status(400).json({ success: false, message: 'User not found or does not have logistics role' });
       }
+      if (driver.logisticsProfile?.verificationStatus !== 'verified') {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected driver is not yet approved for logistics operations.',
+        });
+      }
       logistics.driver      = driverId;
-      logistics.driverName  = driver.name;
+      logistics.driverName  = driver.fullName;
       logistics.driverPhone = driver.phone;
     } else {
       logistics.driverName  = driverName;
@@ -297,6 +535,14 @@ exports.assignDriver = async (req, res, next) => {
     }
 
     if (driverType) logistics.driverType = driverType;
+    if (fleetOwnerId) logistics.fleetOwner = fleetOwnerId;
+    if (logistics.driverType === 'hired_driver') {
+      logistics.payoutRecipient = logistics.fleetOwner || null;
+      logistics.payoutRecipientType = 'fleet_owner';
+    } else {
+      logistics.payoutRecipient = logistics.driver || null;
+      logistics.payoutRecipientType = 'driver';
+    }
 
     await logistics.save();
     res.status(200).json({ success: true, message: 'Driver assigned', data: logistics });

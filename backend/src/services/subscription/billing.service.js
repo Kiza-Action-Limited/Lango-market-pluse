@@ -1,7 +1,7 @@
 const Subscription = require('../../models/Subscription.model');
 const User = require('../../models/User.model');
-const walletService = require('../payment/wallet.service');
 const planService = require('./plan.service');
+const { PLAN_IDS } = require('../../config/subscriptionPlans');
 const { smsQueue } = require('../../config/redis');
 const logger = require('../../utils/logger');
 
@@ -10,12 +10,16 @@ class BillingService {
     const user = await User.findById(userId);
     if (!user) throw new Error('User not found');
 
-    const plan = planService.getPlans().find(p => p.id === planId);
+    const normalizedPlanId = planService.normalizePlan(planId);
+    const plan = planService.getPlanById(normalizedPlanId);
     if (!plan) throw new Error('Invalid plan');
-    if (paymentMethod !== 'mpesa') throw new Error('M-Pesa is the only supported payment method');
+    const normalizedPaymentMethod = paymentMethod || 'mpesa';
+    if (plan.billingType === 'monthly' && normalizedPaymentMethod !== 'mpesa') {
+      throw new Error('M-Pesa is the only supported payment method');
+    }
 
-    // Charge payment
-    if (plan.price > 0) {
+    // Charge payment for monthly plans only
+    if (plan.billingType === 'monthly' && plan.priceKes > 0) {
       if (!paymentMeta?.paymentCompleted) {
         throw new Error('Payment must be completed before plan activation');
       }
@@ -27,38 +31,44 @@ class BillingService {
     // Create or update subscription
     let subscription = await Subscription.findOne({ user: userId });
     const startDate = new Date();
-    const endDate = new Date(startDate);
-    endDate.setMonth(endDate.getMonth() + 1); // Monthly billing
+    const endDate = plan.billingType === 'monthly'
+      ? new Date(new Date(startDate).setMonth(startDate.getMonth() + 1))
+      : null;
 
     if (subscription) {
-      subscription.plan = planId;
+      subscription.plan = normalizedPlanId;
       subscription.status = 'active';
       subscription.startDate = startDate;
       subscription.endDate = endDate;
       subscription.features = new Map(Object.entries(plan.features));
-      subscription.paymentMethod = 'mpesa';
+      subscription.paymentMethod = normalizedPaymentMethod || null;
       subscription.lastPaymentId = paymentMeta?.paymentReference || null;
     } else {
       subscription = await Subscription.create({
         user: userId,
-        plan: planId,
+        plan: normalizedPlanId,
         startDate,
         endDate,
-        features: plan.features,
-        paymentMethod: 'mpesa',
+        features: new Map(Object.entries(plan.features)),
+        paymentMethod: normalizedPaymentMethod || null,
         lastPaymentId: paymentMeta?.paymentReference || null,
       });
     }
     await subscription.save();
 
     // Update user's subscription tier
-    user.subscriptionTier = planId;
+    user.subscriptionTier = normalizedPlanId;
     user.subscriptionExpiry = endDate;
+    if (plan.billingType === 'monthly') {
+      user.smsCredits = plan.smsCreditsPerCycle || 0;
+    } else if (normalizedPlanId === PLAN_IDS.MIZIGO) {
+      user.smsCredits = 0;
+    }
     await user.save();
 
     await smsQueue.add('send', {
       to: user.phone,
-      message: `You've subscribed to the ${planId} plan. Thank you!`,
+      message: `You've subscribed to the ${plan.name} plan. Thank you!`,
     });
 
     return subscription;
@@ -70,22 +80,29 @@ class BillingService {
     subscription.status = 'canceled';
     await subscription.save();
 
-    // Downgrade user to free
+    // Downgrade user to solo
     const user = await User.findById(userId);
-    user.subscriptionTier = 'free';
+    user.subscriptionTier = PLAN_IDS.SOLO;
     user.subscriptionExpiry = null;
+    user.smsCredits = 0;
     await user.save();
 
     return { cancelled: true };
   }
 
   async changePlan(userId, newPlanId) {
-    // Cancel current and subscribe to new
-    await this.cancelSubscription(userId);
-    return await this.subscribe(userId, newPlanId, 'mpesa', {
-      paymentCompleted: true,
-      paymentReference: `manual-change-${Date.now()}`,
-    });
+    const normalizedPlanId = planService.normalizePlan(newPlanId);
+    const targetPlan = planService.getPlanById(normalizedPlanId);
+    if (!targetPlan) throw new Error('Invalid target plan');
+
+    const paymentMeta = targetPlan.billingType === 'monthly'
+      ? {
+          paymentCompleted: true,
+          paymentReference: `manual-change-${Date.now()}`,
+        }
+      : {};
+
+    return await this.subscribe(userId, normalizedPlanId, 'mpesa', paymentMeta);
   }
 
   async handleWebhook(payload) {

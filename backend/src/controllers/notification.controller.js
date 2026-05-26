@@ -15,13 +15,19 @@ exports.sendSMS = async (req, res, next) => {
     }
 
     const { userId, message } = req.body;
-    const result = await smsService.sendToUser(userId, message);
+    const result = await smsService.sendPaidSmsFromUser(req.user.id, userId, message);
     res.status(200).json({
       success: true,
       message: 'SMS sent successfully',
       data: result,
     });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
     next(error);
   }
 };

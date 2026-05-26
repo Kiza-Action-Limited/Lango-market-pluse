@@ -12,9 +12,9 @@ router.get('/', [
 
 router.get('/:id', param('id').isMongoId(), groupBuyController.getGroupBuyById);
 
-// Protected (require auth and V4 plan)
+// Protected (require auth and Smart plan+)
 router.use(authMiddleware);
-router.use(subscriptionGate('v4'));
+router.use(subscriptionGate('smart'));
 
 router.post('/', [
   body('product').isMongoId(),

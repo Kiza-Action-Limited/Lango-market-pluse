@@ -96,6 +96,11 @@ const Navbar = () => {
                   {isAuthenticated ? (
                     <>
                       <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Profile</Link>
+                      {String(user?.role || '').toLowerCase() === 'logistics' ? (
+                        <Link to="/logistics/status" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Logistics Status</Link>
+                      ) : (
+                        <Link to="/logistics/apply" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Apply as Logistics</Link>
+                      )}
                       {isSeller && (
                         <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
                       )}
@@ -222,6 +227,11 @@ const Navbar = () => {
                 {isAuthenticated ? (
                   <>
                     <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Profile</Link>
+                    {String(user?.role || '').toLowerCase() === 'logistics' ? (
+                      <Link to="/logistics/status" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Logistics Status</Link>
+                    ) : (
+                      <Link to="/logistics/apply" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Apply as Logistics</Link>
+                    )}
                     {isSeller && (
                       <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
                     )}

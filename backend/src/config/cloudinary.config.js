@@ -14,15 +14,19 @@ const uploadToCloudinary = (buffer, folder = 'products', mimeType = 'image/jpeg'
     const sanitizedMimeType = mimeType || 'image/jpeg';
     const base64String = buffer.toString('base64');
     const dataURI = `data:${sanitizedMimeType};base64,${base64String}`;
+    const isPdf = sanitizedMimeType === 'application/pdf';
 
-    cloudinary.uploader.upload(dataURI, {
+    const options = {
       folder: folder,
-      resource_type: 'image',
-      allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif'],
-      transformation: [
-        { width: 800, height: 800, crop: 'limit', quality: 'auto' }
-      ],
-    }, (error, result) => {
+      resource_type: isPdf ? 'raw' : 'image',
+      allowed_formats: isPdf ? ['pdf'] : ['jpg', 'png', 'jpeg', 'webp', 'gif'],
+    };
+
+    if (!isPdf) {
+      options.transformation = [{ width: 800, height: 800, crop: 'limit', quality: 'auto' }];
+    }
+
+    cloudinary.uploader.upload(dataURI, options, (error, result) => {
       if (error) {
         console.error('Cloudinary upload error:', error);
         reject(error);

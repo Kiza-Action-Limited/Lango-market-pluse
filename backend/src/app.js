@@ -16,6 +16,10 @@ const wishlistRoutes = require('./routes/v1/wishlist.routes');
 const adminRoutes = require('./routes/v1/admin.routes');
 const logisticsRoutes = require('./routes/v1/logistics.routes');
 const analyticsRoutes = require('./routes/v1/analytics.routes');
+const subscriptionRoutes = require('./routes/v1/subscriptions.routes');
+const paymentRoutes = require('./routes/v1/payments.routes');
+const groupBuyRoutes = require('./routes/v1/groupbuy.routes');
+const escrowRoutes = require('./routes/v1/escrow.routes');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -94,6 +98,10 @@ app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/logistics', logisticsRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/v1/subscriptions', subscriptionRoutes);
+app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/groupbuy', groupBuyRoutes);
+app.use('/api/v1/escrow', escrowRoutes);
 
 // Test route to verify server is working
 app.get('/api/test', (req, res) => {
@@ -108,7 +116,11 @@ app.get('/api/test', (req, res) => {
       cart: '/api/v1/cart',
       admin: '/api/v1/admin',
       logistics: '/api/v1/logistics',
-      analytics: '/api/v1/analytics'
+      analytics: '/api/v1/analytics',
+      subscriptions: '/api/v1/subscriptions',
+      payments: '/api/v1/payments',
+      groupbuy: '/api/v1/groupbuy',
+      escrow: '/api/v1/escrow'
     }
   });
 });

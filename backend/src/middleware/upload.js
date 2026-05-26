@@ -28,6 +28,32 @@ const upload = multer({
   fileFilter: fileFilter,
 });
 
+// Document upload filter (images + PDF)
+const documentFileFilter = (req, file, cb) => {
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+
+  if (allowedMimeTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only jpg, jpeg, png, webp, or pdf files are allowed'), false);
+  }
+};
+
+const uploadDocuments = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB
+    files: 4,
+  },
+  fileFilter: documentFileFilter,
+});
+
 // Error handling middleware for multer
 const handleUploadError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
@@ -35,13 +61,13 @@ const handleUploadError = (err, req, res, next) => {
     if (err.code === 'FILE_TOO_LARGE') {
       return res.status(400).json({
         success: false,
-        message: 'File too large. Maximum size is 5MB'
+        message: 'File too large. Maximum size is 10MB'
       });
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
       return res.status(400).json({
         success: false,
-        message: 'Too many files. Maximum is 10 images'
+        message: 'Too many files. Maximum is 4 documents'
       });
     }
     if (err.code === 'LIMIT_UNEXPECTED_FILE') {
@@ -68,4 +94,4 @@ const handleUploadError = (err, req, res, next) => {
   next();
 };
 
-module.exports = { upload, handleUploadError };
+module.exports = { upload, uploadDocuments, handleUploadError };

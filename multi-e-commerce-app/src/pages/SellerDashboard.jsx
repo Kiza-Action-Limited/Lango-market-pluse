@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FaPlus, FaEdit, FaTrash, FaChartLine, FaBox, FaDollarSign, FaShoppingCart, FaLock, FaUnlockAlt, FaBrain } from 'react-icons/fa';
 import { formatCurrency } from '../utils/formatters';
-import { SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
+import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
 import { productService } from '../services/productService';
 import { orderService } from '../services/orderService';
 
@@ -135,6 +135,7 @@ const SellerDashboard = () => {
         ) : (
           <Link
             to="/seller/subscription-plans"
+            title={FEATURE_TOOLTIPS[SUBSCRIPTION_FEATURES.INVENTORY_LEDGER] || 'Upgrade subscription to unlock inventory tools'}
             className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition flex items-center space-x-2"
           >
             <FaLock />
@@ -178,7 +179,10 @@ const SellerDashboard = () => {
                       <FaUnlockAlt size={12} /> Enabled
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-600">
+                    <span
+                      className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gray-200 text-gray-600"
+                      title={FEATURE_TOOLTIPS[card.key] || 'Upgrade plan to unlock'}
+                    >
                       <FaLock size={11} /> Locked
                     </span>
                   )}
