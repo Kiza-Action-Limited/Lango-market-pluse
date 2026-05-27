@@ -67,13 +67,25 @@ const UserSchema = new mongoose.Schema(
     },
     subscriptionTier: {
       type: String,
-      enum: ['free', 'v3', 'v4'],
-      default: 'free',
+      enum: ['free', 'v3', 'v4', 'solo', 'smart', 'growth', 'mizigo'],
+      default: 'solo',
       index: true,
     },
     subscriptionExpiry: {
       type: Date,
       default: null,
+    },
+    accountRole: {
+      type: String,
+      enum: ['OWNER', 'CLERK', 'DRIVER', 'FLEET_OWNER'],
+      default: 'OWNER',
+      index: true,
+    },
+    ownerAccount: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
     },
     walletBalance: {
       type: Number,

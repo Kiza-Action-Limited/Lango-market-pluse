@@ -2,6 +2,8 @@ const express = require('express');
 const { body } = require('express-validator');
 const notificationController = require('../../controllers/notification.controller');
 const { protect: authMiddleware } = require('../../middleware/auth');
+const subscriptionGate = require('../../middleware/subscriptionGate');
+const { validate } = require('../../middleware/validation');
 
 const router = express.Router();
 
@@ -27,6 +29,9 @@ router.post(
     body('userId').notEmpty().withMessage('User ID is required'),
     body('message').notEmpty().withMessage('Message is required'),
   ],
+  validate,
+  subscriptionGate('smart', 'smsGateway'),
+  subscriptionGate.checkCredits(1),
   notificationController.sendSMS
 );
 

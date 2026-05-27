@@ -10,7 +10,11 @@ router.use(authMiddleware);
 router.post('/', [
   body('product').isMongoId(),
   body('quantity').isFloat({ min: 0.001 }),
-  body('deliveryAddress').optional().isString(),
+  body('deliveryAddress').optional().custom((value) => {
+    if (typeof value === 'string') return true;
+    if (value && typeof value === 'object') return true;
+    throw new Error('deliveryAddress must be a string or address object');
+  }),
 ], subscriptionGate('v3'), orderController.createOrder);
 
 router.get('/', [

@@ -63,6 +63,7 @@ const EMAIL_OTP_TTL = 10 * 60;  // 10 minutes
 const MAX_ATTEMPTS = 3;
 const MAX_RESENDS = 3;
 const RESEND_COOLDOWN = 60;
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Helper functions
 const generateCode = () => crypto.randomInt(100000, 999999).toString();
@@ -226,6 +227,8 @@ const sendEmailOtpCode = async (email) => {
   }
 
   const code = generateCode();
+  let delivered = false;
+  let deliveryError = null;
 
   await store.set(emailKey(normalized), {
     code,
@@ -240,15 +243,25 @@ const sendEmailOtpCode = async (email) => {
 
   try {
     await emailService.sendOtpEmail(normalized, code);
-    return {
-      success: true,
-      message: 'Verification code sent to your email',
-      cooldownSeconds: RESEND_COOLDOWN,
-    };
+    delivered = true;
   } catch (error) {
-    await store.del(emailKey(normalized));
-    throw error;
+    deliveryError = error;
+    if (isProduction) {
+      await store.del(emailKey(normalized));
+      throw error;
+    }
   }
+
+  return {
+    success: true,
+    message: delivered
+      ? 'Verification code sent to your email'
+      : 'Verification code generated. Email delivery failed in development mode.',
+    cooldownSeconds: RESEND_COOLDOWN,
+    delivered,
+    ...(deliveryError && !isProduction ? { deliveryError: deliveryError.message } : {}),
+    ...(!isProduction ? { devCode: code } : {}),
+  };
 };
 
 /**
@@ -272,6 +285,7 @@ const verifyEmailOtp = async (email, code) => {
     const err = new Error('Code expired or not found. Please request a new one.');
     err.statusCode = 400;
     err.code = 'OTP_EXPIRED';
+    err.identifier = normalized;
     throw err;
   }
 
@@ -350,4 +364,5 @@ module.exports = {
   MAX_ATTEMPTS,
   MAX_RESENDS,
   RESEND_COOLDOWN,
+  emailKey,
 };

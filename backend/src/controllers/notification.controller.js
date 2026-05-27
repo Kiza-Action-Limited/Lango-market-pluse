@@ -1,6 +1,6 @@
-const smsService = require('../services/navigation/sms.service');
-const pushService = require('../services/navigation/push.service');
-const emailService = require('../services/navigation/email.service');
+const smsService = require('../services/notification/sms.service');
+const pushService = require('../services/notification/push.service');
+const emailService = require('../services/notification/email.service');
 const { validationResult } = require('express-validator');
 
 /**

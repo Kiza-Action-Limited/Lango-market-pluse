@@ -364,7 +364,7 @@ exports.generateDailyAnalytics = async (req, res, next) => {
         },
         regions: new Map()
       },
-      { upsert: true, new: true, returnDocument: 'after' } // Fixed deprecated option
+      { upsert: true, new: true }
     );
     
     res.status(200).json({
@@ -453,9 +453,9 @@ exports.getDashboardOverview = async (req, res, next) => {
     
     const [todayData, weekData, monthData, allTimeData] = await Promise.all([
       Analytics.findOne({ date: today }),
-      Analytics.getPeriodSummary(startOfWeek, today),
-      Analytics.getPeriodSummary(startOfMonth, today),
-      Analytics.getPeriodSummary(new Date('2020-01-01'), today)
+      Analytics.findOne({ date: startOfWeek }),
+      Analytics.findOne({ date: startOfMonth }),
+      Analytics.findOne().sort({ date: 1 })
     ]);
     
     // Get real-time stats

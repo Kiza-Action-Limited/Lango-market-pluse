@@ -1,5 +1,18 @@
 const mongoose = require('mongoose');
 
+const AddressSchema = new mongoose.Schema(
+  {
+    label: { type: String, trim: true },
+    county: { type: String, trim: true },
+    town: { type: String, trim: true },
+    street: { type: String, trim: true },
+    country: { type: String, default: 'Kenya', trim: true },
+    gpsLat: { type: Number },
+    gpsLng: { type: Number },
+  },
+  { _id: false }
+);
+
 const OrderSchema = new mongoose.Schema(
   {
     buyer: {
@@ -23,6 +36,13 @@ const OrderSchema = new mongoose.Schema(
       ref: 'Product',
       required: true,
       
+    },
+    orderNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      index: true,
     },
     quantity: {
       type: Number,
@@ -56,9 +76,10 @@ const OrderSchema = new mongoose.Schema(
     },
     escrowReleaseDate: Date,
     paymentIntentId: String,
-    deliveryAddress: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Trip',
+    deliveryAddress: AddressSchema,
+    deliveryAddressText: {
+      type: String,
+      trim: true,
     },
     qrChain: {
       type: String,
@@ -82,6 +103,17 @@ const OrderSchema = new mongoose.Schema(
   }
 );
 
+// Calculate total before validation so required totalAmount is satisfied.
+OrderSchema.pre('validate', function (next) {
+  if (this.quantity != null && this.unitPrice != null) {
+    this.totalAmount = Number(this.quantity) * Number(this.unitPrice);
+  }
+  if (!this.orderNumber && this._id) {
+    this.orderNumber = `ORD-${this._id.toString().slice(-8).toUpperCase()}`;
+  }
+  if (typeof next === 'function') next();
+});
+
 // Auto-update timeline on status change
 OrderSchema.pre('save', function (next) {
   if (this.isModified('status')) {
@@ -90,13 +122,7 @@ OrderSchema.pre('save', function (next) {
       timestamp: new Date(),
     });
   }
-  next();
-});
-
-// Calculate total before saving
-OrderSchema.pre('save', function (next) {
-  this.totalAmount = this.quantity * this.unitPrice;
-  next();
+  if (typeof next === 'function') next();
 });
 
 // Indexes

@@ -162,6 +162,9 @@ exports.sendPhoneVerificationOtp = async (req, res) => {
       success: true,
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
+      ...(channel === 'email' ? { delivered: result.delivered } : {}),
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
   } catch (error) {
     console.error('Send phone OTP error:', error.message);
@@ -203,6 +206,7 @@ exports.verifyPhoneOtpCode = async (req, res) => {
       message: error.message,
       code: error.code,
       remainingAttempts: error.remainingAttempts,
+      ...(error.identifier && process.env.NODE_ENV !== 'production' ? { identifier: error.identifier } : {}),
     });
   }
 };
@@ -237,6 +241,9 @@ exports.sendEmailVerificationOtp = async (req, res) => {
       success: true,
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
   } catch (error) {
     console.error('Send email OTP error:', error.message);
@@ -527,6 +534,9 @@ exports.sendEmailOtp = async (req, res) => {
       success: true,
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
       nextStep: '/api/v1/auth/register/email/verify'
     });
   } catch (error) {
@@ -570,6 +580,7 @@ exports.verifyEmailOtp = async (req, res) => {
       message: error.message,
       code: error.code,
       remainingAttempts: error.remainingAttempts,
+      ...(error.identifier && process.env.NODE_ENV !== 'production' ? { identifier: error.identifier } : {}),
     });
   }
 };
@@ -604,6 +615,9 @@ exports.resendEmailOtp = async (req, res) => {
       success: true,
       message: 'Verification code resent successfully',
       cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
   } catch (error) {
     console.error('Resend email OTP error:', error.message);
@@ -829,7 +843,6 @@ exports.login = async (req, res) => {
     });
   }
 };
-
 /**
  * Get current authenticated user
  */

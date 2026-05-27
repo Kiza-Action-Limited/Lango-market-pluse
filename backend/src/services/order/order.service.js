@@ -6,47 +6,86 @@ const escrowService = require('./escrow.service');
 const { smsQueue } = require('../../config/redis');
 const { v4: uuidv4 } = require('uuid');
 
+const normalizeDeliveryAddress = (deliveryAddress) => {
+  if (!deliveryAddress) return undefined;
+
+  if (typeof deliveryAddress === 'string') {
+    return {
+      label: deliveryAddress.trim(),
+      country: 'Kenya',
+    };
+  }
+
+  if (typeof deliveryAddress === 'object') {
+    return {
+      label: deliveryAddress.label || deliveryAddress.address || deliveryAddress.street,
+      county: deliveryAddress.county,
+      town: deliveryAddress.town,
+      street: deliveryAddress.street,
+      country: deliveryAddress.country || 'Kenya',
+      gpsLat: deliveryAddress.gpsLat,
+      gpsLng: deliveryAddress.gpsLng,
+    };
+  }
+
+  return undefined;
+};
+
+const httpError = (message, statusCode, details = {}) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  Object.assign(error, details);
+  return error;
+};
+
 class OrderService {
   async createOrder(orderData) {
     const { buyer, product, quantity, deliveryAddress } = orderData;
 
     // Get product details
     const productDoc = await Product.findById(product);
-    if (!productDoc) throw new Error('Product not found');
+    if (!productDoc) throw httpError('Product not found', 404);
 
-    const seller = await User.findById(productDoc.seller).select('businessType');
+    const seller = await User.findById(productDoc.seller).select('businessType phone');
     const sellerBusinessType = String(seller?.businessType || '').toLowerCase();
     const requiresBulkMinimum = sellerBusinessType === 'wholesaler' || sellerBusinessType === 'manufacturer';
+    const orderQuantity = Number(quantity);
 
-    if (requiresBulkMinimum && Number(quantity) < 10) {
-      throw new Error('Minimum order for wholesaler/manufacturer products is 10 pieces (MQQ1: 10-2,999, MQQ2: 3,000+)');
+    if (requiresBulkMinimum && orderQuantity < 10) {
+      throw httpError('Minimum order for wholesaler/manufacturer products is 10 pieces (MQQ1: 10-2,999, MQQ2: 3,000+)', 400);
     }
 
     // Check stock
-    if (productDoc.quantityAvailable - productDoc.reservedQuantity < quantity) {
-      throw new Error('Insufficient stock');
+    if (productDoc.quantityAvailable - productDoc.reservedQuantity < orderQuantity) {
+      throw httpError('Insufficient stock', 409);
     }
 
     // Reserve stock
-    await productService.reserveStock(product, quantity);
+    await productService.reserveStock(product, orderQuantity);
+
+    const normalizedDeliveryAddress = normalizeDeliveryAddress(deliveryAddress);
 
     // Create order
     const order = await Order.create({
       buyer,
       seller: productDoc.seller,
       product,
-      quantity,
+      quantity: orderQuantity,
       unitPrice: productDoc.price,
-      deliveryAddress,
+      totalAmount: orderQuantity * productDoc.price,
+      deliveryAddress: normalizedDeliveryAddress,
+      deliveryAddressText: typeof deliveryAddress === 'string' ? deliveryAddress.trim() : normalizedDeliveryAddress?.label,
       qrChain: uuidv4(),
       status: 'pending_payment',
     });
 
     // Notify seller via SMS
-    await smsQueue.add('send', {
-      to: productDoc.seller.phone,
-      message: `New order #${order._id} for ${quantity} ${productDoc.name}. Awaiting payment.`,
-    });
+    if (seller?.phone) {
+      await smsQueue.add('send', {
+        to: seller.phone,
+        message: `New order #${order._id} for ${orderQuantity} ${productDoc.name}. Awaiting payment.`,
+      });
+    }
 
     return order;
   }
@@ -86,11 +125,11 @@ class OrderService {
       .populate('buyer', 'fullName phone')
       .populate('seller', 'fullName phone')
       .populate('product');
-    if (!order) throw new Error('Order not found');
+    if (!order) throw httpError('Order not found', 404);
 
     // Check authorization
     if (userRole !== 'admin' && order.buyer._id.toString() !== userId && order.seller._id.toString() !== userId) {
-      throw new Error('Unauthorized');
+      throw httpError('Unauthorized', 403);
     }
     return order;
   }
@@ -98,7 +137,7 @@ class OrderService {
   async cancelOrder(orderId, userId, userRole, reason) {
     const order = await this.getOrderById(orderId, userId, userRole);
     if (!['pending_payment', 'payment_escrowed'].includes(order.status)) {
-      throw new Error('Order cannot be cancelled at this stage');
+      throw httpError('Order cannot be cancelled at this stage', 409, { currentStatus: order.status });
     }
 
     // Release reserved stock
@@ -123,9 +162,26 @@ class OrderService {
 
   async confirmDelivery(orderId, buyerId) {
     const order = await Order.findById(orderId);
-    if (!order) throw new Error('Order not found');
-    if (order.buyer.toString() !== buyerId) throw new Error('Unauthorized');
-    if (order.status !== 'delivered') throw new Error('Order not yet delivered');
+    if (!order) throw httpError('Order not found', 404);
+    if (order.buyer.toString() !== buyerId) throw httpError('Unauthorized', 403);
+
+    if (order.status === 'completed') {
+      return order;
+    }
+
+    if (['cancelled', 'disputed'].includes(order.status)) {
+      throw httpError(`Cannot confirm delivery for a ${order.status} order`, 409, {
+        currentStatus: order.status,
+        expectedStatus: 'delivered',
+      });
+    }
+
+    if (order.status !== 'delivered') {
+      throw httpError('Order must be marked delivered before buyer confirmation', 409, {
+        currentStatus: order.status,
+        expectedStatus: 'delivered',
+      });
+    }
 
     order.status = 'completed';
     // Escrow will be auto-released by job, but we set escrowReleaseDate
@@ -137,12 +193,12 @@ class OrderService {
 
   async updateOrderStatus(orderId, userId, userRole, nextStatus) {
     const order = await Order.findById(orderId);
-    if (!order) throw new Error('Order not found');
+    if (!order) throw httpError('Order not found', 404);
 
     const isOwnerSeller = order.seller.toString() === userId;
     const isAdmin = userRole === 'admin';
     if (!isOwnerSeller && !isAdmin) {
-      throw new Error('Unauthorized');
+      throw httpError('Unauthorized', 403);
     }
 
     const allowedTransitions = {
@@ -159,7 +215,11 @@ class OrderService {
     const currentStatus = order.status;
     const allowedNext = allowedTransitions[currentStatus] || [];
     if (!allowedNext.includes(nextStatus)) {
-      throw new Error(`Invalid status transition from ${currentStatus} to ${nextStatus}`);
+      throw httpError(`Invalid status transition from ${currentStatus} to ${nextStatus}`, 409, {
+        currentStatus,
+        nextStatus,
+        allowedNext,
+      });
     }
 
     order.status = nextStatus;

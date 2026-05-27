@@ -19,7 +19,7 @@ exports.getPlans = async (req, res, next) => {
 };
 
 /**
- * Subscribe to a plan (V3 or V4)
+ * Subscribe to a plan
  * POST /api/v1/subscriptions/subscribe
  */
 exports.subscribe = async (req, res, next) => {
@@ -38,6 +38,22 @@ exports.subscribe = async (req, res, next) => {
       success: true,
       message: `Subscribed to ${subscription.plan} plan successfully`,
       data: subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get current user's effective entitlements
+ * GET /api/v1/subscriptions/entitlements
+ */
+exports.getMyEntitlements = async (req, res, next) => {
+  try {
+    const entitlements = await subscriptionService.getEntitlements(req.user.id);
+    res.status(200).json({
+      success: true,
+      data: entitlements,
     });
   } catch (error) {
     next(error);
@@ -83,8 +99,11 @@ exports.cancelSubscription = async (req, res, next) => {
  */
 exports.changePlan = async (req, res, next) => {
   try {
-    const { newPlanId } = req.body;
-    const subscription = await billingService.changePlan(req.user.id, newPlanId);
+    const { newPlanId, paymentCompleted, paymentReference } = req.body;
+    const subscription = await billingService.changePlan(req.user.id, newPlanId, {
+      paymentCompleted,
+      paymentReference,
+    });
     res.status(200).json({
       success: true,
       message: `Plan changed to ${subscription.plan}`,

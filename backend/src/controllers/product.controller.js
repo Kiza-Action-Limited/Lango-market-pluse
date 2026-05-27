@@ -1,12 +1,16 @@
-const Product = require('../models/product.model');
+const Product = require('../models/Product.model');
 const { validationResult } = require('express-validator');
 const planService = require('../services/subscription/plan.service');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary.config');
 
 const PLAN_PRODUCT_LIMITS = {
-  free: 5,
-  v3: 50,
+  free: 30,
+  v3: 30,
   v4: Number.MAX_SAFE_INTEGER,
+  solo: 30,
+  smart: Number.MAX_SAFE_INTEGER,
+  growth: Number.MAX_SAFE_INTEGER,
+  mizigo: 0,
 };
 
 const SELLER_ROLES = new Set(['seller', 'farmer']);
@@ -15,12 +19,12 @@ const getEffectivePlan = async (userId) => {
   try {
     const subscription = await planService.getUserSubscription(userId);
     if (subscription?.isActive) {
-      return subscription.plan;
+      return planService.normalizePlanId(subscription.plan);
     }
-    return 'free';
+    return 'solo';
   } catch (error) {
     console.error('Error getting effective plan:', error);
-    return 'free';
+    return 'solo';
   }
 };
 
@@ -49,9 +53,10 @@ exports.createProduct = async (req, res, next) => {
     const currentProductCount = await Product.countDocuments({ seller: req.user.id });
 
     if (currentProductCount >= productLimit) {
+      const readableLimit = Number.isFinite(productLimit) ? productLimit : 'unlimited';
       return res.status(403).json({
         success: false,
-        message: `You have reached your ${plan.toUpperCase()} plan product limit (${productLimit}). Upgrade your plan to add more products.`,
+        message: `You have reached your ${plan.toUpperCase()} plan product limit (${readableLimit}). Upgrade your plan to add more products.`,
         data: {
           currentPlan: plan,
           productLimit,
@@ -118,7 +123,7 @@ exports.createProduct = async (req, res, next) => {
         currentPlan: plan,
         productLimit,
         currentProductCount: currentProductCount + 1,
-        remainingSlots: Math.max(0, productLimit - (currentProductCount + 1)),
+        remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - (currentProductCount + 1)) : null,
       },
     });
   } catch (error) {
@@ -447,7 +452,8 @@ exports.getMyProducts = async (req, res, next) => {
     const totalProducts = await Product.countDocuments({ seller: req.user.id });
 
     const safeLimit = Math.min(requestedLimit, productLimit);
-    const skip = (page - 1) * safeLimit;
+    const normalizedLimit = Number.isFinite(safeLimit) ? safeLimit : requestedLimit;
+    const skip = (page - 1) * normalizedLimit;
     const maxVisibleProducts = Math.min(totalProducts, productLimit);
 
     if (skip >= maxVisibleProducts) {
@@ -456,22 +462,22 @@ exports.getMyProducts = async (req, res, next) => {
         data: [],
         pagination: {
           page,
-          limit: safeLimit,
+          limit: normalizedLimit,
           total: maxVisibleProducts,
-          pages: Math.ceil(maxVisibleProducts / safeLimit) || 1,
+          pages: Math.ceil(maxVisibleProducts / normalizedLimit) || 1,
         },
         planUsage: {
           currentPlan: plan,
           productLimit,
           totalProducts,
           visibleProducts: maxVisibleProducts,
-          remainingSlots: Math.max(0, productLimit - totalProducts),
+          remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - totalProducts) : null,
         },
       });
     }
 
     const remainingVisible = maxVisibleProducts - skip;
-    const fetchLimit = Math.min(safeLimit, remainingVisible);
+    const fetchLimit = Math.min(normalizedLimit, remainingVisible);
 
     const products = await Product.find({ seller: req.user.id })
       .sort({ createdAt: -1 })
@@ -483,16 +489,16 @@ exports.getMyProducts = async (req, res, next) => {
       data: products,
       pagination: {
         page,
-        limit: safeLimit,
+        limit: normalizedLimit,
         total: maxVisibleProducts,
-        pages: Math.ceil(maxVisibleProducts / safeLimit) || 1,
+        pages: Math.ceil(maxVisibleProducts / normalizedLimit) || 1,
       },
       planUsage: {
         currentPlan: plan,
         productLimit,
         totalProducts,
         visibleProducts: maxVisibleProducts,
-        remainingSlots: Math.max(0, productLimit - totalProducts),
+        remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - totalProducts) : null,
       },
     });
   } catch (error) {

@@ -1,123 +1,190 @@
+'use strict';
+
+/**
+ * Lango MarketPulse — Logistics Routes
+ * Kakuma–Kitale Corridor | Plan 4 "Mizigo"
+ *
+ * Base path: /api/v1/logistics
+ *
+ * Role access:
+ *  admin      — full access
+ *  logistics  — driver/fleet operations (own records + job acceptance)
+ *  wholesaler — read own shipments, create logistics for their orders
+ *  retailer   — read own inbound shipments, confirm QR delivery
+ *  farmer     — read own outbound shipments
+ *  manufacturer — read own outbound shipments
+ */
+
 const express    = require('express');
-const router     = express.Router();
-const { body, param } = require('express-validator');
-
-const logisticsController = require('../../controllers/logistics.controller');
+const { body, param, query } = require('express-validator');
+const ctrl       = require('../../controllers/logistics.controller');
 const { protect, authorize } = require('../../middleware/auth');
+const { validate }   = require('../../middleware/validation');
 
-// All routes require authentication
+const router = express.Router();
+
+// All routes require a valid JWT
 router.use(protect);
 
-// ─── Create ───────────────────────────────────────────────────────────────────
-router.post('/',
+// ─────────────────────────────────────────────────────────────────────────────
+// COLLECTION ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
+
+router
+  .route('/')
+  .post(
+    authorize('admin', 'wholesaler', 'manufacturer', 'farmer'),
+    [
+      body('orderId').isMongoId().withMessage('Valid order ID required.'),
+      body('carrier').optional().isIn(['solo_owner_operator', 'fleet_managed', 'third_party', 'other']),
+      body('cargoType').optional().isString().trim(),
+      body('weight').optional().isFloat({ min: 0 }),
+      body('weightUnit').optional().isIn(['kg', 'g', 'lb', 'tons']),
+      body('isExpress').optional().isBoolean(),
+      body('shippingAddress.county').optional().isString().trim(),
+      body('shippingAddress.town').notEmpty().withMessage('Delivery town is required.'),
+    ],
+    validate,
+    ctrl.createLogistics
+  )
+  .get(
+    authorize('admin', 'logistics'),
+    [
+      query('page').optional().isInt({ min: 1 }),
+      query('limit').optional().isInt({ min: 1, max: 100 }),
+      query('status').optional().isString(),
+    ],
+    validate,
+    ctrl.getAllLogistics
+  );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATS (must be defined before /:id to avoid route conflict)
+// ─────────────────────────────────────────────────────────────────────────────
+
+router.get(
+  '/stats/delivery',
   authorize('admin', 'logistics'),
   [
-    body('orderId').isMongoId().withMessage('Valid order ID required'),
-    body('driverType').optional().isIn(['owner_operator', 'hired_driver']),
-    body('shippingAddress').optional().isObject(),
-    body('escrowAmount').optional().isFloat({ min: 0 }),
-    body('commissionRate').optional().isFloat({ min: 0.05, max: 0.10 })
+    query('startDate').optional().isISO8601(),
+    query('endDate').optional().isISO8601(),
   ],
-  logisticsController.createLogistics
+  validate,
+  ctrl.getDeliveryStats
 );
 
-// ─── 3-Way QR Handshake ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// BULK UPDATE (admin only)
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Step 1 — Driver scans Seller's QR at pickup
- * Role: driver (logistics)
- */
-router.post('/:id/scan/pickup',
-  authorize('logistics', 'admin'),
+router.post(
+  '/bulk-update',
+  authorize('admin'),
   [
-    param('id').isMongoId(),
-    body('qrPayload').notEmpty().withMessage('QR payload required'),
-    body('lat').optional().isFloat(),
-    body('lng').optional().isFloat()
+    body('logisticsIds').isArray({ min: 1 }).withMessage('At least one logistics ID required.'),
+    body('logisticsIds.*').isMongoId(),
+    body('status').isIn([
+      'pending', 'driver_assigned', 'en_route_to_pickup',
+      'picked_up', 'in_transit', 'out_for_delivery',
+      'delivered', 'failed',
+    ]),
+    body('notes').optional().isString().trim(),
   ],
-  logisticsController.scanPickup
+  validate,
+  ctrl.bulkUpdateStatus
 );
 
-/**
- * Step 2 — Buyer scans Driver's QR on delivery
- * Role: buyer (user)
- */
-router.post('/:id/scan/delivery',
-  authorize('user', 'admin'),
-  [
+// ─────────────────────────────────────────────────────────────────────────────
+// SINGLE RECORD ROUTES
+// ─────────────────────────────────────────────────────────────────────────────
+
+router
+  .route('/:id')
+  .get(
     param('id').isMongoId(),
-    body('qrPayload').notEmpty().withMessage('QR payload required'),
-    body('lat').optional().isFloat(),
-    body('lng').optional().isFloat()
-  ],
-  logisticsController.scanDelivery
+    validate,
+    ctrl.getLogisticsById
+  );
+
+router.get(
+  '/order/:orderId',
+  param('orderId').isMongoId(),
+  validate,
+  ctrl.getLogisticsByOrder
 );
 
-/**
- * Step 3 — Release escrow
- * Called by cron job (auto), buyer early confirm, or admin
- */
-router.post('/:id/escrow/release',
-  authorize('admin', 'user'),
-  [
-    param('id').isMongoId(),
-    body('triggeredBy').optional().isIn(['buyer_confirm', 'auto', 'admin'])
-  ],
-  logisticsController.releaseEscrow
-);
+// ─────────────────────────────────────────────────────────────────────────────
+// STATUS UPDATE
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Open a dispute — freezes escrow auto-release
- */
-router.post('/:id/dispute',
-  authorize('user', 'seller', 'admin'),
-  [param('id').isMongoId()],
-  logisticsController.openDispute
-);
-
-// ─── Read ─────────────────────────────────────────────────────────────────────
-router.get('/',
+router.put(
+  '/:id/status',
   authorize('admin', 'logistics'),
-  logisticsController.getAllLogistics
+  [
+    param('id').isMongoId(),
+    body('status').isIn([
+      'pending', 'driver_assigned', 'en_route_to_pickup',
+      'picked_up', 'in_transit', 'out_for_delivery',
+      'delivered', 'failed', 'returned', 'disputed',
+    ]).withMessage('Invalid status value.'),
+    body('location').optional().isString().trim(),
+    body('notes').optional().isString().trim(),
+    body('gpsCoords.lat').optional().isFloat(),
+    body('gpsCoords.lng').optional().isFloat(),
+  ],
+  validate,
+  ctrl.updateLogisticsStatus
 );
 
-router.get('/stats/delivery',
-  authorize('admin', 'logistics'),
-  logisticsController.getDeliveryStats
-);
+// ─────────────────────────────────────────────────────────────────────────────
+// DRIVER ASSIGNMENT
+// ─────────────────────────────────────────────────────────────────────────────
 
-router.get('/:id',
-  [param('id').isMongoId()],
-  logisticsController.getLogisticsById
-);
-
-router.get('/order/:orderId',
-  [param('orderId').isMongoId()],
-  logisticsController.getLogisticsByOrder
-);
-
-// ─── Driver Assignment ────────────────────────────────────────────────────────
-router.put('/:id/assign-driver',
+router.put(
+  '/:id/assign-driver',
   authorize('admin', 'logistics'),
   [
     param('id').isMongoId(),
     body('driverId').optional().isMongoId(),
-    body('driverName').optional().isString(),
-    body('driverPhone').optional().isString(),
-    body('driverType').optional().isIn(['owner_operator', 'hired_driver'])
+    body('driverName').optional().isString().trim(),
+    body('driverPhone').optional().isString().trim(),
   ],
-  logisticsController.assignDriver
+  validate,
+  ctrl.assignDriver
 );
 
-// ─── Bulk Update ──────────────────────────────────────────────────────────────
-router.post('/bulk-update',
-  authorize('admin'),
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACKING INFO UPDATE
+// ─────────────────────────────────────────────────────────────────────────────
+
+router.put(
+  '/:id/tracking',
+  authorize('admin', 'logistics'),
   [
-    body('logisticsIds').isArray().withMessage('logisticsIds must be an array'),
-    body('status').isIn(['pending', 'in_transit', 'delivered', 'failed']),
-    body('notes').optional().isString()
+    param('id').isMongoId(),
+    body('trackingNumber').optional().isString().trim(),
+    body('carrier').optional().isString().trim(),
+    body('estimatedDelivery').optional().isISO8601().withMessage('estimatedDelivery must be a valid ISO 8601 date.'),
   ],
-  logisticsController.bulkUpdateStatus
+  validate,
+  ctrl.updateTracking
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QR HANDSHAKE
+// ─────────────────────────────────────────────────────────────────────────────
+
+router.post(
+  '/:id/qr-scan',
+  authorize('admin', 'logistics', 'farmer', 'wholesaler', 'manufacturer', 'retailer'),
+  [
+    param('id').isMongoId(),
+    body('step').isIn(['pickup', 'delivery']).withMessage('step must be "pickup" or "delivery".'),
+    body('gpsCoords.lat').optional().isFloat({ min: -90, max: 90 }),
+    body('gpsCoords.lng').optional().isFloat({ min: -180, max: 180 }),
+  ],
+  validate,
+  ctrl.processQrScan
 );
 
 module.exports = router;

@@ -1,6 +1,7 @@
 const mpesaService = require('../services/payment/mpesa.service');
 const walletService = require('../services/payment/wallet.service');
 const ledgerService = require('../services/payment/ledger.service');
+const billingService = require('../services/subscription/billing.service');
 const { validationResult } = require('express-validator');
 
 /**
@@ -105,6 +106,35 @@ exports.withdrawToMpesa = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'Withdrawal initiated',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Record an M-Pesa SMS credit top-up after payment confirmation
+ * POST /api/v1/payments/sms-credits/topup
+ */
+exports.topUpSmsCredits = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { credits, amount, paymentReference, paymentCompleted } = req.body;
+    const result = await billingService.topUpSmsCredits(req.user.id, {
+      credits,
+      amount,
+      paymentReference,
+      paymentCompleted,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'SMS credits topped up successfully',
       data: result,
     });
   } catch (error) {
