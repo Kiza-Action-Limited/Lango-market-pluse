@@ -19,13 +19,20 @@ const express    = require('express');
 const { body, param, query } = require('express-validator');
 const ctrl       = require('../../controllers/logistics.controller');
 const { protect, authorize } = require('../../middleware/auth');
+<<<<<<< HEAD
 const { validate }   = require('../../middleware/validation');
+=======
+const subscriptionGate = require('../../middleware/subscriptionGate');
+const requireApprovedLogistics = require('../../middleware/requireApprovedLogistics');
+const { uploadDocuments, handleUploadError } = require('../../middleware/upload');
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 
 const router = express.Router();
 
 // All routes require a valid JWT
 router.use(protect);
 
+<<<<<<< HEAD
 // ─────────────────────────────────────────────────────────────────────────────
 // COLLECTION ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,10 +71,48 @@ router
 
 router.get(
   '/stats/delivery',
-  authorize('admin', 'logistics'),
+=======
+// ─── Logistics Application Flow ───────────────────────────────────────────────
+router.post(
+  '/apply',
+  authorize('buyer', 'seller', 'farmer', 'logistics', 'admin'),
+  uploadDocuments.fields([
+    { name: 'nationalIdImage', maxCount: 1 },
+    { name: 'businessPermitImage', maxCount: 1 },
+  ]),
+  handleUploadError,
   [
+    body('driverMode').optional().isIn(['owner_operator', 'hired_driver']),
+    body('vehiclePlate').notEmpty().withMessage('vehiclePlate is required'),
+    body('cargoCapacityKg').isFloat({ min: 1 }).withMessage('cargoCapacityKg must be greater than 0'),
+    body('documentType').isIn(['national_id', 'business_permit']).withMessage('Invalid documentType'),
+    body('documentNumber').notEmpty().withMessage('documentNumber is required'),
+    body('fleetOwnerId').optional().isMongoId(),
+  ],
+  logisticsController.applyAsLogistics
+);
+
+router.get('/me/application', logisticsController.getMyLogisticsApplication);
+
+// ─── Create ───────────────────────────────────────────────────────────────────
+router.post('/',
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
+  authorize('admin', 'logistics'),
+  requireApprovedLogistics,
+  subscriptionGate(['growth', 'mizigo']),
+  [
+<<<<<<< HEAD
     query('startDate').optional().isISO8601(),
     query('endDate').optional().isISO8601(),
+=======
+    body('orderId').isMongoId().withMessage('Valid order ID required'),
+    body('driverType').optional().isIn(['owner_operator', 'hired_driver']),
+    body('driverId').optional().isMongoId(),
+    body('fleetOwnerId').optional().isMongoId(),
+    body('shippingAddress').optional().isObject(),
+    body('escrowAmount').optional().isFloat({ min: 0 }),
+    body('commissionRate').optional().isFloat({ min: 0.05, max: 0.10 })
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
   ],
   validate,
   ctrl.getDeliveryStats
@@ -77,9 +122,20 @@ router.get(
 // BULK UPDATE (admin only)
 // ─────────────────────────────────────────────────────────────────────────────
 
+<<<<<<< HEAD
 router.post(
   '/bulk-update',
   authorize('admin'),
+=======
+/**
+ * Step 1 — Driver scans Seller's QR at pickup
+ * Role: driver (logistics)
+ */
+router.post('/:id/scan/pickup',
+  authorize('logistics', 'admin'),
+  requireApprovedLogistics,
+  subscriptionGate('mizigo'),
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
   [
     body('logisticsIds').isArray({ min: 1 }).withMessage('At least one logistics ID required.'),
     body('logisticsIds.*').isMongoId(),
@@ -94,6 +150,7 @@ router.post(
   ctrl.bulkUpdateStatus
 );
 
+<<<<<<< HEAD
 // ─────────────────────────────────────────────────────────────────────────────
 // SINGLE RECORD ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +158,22 @@ router.post(
 router
   .route('/:id')
   .get(
+=======
+router.put('/:id/accept',
+  authorize('logistics'),
+  requireApprovedLogistics,
+  [param('id').isMongoId()],
+  logisticsController.acceptLogisticsOrder
+);
+
+/**
+ * Step 2 — Buyer scans Driver's QR on delivery
+ * Role: buyer (user)
+ */
+router.post('/:id/scan/delivery',
+  authorize('buyer', 'seller', 'farmer', 'admin'),
+  [
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
     param('id').isMongoId(),
     validate,
     ctrl.getLogisticsById
@@ -113,6 +186,7 @@ router.get(
   ctrl.getLogisticsByOrder
 );
 
+<<<<<<< HEAD
 // ─────────────────────────────────────────────────────────────────────────────
 // STATUS UPDATE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,12 +216,69 @@ router.put(
 
 router.put(
   '/:id/assign-driver',
+=======
+/**
+ * Step 3 — Release escrow
+ * Called by cron job (auto), buyer early confirm, or admin
+ */
+router.post('/:id/escrow/release',
+  authorize('admin', 'buyer', 'seller', 'farmer'),
+  [
+    param('id').isMongoId(),
+    body('triggeredBy').optional().isIn(['buyer_confirm', 'auto', 'admin'])
+  ],
+  logisticsController.releaseEscrow
+);
+
+/**
+ * Open a dispute — freezes escrow auto-release
+ */
+router.post('/:id/dispute',
+  authorize('buyer', 'seller', 'farmer', 'admin'),
+  [param('id').isMongoId()],
+  logisticsController.openDispute
+);
+
+// ─── Read ─────────────────────────────────────────────────────────────────────
+router.get('/',
   authorize('admin', 'logistics'),
+  subscriptionGate(['growth', 'mizigo']),
+  logisticsController.getAllLogistics
+);
+
+router.get('/stats/delivery',
+  authorize('admin', 'logistics'),
+  subscriptionGate(['growth', 'mizigo']),
+  logisticsController.getDeliveryStats
+);
+
+router.get('/order/:orderId',
+  [param('orderId').isMongoId()],
+  logisticsController.getLogisticsByOrder
+);
+
+router.get('/:id',
+  [param('id').isMongoId()],
+  logisticsController.getLogisticsById
+);
+
+// ─── Driver Assignment ────────────────────────────────────────────────────────
+router.put('/:id/assign-driver',
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
+  authorize('admin', 'logistics'),
+  subscriptionGate('mizigo'),
   [
     param('id').isMongoId(),
     body('driverId').optional().isMongoId(),
+<<<<<<< HEAD
     body('driverName').optional().isString().trim(),
     body('driverPhone').optional().isString().trim(),
+=======
+    body('driverName').optional().isString(),
+    body('driverPhone').optional().isString(),
+    body('driverType').optional().isIn(['owner_operator', 'hired_driver']),
+    body('fleetOwnerId').optional().isMongoId()
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
   ],
   validate,
   ctrl.assignDriver

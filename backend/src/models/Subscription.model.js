@@ -38,7 +38,7 @@ const SubscriptionSchema = new mongoose.Schema(
     },
     endDate: {
       type: Date,
-      required: true,
+      default: null,
     },
     autoRenew: {
       type: Boolean,
@@ -64,7 +64,25 @@ const SubscriptionSchema = new mongoose.Schema(
     features: {
       type: Map,
       of: Boolean,
+<<<<<<< HEAD
       default: {},
+=======
+      default: {
+        qrAutoSync: true,
+        basicCfoDashboard: true,
+        crmCapture: true,
+        activeSmsCampaigns: false,
+        restockAlerts: false,
+        regionalGuardian: false,
+        netProfitGauge: false,
+        staffRbac: false,
+        billGuardian: false,
+        assetTracking: false,
+        dailyBurnTracker: false,
+        fullAuditPdf: false,
+        checkCredits: false,
+      },
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
     },
   },
   {
@@ -74,7 +92,9 @@ const SubscriptionSchema = new mongoose.Schema(
 
 // Virtual to check if active
 SubscriptionSchema.virtual('isActive').get(function () {
-  return this.status === 'active' && new Date() < this.endDate;
+  if (this.status !== 'active') return false;
+  if (!this.endDate) return true;
+  return new Date() < this.endDate;
 });
 
 SubscriptionSchema.virtual('smsCreditBalance').get(function () {

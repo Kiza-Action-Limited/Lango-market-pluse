@@ -2,7 +2,7 @@ import React from 'react';
 import { Link, Navigate, Outlet } from 'react-router-dom';
 import { FaCrown, FaLock } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
-import { FEATURE_LABELS } from '../config/subscriptionPlans';
+import { FEATURE_LABELS, FEATURE_TOOLTIPS, getUpgradePlanForFeature } from '../config/subscriptionPlans';
 
 const SubscriptionGate = ({ requiredFeatures = [], requireAny = false, children }) => {
   const { isAuthenticated, loading, hasFeature, activePlan } = useAuth();
@@ -31,6 +31,10 @@ const SubscriptionGate = ({ requiredFeatures = [], requireAny = false, children 
   }
 
   const missingFeatures = requiredFeatures.filter((featureKey) => !hasFeature(featureKey));
+  const recommendedPlans = missingFeatures
+    .map((featureKey) => getUpgradePlanForFeature(featureKey))
+    .filter(Boolean);
+  const recommendedPlanNames = [...new Set(recommendedPlans.map((plan) => plan.name))];
 
   return (
     <div className="bg-[#F9FAFB] min-h-[60vh] py-10 px-4">
@@ -52,11 +56,16 @@ const SubscriptionGate = ({ requiredFeatures = [], requireAny = false, children 
           <p className="text-sm font-medium text-[#111827] mb-2">Missing capabilities</p>
           <ul className="space-y-2">
             {missingFeatures.map((featureKey) => (
-              <li key={featureKey} className="text-sm text-[#374151]">
+              <li key={featureKey} className="text-sm text-[#374151]" title={FEATURE_TOOLTIPS[featureKey] || ''}>
                 - {FEATURE_LABELS[featureKey] || featureKey}
               </li>
             ))}
           </ul>
+          {recommendedPlanNames.length > 0 && (
+            <p className="text-xs text-[#6B7280] mt-3">
+              Suggested upgrade: <span className="font-semibold text-[#111827]">{recommendedPlanNames.join(' or ')}</span>
+            </p>
+          )}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-3">

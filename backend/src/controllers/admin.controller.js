@@ -190,6 +190,93 @@ exports.updateUser = async (req, res, next) => {
 };
 
 /**
+ * Get logistics applications queue
+ * GET /api/v1/admin/logistics/applications
+ */
+exports.getLogisticsApplications = async (req, res, next) => {
+  try {
+    const { status = 'pending', page = 1, limit = 20 } = req.query;
+    const filter = { role: 'logistics' };
+
+    if (status && status !== 'all') {
+      filter['logisticsProfile.verificationStatus'] = status;
+    }
+
+    const applications = await User.find(filter)
+      .select('fullName email phone logisticsProfile createdAt updatedAt')
+      .sort({ 'logisticsProfile.applicationSubmittedAt': -1, createdAt: -1 })
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit));
+
+    const total = await User.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      data: applications,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit)),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Review logistics application (approve/reject)
+ * PUT /api/v1/admin/logistics/applications/:userId/review
+ */
+exports.reviewLogisticsApplication = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { action, notes = '' } = req.body;
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid action. Use "approve" or "reject".',
+      });
+    }
+
+    const candidate = await User.findById(userId);
+    if (!candidate) {
+      return res.status(404).json({ success: false, message: 'Logistics applicant not found' });
+    }
+
+    const nextStatus = action === 'approve' ? 'verified' : 'rejected';
+    candidate.role = 'logistics';
+    candidate.businessType = 'logistics';
+    candidate.subscriptionTier = 'mizigo';
+    candidate.logisticsProfile = {
+      ...(candidate.logisticsProfile?.toObject?.() || candidate.logisticsProfile || {}),
+      verificationStatus: nextStatus,
+      reviewedAt: new Date(),
+      reviewedBy: req.user._id,
+      reviewNotes: notes,
+      verifiedAt: action === 'approve' ? new Date() : null,
+    };
+
+    await candidate.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Application ${action}d successfully.`,
+      data: {
+        userId: candidate._id,
+        verificationStatus: candidate.logisticsProfile.verificationStatus,
+        reviewedAt: candidate.logisticsProfile.reviewedAt,
+        notes: candidate.logisticsProfile.reviewNotes,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Get comprehensive orders with filters
  * GET /api/v1/admin/orders
  */

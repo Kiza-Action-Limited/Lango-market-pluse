@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FaCheckCircle, FaChevronDown, FaChevronUp, FaCrown, FaLock, FaSyncAlt } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
-import { FEATURE_LABELS, MIZIGO_PLANS, TRADER_PLANS } from '../config/subscriptionPlans';
+import { FEATURE_LABELS, FEATURE_TOOLTIPS, MIZIGO_PLANS, PLAN_IDS, TRADER_PLANS } from '../config/subscriptionPlans';
 import { hasPremiumVerification } from '../utils/premiumSellerProfile';
 
-const PlanCard = ({ plan, isActive, onActivate, featureLimit, isExpanded, onToggleExpand, isHighlighted }) => (
+const PlanCard = ({ plan, isActive, onActivate, featureLimit, isExpanded, onToggleExpand, isHighlighted, lockTooltip }) => (
   <div
     id={`plan-card-${plan.id}`}
     className={`rounded-xl border p-5 shadow-sm transition ${
@@ -17,7 +17,13 @@ const PlanCard = ({ plan, isActive, onActivate, featureLimit, isExpanded, onTogg
         <h3 className="text-xl font-semibold text-[#111827]">{plan.name}</h3>
         <p className="text-sm text-[#6B7280]">{plan.differentiator}</p>
       </div>
-      {isActive ? <FaCrown className="text-[#F97316] text-xl" /> : <FaLock className="text-[#9CA3AF] text-lg" />}
+      {isActive ? (
+        <FaCrown className="text-[#F97316] text-xl" />
+      ) : (
+        <span title={lockTooltip}>
+          <FaLock className="text-[#9CA3AF] text-lg" />
+        </span>
+      )}
     </div>
 
     <div className="mt-4">
@@ -56,13 +62,14 @@ const PlanCard = ({ plan, isActive, onActivate, featureLimit, isExpanded, onTogg
       type="button"
       onClick={onActivate}
       disabled={isActive}
+      title={isActive ? 'Already active' : lockTooltip}
       className={`w-full mt-5 px-4 py-2 rounded-lg font-medium transition ${
         isActive
           ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
           : 'bg-[#F97316] text-white hover:bg-[#EA580C]'
       }`}
     >
-      {isActive ? 'Active Plan' : 'Activate in UI'}
+      {isActive ? 'Active Plan' : 'Choose Plan'}
     </button>
   </div>
 );
@@ -104,8 +111,8 @@ const SubscriptionPlans = () => {
   };
 
   const handleActivatePlan = (plan) => {
-    const isPremiumPlan = !plan.id.endsWith('_solo');
-    if (!isPremiumPlan) {
+    const isPremiumTraderPlan = plan.id === PLAN_IDS.SMART || plan.id === PLAN_IDS.GROWTH;
+    if (!isPremiumTraderPlan) {
       switchPlan(plan.id);
       return;
     }
@@ -158,6 +165,7 @@ const SubscriptionPlans = () => {
                 isExpanded={expandedPlanId === plan.id}
                 onToggleExpand={handleToggleExpand}
                 isHighlighted={highlightedPlanId === plan.id}
+                lockTooltip={plan.id === PLAN_IDS.SOLO ? 'Starter plan with 30 SKU cap' : FEATURE_TOOLTIPS[plan.featureKeys[0]] || 'Upgrade to unlock'}
               />
             ))}
           </div>
@@ -176,6 +184,7 @@ const SubscriptionPlans = () => {
                 isExpanded={expandedPlanId === plan.id}
                 onToggleExpand={handleToggleExpand}
                 isHighlighted={highlightedPlanId === plan.id}
+                lockTooltip="Commission-only logistics plan with QR escrow release"
               />
             ))}
           </div>

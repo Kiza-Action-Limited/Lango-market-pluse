@@ -1,6 +1,7 @@
 const { Queue, Worker } = require('bull');
 const { redisClient } = require('../config/redis');
 const Order = require('../models/Order.model');
+const Logistics = require('../models/Logistics.model');
 const escrowService = require('../services/order/escrow.service');
 const logger = require('../utils/logger');
 
@@ -39,6 +40,12 @@ const catchupWorker = new Worker('escrow', async (job) => {
     for (const order of orders) {
       logger.info(`Catchup releasing escrow for order ${order._id}`);
       await escrowService.releasePayment(order._id, { forceRelease: false });
+    }
+
+    const pendingLogistics = await Logistics.findPendingAutoReleases();
+    for (const shipment of pendingLogistics) {
+      logger.info(`Catchup releasing logistics escrow for shipment ${shipment._id}`);
+      await shipment.releaseEscrow('auto');
     }
   }
 }, { connection: redisClient });

@@ -4,13 +4,12 @@ import { authService } from '../services/authService';
 import { handleApiError } from '../utils/errorHandler';
 import toast from 'react-hot-toast';
 import {
-  clearStoredPlanOverride,
   getPlanById,
   getPlansByTrack,
   hasFeatureAccess,
   resolveActivePlan,
-  setStoredPlanOverride,
 } from '../utils/subscription';
+import { subscriptionService } from '../services/subscriptionService';
 
 const AuthContext = createContext();
 
@@ -105,20 +104,36 @@ export const AuthProvider = ({ children }) => {
     setUser(prev => ({ ...prev, ...updatedData }));
   };
 
-  const switchPlan = (nextPlanId) => {
+  const switchPlan = async (nextPlanId, paymentMeta = {}) => {
     const nextPlan = getPlanById(nextPlanId);
-    if (!nextPlan || !user) return;
-    setStoredPlanOverride(user, nextPlanId);
-    setActivePlan(nextPlan);
-    toast.success(`Active plan changed to ${nextPlan.name}`);
+    if (!nextPlan || !user) return { success: false, message: 'Plan not found' };
+
+    try {
+      await subscriptionService.subscribe({
+        planId: nextPlan.id,
+        paymentMethod: paymentMeta.paymentMethod || 'mpesa',
+        paymentCompleted: paymentMeta.paymentCompleted ?? true,
+        paymentReference: paymentMeta.paymentReference,
+      });
+
+      const refreshedUser = await authService.getCurrentUser();
+      setUser(refreshedUser);
+      setActivePlan(resolveActivePlan(refreshedUser));
+      toast.success(`Plan changed to ${nextPlan.name}`);
+      return { success: true, plan: nextPlan };
+    } catch (error) {
+      const message = handleApiError(error)?.message || 'Failed to update subscription plan';
+      toast.error(message);
+      return { success: false, message };
+    }
   };
 
   const resetPlanToDefault = () => {
-    if (!user) return;
-    clearStoredPlanOverride(user);
+    if (!user) return { success: false };
     const resolved = resolveActivePlan(user);
     setActivePlan(resolved);
     toast.success('Plan reset to your default tier');
+    return { success: true };
   };
 
   const hasFeature = (featureKey) => hasFeatureAccess(activePlan, featureKey);

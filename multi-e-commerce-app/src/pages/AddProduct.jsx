@@ -645,6 +645,7 @@ const AddProduct = () => {
             <button
               type="submit"
               disabled={loading || (planUsage && planUsage.remainingSlots === 0 && !id)}
+              title={planUsage && planUsage.remainingSlots === 0 && !id ? 'Plan limit reached. Upgrade to Smart or Growth for unlimited SKUs.' : ''}
               className="px-8 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
             >
               {loading ? (

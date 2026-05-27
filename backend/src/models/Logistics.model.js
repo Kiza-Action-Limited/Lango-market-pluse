@@ -13,6 +13,8 @@
  */
 
 const mongoose = require('mongoose');
+const User = require('./User.model');
+const Transaction = require('./Transaction.model');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -46,6 +48,7 @@ const DIM_UNITS     = Object.freeze(['cm', 'in']);
 // SUB-SCHEMAS
 // ─────────────────────────────────────────────────────────────────────────────
 
+<<<<<<< HEAD
 /**
  * A single entry in the immutable tracking history log.
  * Every status change appends a new entry; entries are never mutated.
@@ -58,6 +61,75 @@ const trackingEventSchema = new mongoose.Schema(
     gpsCoords : {
       lat : { type: Number },
       lng : { type: Number },
+=======
+  // ── Status ──────────────────────────────────────────────────────────────
+  status: {
+    type: String,
+    enum: ['pending', 'in_transit', 'delivered', 'failed', 'returned', 'disputed'],
+    default: 'pending',
+    required: true,
+    index: true
+  },
+  currentLocation: { type: String, trim: true, default: 'Warehouse' },
+  estimatedDelivery: { type: Date },
+  actualDelivery: { type: Date },
+
+  // ── Driver ──────────────────────────────────────────────────────────────
+  /**
+   * driverType:
+   *   'owner_operator' – solo driver who owns their vehicle
+   *   'hired_driver'   – works under a fleet / company
+   */
+  driverType: {
+    type: String,
+    enum: ['owner_operator', 'hired_driver'],
+    required: true,
+    default: 'owner_operator'
+  },
+  driver: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  driverName: { type: String, trim: true },
+  driverPhone: { type: String, trim: true },
+  fleet: { type: mongoose.Schema.Types.ObjectId, ref: 'Fleet' }, // only for hired_driver
+  fleetOwner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  payoutRecipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  payoutRecipientType: {
+    type: String,
+    enum: ['driver', 'fleet_owner'],
+    default: 'driver'
+  },
+
+  // ── 3-Way QR Handshake ──────────────────────────────────────────────────
+  /**
+   * Step 1 – Driver scans Seller's QR  → status becomes IN_TRANSIT
+   * Step 2 – Buyer  scans Driver's QR  → status becomes DELIVERED, escrow released
+   * Step 3 – AutoRelease after 72 hrs  → funds released if no dispute
+   */
+  sellerQrCode: { type: String, trim: true },   // QR payload shown to driver at pickup
+  driverQrCode: { type: String, trim: true },   // QR payload shown to buyer at delivery
+
+  step1_pickupScan: qrScanSchema,    // Driver scans Seller QR
+  step2_deliveryScan: qrScanSchema,  // Buyer  scans Driver QR
+  step3_autoRelease: {
+    scheduledAt: { type: Date },     // Set when step2 completes (now + 72h)
+    releasedAt:  { type: Date },     // Populated when actually released
+    triggeredBy: { type: String, enum: ['buyer_confirm', 'auto', 'admin'], default: 'auto' }
+  },
+
+  // ── Escrow / Payment ────────────────────────────────────────────────────
+  escrow: {
+    provider: { type: String, enum: ['mpesa', 'bank', 'cash'], default: 'mpesa' },
+    reference: { type: String, trim: true },
+    totalAmount: { type: Number, min: 0, default: 0 },
+    platformCommissionRate: { type: Number, min: 0, max: 1, default: 0.075 }, // 5–10%, stored as decimal
+    platformCommission: { type: Number, min: 0, default: 0 },
+    sellerPayout: { type: Number, min: 0, default: 0 },
+    driverPayout: { type: Number, min: 0, default: 0 },
+    sinkingFundDeduction: { type: Number, min: 0, default: 0 }, // 10% of driverPayout
+    status: {
+      type: String,
+      enum: ['holding', 'released', 'disputed', 'refunded'],
+      default: 'holding'
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
     },
     updatedBy : { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     timestamp : { type: Date, default: Date.now },
@@ -292,6 +364,151 @@ logisticsSchema.methods.updateStatus = async function (status, opts = {}) {
     throw new Error(`Invalid logistics status: "${status}"`);
   }
 
+<<<<<<< HEAD
+=======
+  this.step1_pickupScan = {
+    scannedBy,
+    scannedAt: new Date(),
+    gpsCoordinates: { lat, lng },
+    ipAddress,
+    verified: true
+  };
+
+  await this.updateStatus('in_transit', null, 'Driver scanned seller QR at pickup', scannedBy);
+
+  // Generate driver's own QR for the buyer scan
+  if (!this.driverQrCode) {
+    this.driverQrCode = _generateQrPayload('DRV', this._id);
+  }
+
+  await this.save();
+  return this;
+};
+
+/**
+ * Step 2 — Buyer scans Driver's QR code on delivery.
+ * Marks shipment DELIVERED, calculates payouts, schedules 72-hr auto-release.
+ */
+logisticsSchema.methods.recordDeliveryScan = async function ({ scannedBy, lat, lng, ipAddress }) {
+  if (this.status !== 'in_transit') {
+    throw new Error(`Cannot record delivery scan: current status is "${this.status}"`);
+  }
+
+  this.step2_deliveryScan = {
+    scannedBy,
+    scannedAt: new Date(),
+    gpsCoordinates: { lat, lng },
+    ipAddress,
+    verified: true
+  };
+
+  this.actualDelivery = new Date();
+
+  // Schedule 72-hour auto-release
+  const autoReleaseAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+  this.step3_autoRelease.scheduledAt = autoReleaseAt;
+
+  // Calculate escrow splits
+  if (!this.payoutRecipient) {
+    if (this.driverType === 'hired_driver' && this.fleetOwner) {
+      this.payoutRecipient = this.fleetOwner;
+      this.payoutRecipientType = 'fleet_owner';
+    } else if (this.driver) {
+      this.payoutRecipient = this.driver;
+      this.payoutRecipientType = 'driver';
+    }
+  }
+
+  _calculatePayouts(this);
+
+  await this.updateStatus('delivered', null, 'Buyer scanned driver QR on delivery', scannedBy);
+  await this.save();
+  return this;
+};
+
+/**
+ * Step 3 — Release escrow funds.
+ * Called by a scheduled job after 72 hrs, or earlier by buyer confirmation / admin.
+ */
+logisticsSchema.methods.releaseEscrow = async function (triggeredBy = 'auto') {
+  if (this.escrow.status !== 'holding') {
+    throw new Error(`Escrow already in state "${this.escrow.status}"`);
+  }
+  if (this.status !== 'delivered') {
+    throw new Error('Cannot release escrow: delivery not confirmed');
+  }
+  if (this.escrow.disputeOpenedAt) {
+    throw new Error('Cannot auto-release: a dispute is open');
+  }
+  if (!this.payoutRecipient) {
+    throw new Error('Cannot release escrow: payout recipient is not configured');
+  }
+
+  const recipient = await User.findById(this.payoutRecipient);
+  if (!recipient) {
+    throw new Error('Cannot release escrow: payout recipient not found');
+  }
+
+  this.escrow.status = 'released';
+  this.escrow.releasedAt = new Date();
+  this.step3_autoRelease.releasedAt = new Date();
+  this.step3_autoRelease.triggeredBy = triggeredBy;
+
+  const payoutAmount = Number(this.escrow.driverPayout || 0);
+  const sinkingAmount = Number(this.escrow.sinkingFundDeduction || 0);
+  const commissionAmount = Number(this.escrow.platformCommission || 0);
+
+  recipient.walletBalance = Number(recipient.walletBalance || 0) + payoutAmount;
+  recipient.sinkingFundBalance = Number(recipient.sinkingFundBalance || 0) + sinkingAmount;
+  await recipient.save();
+
+  await Transaction.create({
+    user: recipient._id,
+    type: 'escrow_release',
+    amount: payoutAmount,
+    balanceAfter: recipient.walletBalance,
+    reference: String(this._id),
+    description: `Logistics payout release for trip ${this.orderNumber}`,
+    metadata: new Map([
+      ['driverType', this.driverType],
+      ['payoutRecipientType', this.payoutRecipientType],
+      ['sinkingFundDeduction', sinkingAmount],
+      ['platformCommission', commissionAmount],
+    ]),
+  });
+
+  await this.save();
+  return this;
+};
+
+/**
+ * Open a dispute — freezes auto-release.
+ */
+logisticsSchema.methods.openDispute = async function (openedBy) {
+  if (['delivered', 'in_transit'].indexOf(this.status) === -1) {
+    throw new Error('Disputes can only be opened on in-transit or delivered shipments');
+  }
+
+  this.status = 'disputed';
+  this.escrow.disputeOpenedAt = new Date();
+  this.escrow.status = 'disputed';
+
+  this.trackingHistory.push({
+    status: 'disputed',
+    notes: 'Dispute opened — escrow frozen',
+    timestamp: new Date(),
+    updatedBy: openedBy
+  });
+
+  await this.save();
+  return this;
+};
+
+/**
+ * General status update with full tracking history entry.
+ */
+logisticsSchema.methods.updateStatus = async function (status, location, notes, updatedBy) {
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
   this.status = status;
   if (location) this.currentLocation = location;
 
@@ -406,4 +623,33 @@ logisticsSchema.pre('save', function (next) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+<<<<<<< HEAD
 module.exports = mongoose.model('Logistics', logisticsSchema);
+=======
+/**
+ * Calculates platform commission (5–10%), driver payout, seller payout,
+ * and 10% sinking fund deduction from driver payout.
+ * All stored on this.escrow — caller must save().
+ */
+function _calculatePayouts(logisticsDoc) {
+  const e = logisticsDoc.escrow;
+  const total = e.totalAmount || 0;
+  const rate  = e.platformCommissionRate || 0.075;
+
+  e.platformCommission = parseFloat((total * rate).toFixed(2));
+
+  const grossDriverPayout = parseFloat((total - e.platformCommission).toFixed(2));
+  e.sinkingFundDeduction = parseFloat((grossDriverPayout * 0.10).toFixed(2));
+  e.driverPayout = parseFloat((grossDriverPayout - e.sinkingFundDeduction).toFixed(2));
+  e.sellerPayout = 0;
+}
+
+function _generateQrPayload(prefix, logisticsId) {
+  const ts     = Date.now().toString(36).toUpperCase();
+  const rand   = Math.random().toString(36).substring(2, 7).toUpperCase();
+  return `${prefix}-${logisticsId}-${ts}-${rand}`;
+}
+
+module.exports = mongoose.model('Logistics', logisticsSchema);
+
+>>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
