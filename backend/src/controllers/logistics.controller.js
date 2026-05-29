@@ -1,36 +1,50 @@
-<<<<<<< HEAD
 'use strict';
-=======
-const Logistics = require('../models/Logistics.model');
-const Order     = require('../models/Order.model');
-const User      = require('../models/User.model');
+
+/**
+ * Lango MarketPulse — Logistics Controller
+ * Kakuma–Kitale Corridor | Plan 4 "Mizigo"
+ *
+ * Handles all HTTP logic for logistics records.
+ * Business logic (escrow, QR, notifications) lives in services.
+ */
+
+const Logistics  = require('../models/Logistics.model');
+const Order      = require('../models/Order.model');
+const User       = require('../models/User.model');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { validationResult } = require('express-validator');
+const dispatchSvc = require('../services/notification/dispatch.service');
+const logger     = require('../utils/logger');
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-const notFound = (res, msg = 'Logistics record not found') =>
-  res.status(404).json({ success: false, message: msg });
+const getOrderNumber = (order) => (
+  order.orderNumber || `ORD-${order._id.toString().slice(-8).toUpperCase()}`
+);
 
-const extractGps = (body) => ({
-  lat: parseFloat(body.lat  ?? body.latitude  ?? 0),
-  lng: parseFloat(body.lng  ?? body.longitude ?? 0)
-});
+const normalizeAddress = (address, fallback = {}) => {
+  const source = address || fallback || {};
 
-const ensureDriverOwnsTrip = (logistics, user) => {
-  if (!user) return 'Authentication required';
-  if (user.role === 'admin') return null;
-  if (user.role !== 'logistics') return 'Only logistics users can perform this action';
-
-  if (!logistics.driver) {
-    return 'This shipment has not been accepted by a driver yet.';
+  if (typeof source === 'string') {
+    return {
+      label: source,
+      county: 'Unknown',
+      town: 'Unknown',
+      country: 'Kenya',
+    };
   }
 
-  if (String(logistics.driver) !== String(user._id || user.id)) {
-    return 'You are not assigned to this shipment.';
-  }
-
-  return null;
+  return {
+    label: source.label || source.street || fallback.label,
+    county: source.county || fallback.county || 'Unknown',
+    town: source.town || fallback.town || 'Unknown',
+    street: source.street || fallback.street,
+    gpsLat: source.gpsLat || fallback.gpsLat,
+    gpsLng: source.gpsLng || fallback.gpsLng,
+    country: source.country || fallback.country || 'Kenya',
+  };
 };
 
 const uploadLogisticsDocument = async (file, userId, documentType) => {
@@ -50,7 +64,9 @@ const uploadLogisticsDocument = async (file, userId, documentType) => {
   };
 };
 
-// ─── Logistics Application Flow ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGISTICS APPLICATION FLOW
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * POST /api/v1/logistics/apply
@@ -64,7 +80,9 @@ exports.applyAsLogistics = async (req, res, next) => {
     }
 
     const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
 
     const {
       driverMode = 'owner_operator',
@@ -148,7 +166,9 @@ exports.getMyLogisticsApplication = async (req, res, next) => {
     const user = await User.findById(req.user.id).select(
       'role businessType logisticsProfile subscriptionTier'
     );
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
 
     res.status(200).json({
       success: true,
@@ -164,111 +184,6 @@ exports.getMyLogisticsApplication = async (req, res, next) => {
   }
 };
 
-/**
- * PUT /api/v1/logistics/:id/accept
- * Approved logistics drivers accept a pending order assignment.
- */
-exports.acceptLogisticsOrder = async (req, res, next) => {
-  try {
-    const logistics = await Logistics.findById(req.params.id);
-    if (!logistics) return notFound(res);
-
-    if (logistics.status !== 'pending') {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot accept order in "${logistics.status}" status.`,
-      });
-    }
-
-    if (logistics.driver && String(logistics.driver) !== String(req.user._id)) {
-      return res.status(409).json({
-        success: false,
-        message: 'This order is already accepted by another driver.',
-      });
-    }
-
-    const driver = await User.findById(req.user.id);
-    if (!driver) return res.status(404).json({ success: false, message: 'Driver not found' });
-
-    logistics.driver = driver._id;
-    logistics.driverName = driver.fullName || driver.name;
-    logistics.driverPhone = driver.phone;
-
-    const driverMode = driver.logisticsProfile?.driverMode || 'owner_operator';
-    logistics.driverType = driverMode;
-    if (driverMode === 'hired_driver') {
-      logistics.fleetOwner = driver.logisticsProfile?.fleetOwner || null;
-      logistics.payoutRecipient = logistics.fleetOwner || null;
-      logistics.payoutRecipientType = 'fleet_owner';
-    } else {
-      logistics.payoutRecipient = driver._id;
-      logistics.payoutRecipientType = 'driver';
-    }
-
-    logistics.trackingHistory.push({
-      status: 'pending',
-      location: logistics.currentLocation,
-      notes: 'Driver accepted logistics order',
-      timestamp: new Date(),
-      updatedBy: driver._id,
-    });
-
-    await logistics.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Order accepted successfully. Proceed to pickup QR scan.',
-      data: logistics,
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ─── Create ───────────────────────────────────────────────────────────────────
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
-
-/**
- * Lango MarketPulse — Logistics Controller
- * Kakuma–Kitale Corridor | Plan 4 "Mizigo"
- *
- * Handles all HTTP logic for logistics records.
- * Business logic (escrow, QR, notifications) lives in services.
- */
-
-const Logistics  = require('../models/Logistics.model');
-const Order      = require('../models/Order.model');
-const User       = require('../models/User.model');
-const dispatchSvc = require('../services/notification/dispatch.service');
-const logger     = require('../utils/logger');
-
-const getOrderNumber = (order) => (
-  order.orderNumber || `ORD-${order._id.toString().slice(-8).toUpperCase()}`
-);
-
-const normalizeAddress = (address, fallback = {}) => {
-  const source = address || fallback || {};
-
-  if (typeof source === 'string') {
-    return {
-      label: source,
-      county: 'Unknown',
-      town: 'Unknown',
-      country: 'Kenya',
-    };
-  }
-
-  return {
-    label: source.label || source.street || fallback.label,
-    county: source.county || fallback.county || 'Unknown',
-    town: source.town || fallback.town || 'Unknown',
-    street: source.street || fallback.street,
-    gpsLat: source.gpsLat || fallback.gpsLat,
-    gpsLng: source.gpsLng || fallback.gpsLng,
-    country: source.country || fallback.country || 'Kenya',
-  };
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -279,15 +194,7 @@ const normalizeAddress = (address, fallback = {}) => {
  */
 exports.createLogistics = async (req, res, next) => {
   try {
-<<<<<<< HEAD
     const { orderId, carrier, pickupAddress, shippingAddress, weight, weightUnit, dimensions, cargoType, isExpress, notes } = req.body;
-=======
-    const {
-      orderId, driverType = 'owner_operator',
-      shippingAddress, weight, dimensions, notes,
-      escrowAmount, commissionRate, driverId, fleetOwnerId
-    } = req.body;
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 
     const order = await Order.findById(orderId).populate('seller buyer');
     if (!order) {
@@ -299,7 +206,6 @@ exports.createLogistics = async (req, res, next) => {
       return res.status(409).json({ success: false, message: 'A logistics record already exists for this order.' });
     }
 
-<<<<<<< HEAD
     const orderNumber = getOrderNumber(order);
     if (!order.orderNumber) {
       await Order.updateOne({ _id: order._id }, { $set: { orderNumber } });
@@ -317,37 +223,13 @@ exports.createLogistics = async (req, res, next) => {
       carrier         : carrier ?? 'solo_owner_operator',
       pickupAddress   : normalizeAddress(pickupAddress),
       shippingAddress : normalizeAddress(shippingAddress, orderDeliveryAddress),
-=======
-    const normalizedCommission = commissionRate === undefined ? 0.075 : Number(commissionRate);
-    if (Number.isNaN(normalizedCommission) || normalizedCommission < 0.05 || normalizedCommission > 0.10) {
-      return res.status(400).json({ success: false, message: 'Commission rate must be between 5% and 10%.' });
-    }
-
-    const logistics = new Logistics({
-      order:           orderId,
-      orderNumber:     order.orderNumber,
-      driverType,
-      driver:          driverId || null,
-      fleetOwner:      fleetOwnerId || null,
-      payoutRecipient: driverType === 'hired_driver' ? (fleetOwnerId || null) : (driverId || null),
-      payoutRecipientType: driverType === 'hired_driver' ? 'fleet_owner' : 'driver',
-      shippingAddress: shippingAddress || order.shippingAddress,
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
       weight,
       weightUnit,
       dimensions,
       cargoType,
       isExpress       : isExpress ?? false,
       notes,
-<<<<<<< HEAD
       status          : 'pending',
-=======
-      status:          'pending',
-      escrow: {
-        totalAmount:          escrowAmount || order.totalAmount || 0,
-        platformCommissionRate: normalizedCommission
-      }
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
     });
 
     return res.status(201).json({
@@ -368,143 +250,6 @@ exports.createLogistics = async (req, res, next) => {
  * List all logistics records with optional filters and pagination.
  * GET /api/v1/logistics
  */
-<<<<<<< HEAD
-=======
-exports.scanPickup = async (req, res, next) => {
-  try {
-    const { qrPayload } = req.body;
-    const logistics = await Logistics.findById(req.params.id);
-    if (!logistics) return notFound(res);
-
-    const ownershipError = ensureDriverOwnsTrip(logistics, req.user);
-    if (ownershipError) {
-      return res.status(403).json({ success: false, message: ownershipError });
-    }
-
-    // Validate QR payload matches
-    if (logistics.sellerQrCode !== qrPayload) {
-      return res.status(400).json({ success: false, message: 'Invalid QR code for this shipment' });
-    }
-
-    await logistics.recordPickupScan({
-      scannedBy:  req.user._id,
-      ...extractGps(req.body),
-      ipAddress:  req.ip
-    });
-
-    // TODO: emit socket / push notification to seller here
-
-    res.status(200).json({
-      success: true,
-      message: 'Pickup confirmed. Stock is now IN_TRANSIT. Seller has been notified.',
-      data: {
-        status:       logistics.status,
-        driverQrCode: logistics.driverQrCode,  // driver shows this to buyer on delivery
-        trackingNumber: logistics.trackingNumber,
-        step1_pickupScan: logistics.step1_pickupScan
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-/**
- * POST /api/v1/logistics/:id/scan/delivery
- * Step 2 — Buyer scans Driver's QR.
- * Body: { qrPayload, lat, lng }
- * Marks DELIVERED, calculates payouts, starts 72-hr escrow countdown.
- */
-exports.scanDelivery = async (req, res, next) => {
-  try {
-    const { qrPayload } = req.body;
-    const logistics = await Logistics.findById(req.params.id);
-    if (!logistics) return notFound(res);
-
-    if (logistics.driverQrCode !== qrPayload) {
-      return res.status(400).json({ success: false, message: 'Invalid QR code for this shipment' });
-    }
-
-    await logistics.recordDeliveryScan({
-      scannedBy:  req.user._id,
-      ...extractGps(req.body),
-      ipAddress:  req.ip
-    });
-
-    // Sync order status
-    await Order.findByIdAndUpdate(logistics.order, {
-      status:      'delivered',
-      deliveredAt: logistics.actualDelivery
-    });
-
-    // TODO: schedule auto-release job at logistics.step3_autoRelease.scheduledAt
-
-    res.status(200).json({
-      success: true,
-      message: 'Delivery confirmed. Escrow will auto-release in 72 hours unless a dispute is opened.',
-      data: {
-        status:        logistics.status,
-        actualDelivery: logistics.actualDelivery,
-        escrow:         logistics.escrow,
-        autoReleaseAt:  logistics.step3_autoRelease.scheduledAt,
-        step2_deliveryScan: logistics.step2_deliveryScan
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-/**
- * POST /api/v1/logistics/:id/escrow/release
- * Step 3 — Release escrow (called by cron job OR buyer early-confirm OR admin).
- * Body: { triggeredBy: 'buyer_confirm' | 'auto' | 'admin' }
- */
-exports.releaseEscrow = async (req, res, next) => {
-  try {
-    const triggeredBy = req.body.triggeredBy || 'auto';
-    const logistics = await Logistics.findById(req.params.id);
-    if (!logistics) return notFound(res);
-
-    await logistics.releaseEscrow(triggeredBy);
-
-    res.status(200).json({
-      success: true,
-      message: 'Escrow released successfully.',
-      data: {
-        escrow:             logistics.escrow,
-        step3_autoRelease:  logistics.step3_autoRelease
-      }
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-/**
- * POST /api/v1/logistics/:id/dispute
- * Freeze escrow and flag shipment as disputed.
- */
-exports.openDispute = async (req, res, next) => {
-  try {
-    const logistics = await Logistics.findById(req.params.id);
-    if (!logistics) return notFound(res);
-
-    await logistics.openDispute(req.user._id);
-
-    res.status(200).json({
-      success: true,
-      message: 'Dispute opened. Escrow is frozen pending resolution.',
-      data: { status: logistics.status, escrow: logistics.escrow }
-    });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ─── Read ─────────────────────────────────────────────────────────────────────
-
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 exports.getAllLogistics = async (req, res, next) => {
   try {
     const { status, carrier, driverId, startDate, endDate, page = 1, limit = 20 } = req.query;
@@ -520,27 +265,12 @@ exports.getAllLogistics = async (req, res, next) => {
       if (endDate)   query.createdAt.$lte = new Date(endDate);
     }
 
-<<<<<<< HEAD
     const [records, total, stats] = await Promise.all([
       Logistics.find(query)
         .populate('order', 'orderNumber total')
         .populate('seller',  'name phone')
         .populate('buyer',   'name phone')
         .populate('driver',  'name phone')
-=======
-    if (req.user.role === 'logistics') {
-      const userId = req.user._id || req.user.id;
-      q.$or = [
-        { driver: userId },
-        { status: 'pending', driver: null },
-      ];
-    }
-
-    const [logistics, total, stats] = await Promise.all([
-      Logistics.find(q)
-        .populate('order', 'orderNumber total customer')
-        .populate('driver', 'name email phone')
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
         .sort('-createdAt')
         .skip((page - 1) * limit)
         .limit(parseInt(limit, 10)),
@@ -646,12 +376,8 @@ exports.updateLogisticsStatus = async (req, res, next) => {
  */
 exports.assignDriver = async (req, res, next) => {
   try {
-<<<<<<< HEAD
     const { driverId, driverName, driverPhone } = req.body;
 
-=======
-    const { driverId, driverName, driverPhone, driverType, fleetOwnerId } = req.body;
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
     const logistics = await Logistics.findById(req.params.id);
     if (!logistics) {
       return res.status(404).json({ success: false, message: 'Logistics record not found.' });
@@ -662,18 +388,9 @@ exports.assignDriver = async (req, res, next) => {
       if (!driver || driver.role !== 'logistics') {
         return res.status(400).json({ success: false, message: 'User is not a registered logistics driver.' });
       }
-<<<<<<< HEAD
 
-=======
-      if (driver.logisticsProfile?.verificationStatus !== 'verified') {
-        return res.status(400).json({
-          success: false,
-          message: 'Selected driver is not yet approved for logistics operations.',
-        });
-      }
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
       logistics.driver      = driverId;
-      logistics.driverName  = driver.fullName;
+      logistics.driverName  = driver.name;
       logistics.driverPhone = driver.phone;
 
       // Determine payment routing
@@ -690,32 +407,18 @@ exports.assignDriver = async (req, res, next) => {
       logistics.carrier     = 'third_party';
     }
 
-<<<<<<< HEAD
     await logistics.updateStatus('driver_assigned', { updatedBy: req.user._id });
-=======
-    if (driverType) logistics.driverType = driverType;
-    if (fleetOwnerId) logistics.fleetOwner = fleetOwnerId;
-    if (logistics.driverType === 'hired_driver') {
-      logistics.payoutRecipient = logistics.fleetOwner || null;
-      logistics.payoutRecipientType = 'fleet_owner';
-    } else {
-      logistics.payoutRecipient = logistics.driver || null;
-      logistics.payoutRecipientType = 'driver';
-    }
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 
-    // Notify the buyer that a driver has been assigned
+    // Notify the seller that a driver has been assigned
     const order = await Order.findById(logistics.order);
     if (order) {
       const eta = logistics.estimatedDelivery
         ? logistics.estimatedDelivery.toLocaleDateString('en-KE', { timeZone: 'Africa/Nairobi' })
         : 'TBC';
 
-      // Notify seller that pickup is imminent
       await dispatchSvc.dispatch({
         userIds : [logistics.seller],
-        type    : 'push',
-        channel : 'logistics',
+        channels: ['push'],
         title   : `Driver assigned to your shipment`,
         body    : `${logistics.driverName} (${logistics.driverPhone}) will collect your cargo. ETA: ${eta}.`,
         data    : { shipmentId: logistics._id.toString(), driverName: logistics.driverName },
@@ -784,10 +487,9 @@ exports.processQrScan = async (req, res, next) => {
     if (step === 'pickup') {
       await Order.findByIdAndUpdate(logistics.order._id || logistics.order, { status: 'dispatched' });
 
-      // Notify seller that cargo is in transit
       await dispatchSvc.dispatch({
         userIds : [logistics.seller._id || logistics.seller],
-        type    : 'logistics_pickup_confirmed',
+        channels: ['push'],
         title   : 'Cargo pickup confirmed',
         body    : `${logistics.cargoType ?? 'Cargo'} is now in transit to ${logistics.shippingAddress.town}.`,
         data    : { shipmentId: logistics._id.toString(), status: 'in_transit' },
@@ -797,7 +499,7 @@ exports.processQrScan = async (req, res, next) => {
 
       await dispatchSvc.dispatch({
         userIds : [logistics.seller._id || logistics.seller, logistics.driver?._id || logistics.driver].filter(Boolean),
-        type    : 'logistics_delivery_confirmed',
+        channels: ['push'],
         title   : 'Delivery confirmed',
         body    : `${logistics.cargoType ?? 'Cargo'} was delivered and is ready for buyer confirmation.`,
         data    : { shipmentId: logistics._id.toString(), status: 'delivered' },
@@ -805,6 +507,66 @@ exports.processQrScan = async (req, res, next) => {
     }
 
     return res.status(200).json({ success: true, message: `QR step "${step}" recorded.`, data: logistics });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ESCROW & DISPUTES
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/logistics/:id/escrow/release
+ * Release escrow after QR confirmation or 72-hour window
+ */
+exports.releaseEscrow = async (req, res, next) => {
+  try {
+    const { triggeredBy = 'auto' } = req.body;
+
+    const logistics = await Logistics.findById(req.params.id);
+    if (!logistics) {
+      return res.status(404).json({ success: false, message: 'Logistics record not found.' });
+    }
+
+    if (logistics.status !== 'delivered') {
+      return res.status(400).json({ success: false, message: 'Can only release escrow for delivered shipments.' });
+    }
+
+    if (logistics.escrow.status === 'released') {
+      return res.status(400).json({ success: false, message: 'Escrow already released.' });
+    }
+
+    logistics.escrow.status = 'released';
+    logistics.escrow.releasedAt = new Date();
+    logistics.step3_autoRelease.releasedAt = new Date();
+    logistics.step3_autoRelease.triggeredBy = triggeredBy;
+
+    await logistics.save();
+
+    return res.status(200).json({ success: true, message: 'Escrow released.', data: logistics });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /api/v1/logistics/:id/dispute
+ * Open a dispute and freeze escrow
+ */
+exports.openDispute = async (req, res, next) => {
+  try {
+    const logistics = await Logistics.findById(req.params.id);
+    if (!logistics) {
+      return res.status(404).json({ success: false, message: 'Logistics record not found.' });
+    }
+
+    logistics.status = 'disputed';
+    logistics.escrow.status = 'disputed';
+
+    await logistics.save();
+
+    return res.status(200).json({ success: true, message: 'Dispute opened. Escrow frozen.', data: logistics });
   } catch (err) {
     next(err);
   }

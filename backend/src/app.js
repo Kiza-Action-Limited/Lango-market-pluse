@@ -13,16 +13,14 @@ const orderRoutes = require('./routes/v1/orders.routes');
 const notificationRoutes = require('./routes/v1/notifications.routes');
 const cartRoutes = require('./routes/v1/cart.routes');
 const wishlistRoutes = require('./routes/v1/wishlist.routes');
+const categoryRoutes = require('./routes/v1/category.routes');
 const adminRoutes = require('./routes/v1/admin.routes');
 const logisticsRoutes = require('./routes/v1/logistics.routes');
 const analyticsRoutes = require('./routes/v1/analytics.routes');
 const subscriptionRoutes = require('./routes/v1/subscriptions.routes');
-<<<<<<< HEAD
-=======
 const paymentRoutes = require('./routes/v1/payments.routes');
 const groupBuyRoutes = require('./routes/v1/groupbuy.routes');
 const escrowRoutes = require('./routes/v1/escrow.routes');
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -98,11 +96,11 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/v1/cart', cartRoutes);
 app.use('/api/v1/wishlist', wishlistRoutes);
 app.use('/api/wishlist', wishlistRoutes);
+app.use('/api/v1/categories', categoryRoutes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/logistics', logisticsRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
-app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/groupbuy', groupBuyRoutes);
 app.use('/api/v1/escrow', escrowRoutes);
@@ -118,6 +116,7 @@ app.get('/api/test', (req, res) => {
       orders: '/api/v1/orders',
       notifications: '/api/v1/notifications',
       cart: '/api/v1/cart',
+      categories: '/api/v1/categories',
       admin: '/api/v1/admin',
       logistics: '/api/v1/logistics',
       analytics: '/api/v1/analytics',

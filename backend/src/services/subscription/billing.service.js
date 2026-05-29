@@ -37,25 +37,12 @@ class BillingService {
     const user = await User.findById(userId);
     if (!user) throw new Error('User not found');
 
-<<<<<<< HEAD
     const normalizedPlanId = normalizePlanId(planId);
     const plan = planService.getPlan(normalizedPlanId);
     if (!plan) throw new Error('Invalid plan');
 
     if (plan.billingModel === 'monthly') {
       if (paymentMethod !== 'mpesa') throw new Error('M-Pesa is the only supported payment method');
-=======
-    const normalizedPlanId = planService.normalizePlan(planId);
-    const plan = planService.getPlanById(normalizedPlanId);
-    if (!plan) throw new Error('Invalid plan');
-    const normalizedPaymentMethod = paymentMethod || 'mpesa';
-    if (plan.billingType === 'monthly' && normalizedPaymentMethod !== 'mpesa') {
-      throw new Error('M-Pesa is the only supported payment method');
-    }
-
-    // Charge payment for monthly plans only
-    if (plan.billingType === 'monthly' && plan.priceKes > 0) {
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
       if (!paymentMeta?.paymentCompleted) {
         throw new Error('Payment must be completed before plan activation');
       }
@@ -67,7 +54,6 @@ class BillingService {
     }
 
     const startDate = new Date();
-<<<<<<< HEAD
     const endDate = getCycleEnd(plan);
 
     let subscription = await Subscription.findOne({ user: userId });
@@ -91,33 +77,8 @@ class BillingService {
       await subscription.save();
     } else {
       subscription = await Subscription.create({ user: userId, ...payload });
-=======
-    const endDate = plan.billingType === 'monthly'
-      ? new Date(new Date(startDate).setMonth(startDate.getMonth() + 1))
-      : null;
-
-    if (subscription) {
-      subscription.plan = normalizedPlanId;
-      subscription.status = 'active';
-      subscription.startDate = startDate;
-      subscription.endDate = endDate;
-      subscription.features = new Map(Object.entries(plan.features));
-      subscription.paymentMethod = normalizedPaymentMethod || null;
-      subscription.lastPaymentId = paymentMeta?.paymentReference || null;
-    } else {
-      subscription = await Subscription.create({
-        user: userId,
-        plan: normalizedPlanId,
-        startDate,
-        endDate,
-        features: new Map(Object.entries(plan.features)),
-        paymentMethod: normalizedPaymentMethod || null,
-        lastPaymentId: paymentMeta?.paymentReference || null,
-      });
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
     }
 
-<<<<<<< HEAD
     user.subscriptionTier = normalizedPlanId;
     user.subscriptionExpiry = endDate;
     if (normalizedPlanId === 'mizigo' && user.role !== 'logistics') {
@@ -147,22 +108,6 @@ class BillingService {
         message: `You've subscribed to Lango ${plan.displayName}. Your plan is active.`,
       });
     }
-=======
-    // Update user's subscription tier
-    user.subscriptionTier = normalizedPlanId;
-    user.subscriptionExpiry = endDate;
-    if (plan.billingType === 'monthly') {
-      user.smsCredits = plan.smsCreditsPerCycle || 0;
-    } else if (normalizedPlanId === PLAN_IDS.MIZIGO) {
-      user.smsCredits = 0;
-    }
-    await user.save();
-
-    await smsQueue.add('send', {
-      to: user.phone,
-      message: `You've subscribed to the ${plan.name} plan. Thank you!`,
-    });
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 
     return subscription;
   }
@@ -173,26 +118,16 @@ class BillingService {
     subscription.status = 'canceled';
     await subscription.save();
 
-<<<<<<< HEAD
     const user = await User.findById(userId);
     if (user) {
       user.subscriptionTier = 'solo';
       user.subscriptionExpiry = null;
       await user.save();
     }
-=======
-    // Downgrade user to solo
-    const user = await User.findById(userId);
-    user.subscriptionTier = PLAN_IDS.SOLO;
-    user.subscriptionExpiry = null;
-    user.smsCredits = 0;
-    await user.save();
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 
     return { cancelled: true };
   }
 
-<<<<<<< HEAD
   async changePlan(userId, newPlanId, paymentMeta = {}) {
     const normalizedPlanId = normalizePlanId(newPlanId);
     const plan = planService.getPlan(normalizedPlanId);
@@ -262,21 +197,6 @@ class BillingService {
       balance: subscription.smsCredits.balance,
       usedThisCycle: subscription.smsCredits.usedThisCycle,
     };
-=======
-  async changePlan(userId, newPlanId) {
-    const normalizedPlanId = planService.normalizePlan(newPlanId);
-    const targetPlan = planService.getPlanById(normalizedPlanId);
-    if (!targetPlan) throw new Error('Invalid target plan');
-
-    const paymentMeta = targetPlan.billingType === 'monthly'
-      ? {
-          paymentCompleted: true,
-          paymentReference: `manual-change-${Date.now()}`,
-        }
-      : {};
-
-    return await this.subscribe(userId, normalizedPlanId, 'mpesa', paymentMeta);
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
   }
 
   async handleWebhook(payload) {

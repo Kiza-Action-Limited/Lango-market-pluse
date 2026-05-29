@@ -6,21 +6,12 @@ const { PLAN_IDS } = require('../config/subscriptionPlans');
 
 const PLAN_PRODUCT_LIMITS = {
   free: 30,
-<<<<<<< HEAD
-  v3: 30,
-  v4: Number.MAX_SAFE_INTEGER,
-  solo: 30,
-  smart: Number.MAX_SAFE_INTEGER,
-  growth: Number.MAX_SAFE_INTEGER,
-  mizigo: 0,
-=======
   v3: Number.MAX_SAFE_INTEGER,
   v4: Number.MAX_SAFE_INTEGER,
   [PLAN_IDS.SOLO]: 30,
   [PLAN_IDS.SMART]: Number.MAX_SAFE_INTEGER,
   [PLAN_IDS.GROWTH]: Number.MAX_SAFE_INTEGER,
   [PLAN_IDS.MIZIGO]: 0,
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 };
 
 const SELLER_ROLES = new Set(['seller', 'farmer']);
@@ -29,21 +20,12 @@ const getEffectivePlan = async (userId) => {
   try {
     const subscription = await planService.getUserSubscription(userId);
     if (subscription?.isActive) {
-<<<<<<< HEAD
-      return planService.normalizePlanId(subscription.plan);
-    }
-    return 'solo';
-  } catch (error) {
-    console.error('Error getting effective plan:', error);
-    return 'solo';
-=======
       return planService.normalizePlan(subscription.plan);
     }
     return PLAN_IDS.SOLO;
   } catch (error) {
     console.error('Error getting effective plan:', error);
     return PLAN_IDS.SOLO;
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
   }
 };
 

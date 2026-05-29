@@ -64,25 +64,7 @@ const SubscriptionSchema = new mongoose.Schema(
     features: {
       type: Map,
       of: Boolean,
-<<<<<<< HEAD
       default: {},
-=======
-      default: {
-        qrAutoSync: true,
-        basicCfoDashboard: true,
-        crmCapture: true,
-        activeSmsCampaigns: false,
-        restockAlerts: false,
-        regionalGuardian: false,
-        netProfitGauge: false,
-        staffRbac: false,
-        billGuardian: false,
-        assetTracking: false,
-        dailyBurnTracker: false,
-        fullAuditPdf: false,
-        checkCredits: false,
-      },
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
     },
   },
   {

@@ -1,5 +1,4 @@
 const planService = require('../services/subscription/plan.service');
-<<<<<<< HEAD
 const billingService = require('../services/subscription/billing.service');
 const { normalizePlanId, meetsTier } = require('../config/subscriptionPlans');
 
@@ -12,19 +11,6 @@ const isLogisticsBypass = (user) => (
  * Plan 4 logistics users bypass monthly subscription checks.
  */
 const subscriptionGate = (requiredTier = 'solo', feature = null) => {
-=======
-const { PLAN_IDS, TIER_ORDER } = require('../config/subscriptionPlans');
-
-/**
- * Middleware to check if user's subscription plan allows access to a feature.
- * @param {string|string[]} requiredTier - Minimum tier(s) required.
- * @param {string} [feature] - Specific feature name (e.g., 'groupBuying', 'scarcityAlerts')
- * @returns {Function} Express middleware
- */
-const subscriptionGate = (requiredTier, feature = null) => {
-  const requiredTiers = Array.isArray(requiredTier) ? requiredTier : [requiredTier];
-
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
   return async (req, res, next) => {
     try {
       const user = req.user;
@@ -35,7 +21,6 @@ const subscriptionGate = (requiredTier, feature = null) => {
         });
       }
 
-<<<<<<< HEAD
       if (isLogisticsBypass(user)) {
         return next();
       }
@@ -43,38 +28,14 @@ const subscriptionGate = (requiredTier, feature = null) => {
       const subscription = await planService.getUserSubscription(user.id || user._id);
       const currentTier = normalizePlanId(subscription.plan || user.subscriptionTier || 'solo');
       const normalizedRequiredTier = normalizePlanId(requiredTier);
-=======
-      if (user.role === 'admin') {
-        return next();
-      }
-
-      const userTier = planService.normalizePlan(user.subscriptionTier || PLAN_IDS.SOLO);
-      const normalizedRequired = requiredTiers.map((tier) => planService.normalizePlan(tier));
-
-      const hasRequiredTier = normalizedRequired.some((tier) => {
-        if (tier === PLAN_IDS.MIZIGO) {
-          return userTier === PLAN_IDS.MIZIGO;
-        }
-        if (userTier === PLAN_IDS.MIZIGO) {
-          return false;
-        }
-        return (TIER_ORDER[userTier] || 0) >= (TIER_ORDER[tier] || 0);
-      });
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 
       if (!subscription.isActive || !meetsTier(currentTier, normalizedRequiredTier)) {
         return res.status(403).json({
           success: false,
-<<<<<<< HEAD
           message: `This feature requires the ${normalizedRequiredTier.toUpperCase()} plan or higher. Please upgrade.`,
           requiredTier: normalizedRequiredTier,
           currentTier,
           upgradePrompt: `Upgrade to ${normalizedRequiredTier} to unlock this feature.`,
-=======
-          message: `This feature requires one of: ${normalizedRequired.join(', ')}.`,
-          requiredTier: normalizedRequired,
-          currentTier: userTier,
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
         });
       }
 
@@ -99,7 +60,6 @@ const subscriptionGate = (requiredTier, feature = null) => {
   };
 };
 
-<<<<<<< HEAD
 const checkCredits = (count = 1) => async (req, res, next) => {
   try {
     if (!req.user) {
@@ -150,6 +110,4 @@ subscriptionGate.checkCredits = checkCredits;
 subscriptionGate.checkRole = checkRole;
 subscriptionGate.isLogisticsBypass = isLogisticsBypass;
 
-=======
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 module.exports = subscriptionGate;

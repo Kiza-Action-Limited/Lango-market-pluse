@@ -10,17 +10,12 @@ router.use(authMiddleware);
 router.post('/', [
   body('product').isMongoId(),
   body('quantity').isFloat({ min: 0.001 }),
-<<<<<<< HEAD
   body('deliveryAddress').optional().custom((value) => {
     if (typeof value === 'string') return true;
     if (value && typeof value === 'object') return true;
     throw new Error('deliveryAddress must be a string or address object');
   }),
 ], subscriptionGate('v3'), orderController.createOrder);
-=======
-  body('deliveryAddress').optional().isString(),
-], subscriptionGate('solo'), orderController.createOrder);
->>>>>>> a4ca05ef18bdd6473e0d7b4cf68582b8dde40cd6
 
 router.get('/', [
   query('status').optional().isIn(['pending_payment', 'payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed', 'cancelled', 'disputed']),
