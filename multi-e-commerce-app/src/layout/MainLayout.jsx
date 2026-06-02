@@ -17,8 +17,11 @@ const MainLayout = () => {
         <nav className="bg-[#F2871A] text-white sticky top-0 z-40 shadow-sm">
           <div className="max-w-screen-2xl mx-auto px-4 md:px-6">
             <div className="h-14 sm:h-16 flex items-center">
-              <Link to="/" className="hover:opacity-90 transition font-extrabold text-base sm:text-lg" aria-label="MarketPulse Home">
-                Lango Market Pulse
+              <Link to="/" className="flex items-center gap-2 min-w-max hover:opacity-90" aria-label="MarketPulse Home">
+            <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-[#0B2D55] border-2 border-[#06182f]" />
+            <span className="font-extrabold text-sm sm:text-lg leading-none tracking-wide bg-[#0B2D55] px-2 py-1 rounded-sm">
+              LANGO <span className="text-[#F9B233]">MARKET PULSE</span>
+            </span>
               </Link>
             </div>
           </div>

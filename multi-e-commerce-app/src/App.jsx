@@ -109,6 +109,7 @@ function App() {
                         <Route path="wishlist" element={<Wishlist />} />
                         <Route path="logistics/apply" element={<LogisticsApplication />} />
                         <Route path="logistics/status" element={<LogisticsStatus />} />
+                        <Route path="logistics/dashboard" element={<LogisticsStatus />} />
                       </Route>
 
                       <Route element={<SellerRoute />}>

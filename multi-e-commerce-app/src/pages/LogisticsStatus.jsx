@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { FaCheckCircle, FaQrcode, FaTruckLoading } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import { logisticsService } from '../services/logisticsService';
@@ -60,9 +60,9 @@ const LogisticsStatus = () => {
   };
 
   useEffect(() => {
-    if (isAuthenticated) fetchAll();
+    if (isAuthenticated && role === 'logistics') fetchAll();
     else setLoading(false);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, role]);
 
   const handleAccept = async (tripId) => {
     try {
@@ -96,6 +96,10 @@ const LogisticsStatus = () => {
         </div>
       </div>
     );
+  }
+
+  if (role !== 'logistics') {
+    return <Navigate to={role === 'seller' ? '/seller' : '/'} replace />;
   }
 
   if (loading) {

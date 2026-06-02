@@ -6,7 +6,8 @@ import { useAuth } from '../context/AuthContext';
 import api from '../config/axios';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
-import { FaTruck, FaShieldAlt, FaBrain, FaLock, FaArrowLeft } from 'react-icons/fa';
+import { productService } from '../services/productService';
+import { FaTruck, FaShieldAlt, FaBrain, FaLock, FaArrowLeft, FaStar, FaRegStar, FaTimes } from 'react-icons/fa';
 import { getMinimumOrderQuantity, MQQ_TIERS } from '../utils/moq';
 
 const Checkout = () => {
@@ -14,6 +15,11 @@ const Checkout = () => {
   const { cartItems, getCartTotal, clearCart } = useCart();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [reviewItems, setReviewItems] = useState([]);
+  const [activeReviewIndex, setActiveReviewIndex] = useState(0);
+  const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [postOrderPath, setPostOrderPath] = useState('/orders');
   const [shippingAddress, setShippingAddress] = useState({
     fullName: user?.name || '',
     addressLine1: '',
@@ -25,8 +31,9 @@ const Checkout = () => {
     phone: ''
   });
   const paymentMethod = 'mpesa';
+  const showReviewPopup = reviewItems.length > 0;
 
-  if (cartItems.length === 0) {
+  if (cartItems.length === 0 && !showReviewPopup) {
     navigate('/cart');
     return null;
   }
@@ -36,6 +43,68 @@ const Checkout = () => {
       ...shippingAddress,
       [e.target.name]: e.target.value
     });
+  };
+
+  const getItemProductId = (item) => {
+    const productId = item.productId || item.product?._id || item.product?.id || item.id || item._id;
+    if (typeof productId === 'object') return productId?._id || productId?.id || '';
+    return productId;
+  };
+
+  const getItemImage = (item) => {
+    const image = item.image || item.product?.images?.[0] || item.images?.[0];
+    return typeof image === 'string' ? image : image?.url;
+  };
+
+  const buildReviewItems = () => {
+    const seen = new Set();
+
+    return cartItems
+      .map((item) => {
+        const productId = String(getItemProductId(item) || '');
+        if (!productId || seen.has(productId)) return null;
+        seen.add(productId);
+
+        return {
+          productId,
+          name: item.name || item.product?.name || 'Purchased product',
+          image: getItemImage(item),
+        };
+      })
+      .filter(Boolean);
+  };
+
+  const closeReviewPopup = () => {
+    setReviewItems([]);
+    navigate(postOrderPath);
+  };
+
+  const moveToNextReview = () => {
+    if (activeReviewIndex < reviewItems.length - 1) {
+      setActiveReviewIndex((prev) => prev + 1);
+      setReviewDraft({ rating: 5, comment: '' });
+      return;
+    }
+
+    closeReviewPopup();
+  };
+
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    const currentItem = reviewItems[activeReviewIndex];
+    if (!currentItem) return;
+
+    setReviewSubmitting(true);
+    try {
+      await productService.addReview(currentItem.productId, reviewDraft);
+      toast.success('Review submitted');
+      moveToNextReview();
+    } catch (error) {
+      const message = error?.response?.data?.message || 'Failed to submit review';
+      toast.error(message);
+    } finally {
+      setReviewSubmitting(false);
+    }
   };
 
   const handleSubmitOrder = async (e) => {
@@ -55,6 +124,7 @@ const Checkout = () => {
     setLoading(true);
 
     try {
+      const purchasedReviewItems = buildReviewItems();
       const orderData = {
         items: cartItems.map(item => ({
           productId: item.productId,
@@ -78,16 +148,23 @@ const Checkout = () => {
       }
 
       toast.success('Order placed successfully!');
-      clearCart();
       const orderId =
         response?.data?.order?.id ||
         response?.data?.order?._id ||
         response?.data?.data?.order?.id ||
-        response?.data?.data?.order?._id;
-      if (orderId) {
-        navigate(`/orders/${orderId}/track`);
-      } else {
-        navigate('/orders');
+        response?.data?.data?.order?._id ||
+        response?.data?.data?.id ||
+        response?.data?.data?._id;
+      const nextPath = orderId ? `/orders/${orderId}/track` : '/orders';
+
+      setPostOrderPath(nextPath);
+      setActiveReviewIndex(0);
+      setReviewDraft({ rating: 5, comment: '' });
+      setReviewItems(purchasedReviewItems);
+      await clearCart();
+
+      if (purchasedReviewItems.length === 0) {
+        navigate(nextPath);
       }
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to place order');
@@ -99,6 +176,7 @@ const Checkout = () => {
   const subtotal = getCartTotal();
   const shipping = subtotal >= 50 ? 0 : 5;
   const total = subtotal + shipping;
+  const currentReviewItem = reviewItems[activeReviewIndex];
 
   return (
     <div className="bg-[#F9FAFB] min-h-screen py-8">
@@ -355,6 +433,95 @@ const Checkout = () => {
           </div>
         </div>
       </div>
+
+      {showReviewPopup && currentReviewItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-6">
+          <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#16A34A]">Payment complete</p>
+                <h2 className="mt-1 text-xl font-bold text-[#111827]">Customer Reviews</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeReviewPopup}
+                className="rounded-full p-2 text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]"
+                aria-label="Close review popup"
+              >
+                <FaTimes />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitReview} className="space-y-5 px-6 py-5">
+              <div className="flex gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                {currentReviewItem.image && (
+                  <img
+                    src={currentReviewItem.image}
+                    alt={currentReviewItem.name}
+                    className="h-14 w-14 rounded-lg object-cover"
+                  />
+                )}
+                <div>
+                  <h3 className="font-semibold text-[#111827]">Write a Review</h3>
+                  <p className="mt-1 text-sm text-[#6B7280]">{currentReviewItem.name}</p>
+                  {reviewItems.length > 1 && (
+                    <p className="mt-1 text-xs text-[#6B7280]">
+                      Product {activeReviewIndex + 1} of {reviewItems.length}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#111827]">Rating</label>
+                <div className="mt-2 flex gap-1">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setReviewDraft((prev) => ({ ...prev, rating: star }))}
+                      className="rounded p-1 text-2xl transition hover:scale-105"
+                      aria-label={`${star} star rating`}
+                    >
+                      {star <= reviewDraft.rating ? (
+                        <FaStar className="text-yellow-400" />
+                      ) : (
+                        <FaRegStar className="text-gray-300" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <textarea
+                value={reviewDraft.comment}
+                onChange={(e) => setReviewDraft((prev) => ({ ...prev, comment: e.target.value }))}
+                placeholder="Write your review..."
+                rows="4"
+                required
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#F97316]"
+              />
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                <button
+                  type="button"
+                  onClick={closeReviewPopup}
+                  className="rounded-lg border border-gray-300 px-4 py-2 font-semibold text-[#374151] hover:bg-gray-50"
+                >
+                  Skip
+                </button>
+                <button
+                  type="submit"
+                  disabled={reviewSubmitting}
+                  className="rounded-lg bg-[#F97316] px-5 py-2 font-semibold text-white hover:bg-[#EA580C] disabled:opacity-50"
+                >
+                  {reviewSubmitting ? 'Submitting...' : 'Submit Review'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

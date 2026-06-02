@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { FaEnvelope, FaLock, FaBrain, FaArrowRight, FaEye, FaEyeSlash, FaUser, FaStore } from 'react-icons/fa';
+import { FaEnvelope, FaLock, FaBrain, FaArrowRight, FaEye, FaEyeSlash, FaUser, FaStore, FaTruck } from 'react-icons/fa';
 import marketPulseLogo from '../assets/Marketpulse-logo.png';
 import { createPrefetchHandlers } from '../utils/prefetch';
 
@@ -27,7 +27,7 @@ const Login = () => {
     }
 
     const roleParam = searchParams.get('role');
-    if (roleParam === 'seller' || roleParam === 'buyer') {
+    if (roleParam === 'seller' || roleParam === 'buyer' || roleParam === 'logistics') {
       setAccountType(roleParam);
     }
   }, [isAdminLogin, searchParams]);
@@ -57,6 +57,7 @@ const Login = () => {
       const resolvedRole = String(result?.user?.role || '').toLowerCase();
       const resolvedBusinessType = String(result?.user?.businessType || '').toLowerCase();
       const isAdminUser = resolvedRole === 'admin';
+      const isLogisticsUser = resolvedRole === 'logistics' || resolvedBusinessType === 'logistics';
       const isSellerUser =
         resolvedRole === 'seller' ||
         ['wholesaler', 'retailer', 'farmer', 'manufacturer'].includes(resolvedRole) ||
@@ -64,6 +65,8 @@ const Login = () => {
 
       if (isAdminUser) {
         navigate('/admin');
+      } else if (isLogisticsUser) {
+        navigate('/logistics/dashboard');
       } else if (isSellerUser) {
         navigate('/seller');
       } else {
@@ -91,6 +94,14 @@ const Login = () => {
       activeClass: 'border-[#F97316] bg-[#F97316]/5',
       iconClass: 'text-[#F97316]',
     },
+    {
+      key: 'logistics',
+      title: 'Logistics Provider',
+      subtitle: 'Deliver orders and earn',
+      icon: FaTruck,
+      activeClass: 'border-[#3B82F6] bg-[#3B82F6]/5',
+      iconClass: 'text-[#3B82F6]',
+    },
   ];
 
   return (
@@ -111,7 +122,7 @@ const Login = () => {
             <p className="mt-2 text-sm text-[#6B7280] italic">Lango Lako la Biashara Smart</p>
           </div>
 
-          {!isAdminLogin && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {!isAdminLogin && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {cards.map((card) => {
               const Icon = card.icon;
               const isActive = accountType === card.key;
@@ -134,7 +145,7 @@ const Login = () => {
 
           <form className="space-y-4 rounded-xl border border-gray-200 bg-white p-5" onSubmit={handleSubmit}>
             <p className="text-sm font-semibold text-[#111827]">
-              {accountType === 'admin' ? 'Admin credentials' : accountType === 'seller' ? 'Seller credentials' : 'Buyer credentials'}
+              {accountType === 'admin' ? 'Admin credentials' : accountType === 'seller' ? 'Seller credentials' : accountType === 'logistics' ? 'Logistics credentials' : 'Buyer credentials'}
             </p>
 
             <div className="relative">
@@ -197,7 +208,7 @@ const Login = () => {
                 </>
               ) : (
                 <>
-                  {accountType === 'admin' ? 'Sign in as Admin' : accountType === 'seller' ? 'Sign in as Seller' : 'Sign in as Buyer'}
+                  {accountType === 'admin' ? 'Sign in as Admin' : accountType === 'seller' ? 'Sign in as Seller' : accountType === 'logistics' ? 'Sign in as Logistics' : 'Sign in as Buyer'}
                   <FaArrowRight size={14} />
                 </>
               )}
@@ -221,7 +232,7 @@ const Login = () => {
               className="font-medium text-[#F97316] hover:text-[#F97316]/80 transition-colors"
               {...createPrefetchHandlers('/register')}
             >
-              Create {accountType === 'seller' ? 'Seller' : 'Buyer'} account
+              Create {accountType === 'seller' ? 'Seller' : accountType === 'logistics' ? 'Logistics' : 'Buyer'} account
             </Link>
           </p>}
         </div>

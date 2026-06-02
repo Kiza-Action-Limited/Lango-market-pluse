@@ -15,6 +15,7 @@ import {
   FaEyeSlash,
   FaPhone,
   FaCheckCircle,
+  FaTruck,
 } from 'react-icons/fa';
 import marketPulseLogo from '../assets/Marketpulse-logo.png';
 import { createPrefetchHandlers } from '../utils/prefetch';
@@ -82,7 +83,7 @@ const Register = () => {
 
   useEffect(() => {
     const roleParam = searchParams.get('role');
-    if (roleParam === 'seller' || roleParam === 'buyer') {
+    if (roleParam === 'seller' || roleParam === 'buyer' || roleParam === 'logistics') {
       setFormData((prev) => ({
         ...prev,
         role: roleParam,
@@ -260,7 +261,7 @@ const Register = () => {
 
     if (targetStep === 3) {
       if (!formData.role) {
-        setError('Please choose Buyer or Seller');
+        setError('Please choose Buyer, Seller, or Logistics');
         return false;
       }
       if (!formData.name.trim() || !formData.email.trim() || !formData.phone.trim()) {
@@ -337,7 +338,7 @@ const Register = () => {
     setLoading(true);
     const { confirmPassword, ...registerData } = formData;
     registerData.phone = phoneValue;
-    registerData.businessType = registerData.role === 'seller' ? registerData.businessType : 'consumer';
+    registerData.businessType = registerData.role === 'seller' ? registerData.businessType : registerData.role === 'logistics' ? 'logistics' : 'consumer';
 
     const result = await register(registerData);
     if (result.success) {
@@ -349,6 +350,8 @@ const Register = () => {
             ? `/seller/subscription-plans?plan=${encodeURIComponent(requestedPlan)}`
             : '/seller/subscription-plans'
         );
+      } else if (registerData.role === 'logistics') {
+        navigate('/logistics/apply');
       } else {
         navigate('/login?role=buyer');
       }
@@ -374,6 +377,14 @@ const Register = () => {
       icon: FaStore,
       activeClass: 'border-[#F97316] bg-[#F97316]/5',
       iconClass: 'text-[#F97316]',
+    },
+    {
+      key: 'logistics',
+      title: 'Logistics Provider',
+      subtitle: 'Deliver orders and earn',
+      icon: FaTruck,
+      activeClass: 'border-[#3B82F6] bg-[#3B82F6]/5',
+      iconClass: 'text-[#3B82F6]',
     },
   ];
 
@@ -402,7 +413,7 @@ const Register = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {accountCards.map((card) => {
               const Icon = card.icon;
               const isActive = formData.role === card.key;
@@ -601,6 +612,10 @@ const Register = () => {
                       {businessLogoName && <p className="mt-1 text-xs text-[#16A34A]">Selected: {businessLogoName}</p>}
                     </div>
                   </div>
+                ) : formData.role === 'logistics' ? (
+                  <div className="p-3 bg-[#3B82F6]/5 border border-[#3B82F6]/20 rounded-lg text-sm text-[#1D4ED8]">
+                    Logistics account selected. Continue to create your password, then complete your provider application.
+                  </div>
                 ) : (
                   <div className="p-3 bg-[#16A34A]/5 border border-[#16A34A]/20 rounded-lg text-sm text-[#166534]">
                     Buyer account selected. You can continue to create your password.
@@ -696,7 +711,7 @@ const Register = () => {
                   disabled={loading}
                   className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg text-white bg-[#F97316] hover:bg-[#F97316]/90 disabled:opacity-50"
                 >
-                  {loading ? 'Creating account...' : formData.role === 'seller' ? 'Sign up as Seller' : 'Sign up as Buyer'}
+                  {loading ? 'Creating account...' : formData.role === 'seller' ? 'Sign up as Seller' : formData.role === 'logistics' ? 'Sign up as Logistics' : 'Sign up as Buyer'}
                 </button>
               )}
             </div>
@@ -709,7 +724,7 @@ const Register = () => {
               className="font-medium text-[#F97316] hover:text-[#F97316]/80 transition-colors"
               {...createPrefetchHandlers('/login')}
             >
-              Sign in as {formData.role === 'seller' ? 'Seller' : 'Buyer'}
+              Sign in as {formData.role === 'seller' ? 'Seller' : formData.role === 'logistics' ? 'Logistics' : 'Buyer'}
             </Link>
           </p>
         </div>

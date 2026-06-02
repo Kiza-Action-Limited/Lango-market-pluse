@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { FaCheckCircle, FaIdCard, FaTruck, FaUpload } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import { logisticsService } from '../services/logisticsService';
@@ -32,6 +32,7 @@ const LogisticsApplication = () => {
   ];
 
   const verificationStatus = application?.logisticsProfile?.verificationStatus || 'unverified';
+  const role = String(user?.role || '').toLowerCase();
 
   useEffect(() => {
     const load = async () => {
@@ -45,12 +46,12 @@ const LogisticsApplication = () => {
       }
     };
 
-    if (isAuthenticated) {
+    if (isAuthenticated && role === 'logistics') {
       load();
     } else {
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, role]);
 
   const statusLabel = useMemo(() => {
     if (verificationStatus === 'pending') return 'Pending Admin Verification';
@@ -103,6 +104,10 @@ const LogisticsApplication = () => {
         </div>
       </div>
     );
+  }
+
+  if (role !== 'logistics') {
+    return <Navigate to={role === 'seller' ? '/seller' : '/'} replace />;
   }
 
   if (loading) {
