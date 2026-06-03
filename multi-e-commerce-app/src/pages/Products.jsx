@@ -5,6 +5,36 @@ import ProductCard from '../components/ProductCard';
 import { FaFilter, FaTimes } from 'react-icons/fa';
 import { productService } from '../services/productService';
 
+const CATEGORY_LABELS = {
+  cereals: 'Cereals',
+  vegetables: 'Vegetables',
+  fruits: 'Fruits',
+  livestock: 'Livestock',
+  dairy: 'Dairy',
+  other: 'Other',
+};
+
+const toTitleCase = (value) =>
+  String(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getCategoryId = (category) => {
+  if (!category) return 'uncategorized';
+  if (typeof category === 'object') {
+    return String(category.id || category._id || category.slug || category.value || category.name || 'uncategorized');
+  }
+  return String(category);
+};
+
+const getCategoryName = (category) => {
+  if (!category) return 'Uncategorized';
+  if (typeof category === 'object') {
+    return category.name || category.title || category.label || toTitleCase(getCategoryId(category));
+  }
+  return CATEGORY_LABELS[category] || toTitleCase(category);
+};
+
 const Products = ({ seller = false }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
@@ -99,8 +129,16 @@ const Products = ({ seller = false }) => {
     try {
       const payload = await productService.getAll({ page: 1, limit: 120 });
       const liveProducts = payload?.products || payload?.data || payload?.items || [];
-      const categorySet = Array.from(new Set(liveProducts.map((item) => item?.category).filter(Boolean)));
-      setCategories(categorySet.map((name) => ({ id: name, name })));
+      const categoriesById = new Map();
+
+      liveProducts.forEach((item) => {
+        if (!item?.category) return;
+        const id = getCategoryId(item.category);
+        if (id === 'uncategorized' || categoriesById.has(id)) return;
+        categoriesById.set(id, { id, name: getCategoryName(item.category) });
+      });
+
+      setCategories(Array.from(categoriesById.values()));
     } catch (error) {
       console.error('Error fetching categories:', error);
       setCategories([]);
@@ -137,10 +175,40 @@ const Products = ({ seller = false }) => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
-  const categoryOptions = categories.map((cat) => ({
-    id: cat.id || cat._id || cat.value || cat.slug || cat.name,
-    name: cat.name || cat.title || 'Unnamed Category',
-  }));
+  const categoryOptions = useMemo(
+    () =>
+      categories.map((cat) => ({
+        id: getCategoryId(cat),
+        name: getCategoryName(cat),
+      })),
+    [categories]
+  );
+
+  const categoryNameById = useMemo(
+    () => new Map(categoryOptions.map((cat) => [cat.id, cat.name])),
+    [categoryOptions]
+  );
+
+  const groupedProducts = useMemo(() => {
+    const groupsByCategory = new Map();
+
+    products.forEach((product) => {
+      const categoryId = getCategoryId(product.category);
+      const categoryName = categoryNameById.get(categoryId) || getCategoryName(product.category);
+
+      if (!groupsByCategory.has(categoryId)) {
+        groupsByCategory.set(categoryId, {
+          id: categoryId,
+          name: categoryName,
+          products: [],
+        });
+      }
+
+      groupsByCategory.get(categoryId).products.push(product);
+    });
+
+    return Array.from(groupsByCategory.values());
+  }, [products, categoryNameById]);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -260,9 +328,24 @@ const Products = ({ seller = false }) => {
             </div>
           ) : (
             <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {products.map(product => (
-                  <ProductCard key={product.id || product._id} product={product} />
+              <div className="space-y-10">
+                {groupedProducts.map((group) => (
+                  <section key={group.id}>
+                    <div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-gray-200 pb-3">
+                      <div>
+                        <h2 className="text-xl font-semibold text-[#111827]">{group.name}</h2>
+                        <p className="text-sm text-gray-500">
+                          {group.products.length} {group.products.length === 1 ? 'product' : 'products'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {group.products.map((product) => (
+                        <ProductCard key={product.id || product._id} product={product} />
+                      ))}
+                    </div>
+                  </section>
                 ))}
               </div>
 

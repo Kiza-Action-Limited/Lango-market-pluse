@@ -44,6 +44,7 @@ const BusinessDirectory = lazy(() => import('./pages/BusinessDirectory'));
 const BusinessProfile = lazy(() => import('./pages/BusinessProfile'));
 const AISourcingHub = lazy(() => import('./pages/AISourcingHub'));
 const SellerDashboard = lazy(() => import('./pages/SellerDashboard'));
+const SellerProducts = lazy(() => import('./pages/SellerProducts'));
 const AddProduct = lazy(() => import('./pages/AddProduct'));
 const EditProduct = lazy(() => import('./pages/EditProduct'));
 const SellerOrders = lazy(() => import('./pages/SellerOrders'));
@@ -118,7 +119,7 @@ function App() {
                           <Route path="home" element={<Home />} />
                           <Route path="add-product" element={<AddProduct />} />
                           <Route path="edit-product/:id" element={<EditProduct />} />
-                          <Route path="products" element={<SellerDashboard />} />
+                          <Route path="products" element={<SellerProducts />} />
                           <Route path="orders" element={<SellerOrders />} />
                           <Route path="profile" element={<Profile />} />
                           <Route path="scarcity-board" element={<RegionalScarcityBoard />} />

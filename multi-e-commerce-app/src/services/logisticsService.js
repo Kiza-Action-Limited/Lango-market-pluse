@@ -20,6 +20,29 @@ export const logisticsService = {
     return response?.data || { data: [], pagination: null };
   },
 
+  getVerifiedProviders: async (params = {}) => {
+    const candidates = [
+      () => api.get('/v1/logistics/providers', { params: { ...params, status: 'verified' } }),
+      () => api.get('/v1/logistics/providers/verified', { params }),
+      () => api.get('/v1/logistics/verified-providers', { params }),
+    ];
+
+    let lastError;
+    for (const request of candidates) {
+      try {
+        const response = await request();
+        const payload = response?.data?.data || response?.data || {};
+        return payload.providers || payload.logistics || payload.users || payload.data || payload || [];
+      } catch (error) {
+        lastError = error;
+        if (error.response?.status === 401 || error.response?.status === 403) throw error;
+      }
+    }
+
+    if (lastError?.response?.status === 404) return [];
+    throw lastError;
+  },
+
   acceptTrip: async (logisticsId) => {
     const response = await api.put(`/v1/logistics/${logisticsId}/accept`);
     return unwrap(response);

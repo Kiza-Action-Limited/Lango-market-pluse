@@ -199,7 +199,7 @@ const Navbar = () => {
       </div>
 
       <div className="bg-[#2F4258] px-3 py-3">
-        <div className="mx-auto max-w-[1366px]">
+        <div className="mx-auto max-w-341.5">
           <form onSubmit={handleSubmit} className="mx-auto w-full max-w-xl bg-white rounded-full h-11 flex items-center pl-4 pr-2">
             <input
               value={query}
