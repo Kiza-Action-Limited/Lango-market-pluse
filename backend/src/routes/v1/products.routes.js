@@ -5,6 +5,7 @@ const { body, param, query } = require('express-validator');
 const productController = require('../../controllers/product.controller');
 const { protect: authMiddleware } = require('../../middleware/auth');
 const { upload, handleUploadError } = require('../../middleware/upload');
+const { isFarmerUser } = require('../../utils/userCategory');
 
 // ---------- Public routes ----------
 router.get(
@@ -33,6 +34,7 @@ router.use(authMiddleware);
 // Low stock must come before /:id to avoid treating "low-stock" as an ID
 router.get('/low-stock', productController.getLowStockProducts);
 router.get('/my-products', productController.getMyProducts);
+router.get('/:id/reviews/eligibility', param('id').isMongoId(), productController.getReviewEligibility);
 router.get('/:id', param('id').isMongoId(), productController.getProductById);
 router.post(
   '/:id/reviews',
@@ -53,7 +55,12 @@ router.post(
     body('name').notEmpty().withMessage('Name is required'),
     body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
     body('quantityAvailable').isInt({ min: 0 }).withMessage('Quantity must be a non-negative integer'),
-    body('category').isIn(['cereals', 'vegetables', 'fruits', 'livestock', 'dairy', 'other']),
+    body('category')
+      .custom((value, { req }) => {
+        if (isFarmerUser(req.user)) return true;
+        return ['electronics', 'fashion', 'home-garden', 'beauty-health', 'sports-outdoor'].includes(value);
+      })
+      .withMessage('Choose a valid category. Farmer products are categorized as Grocery automatically.'),
     body('unit').isIn(['kg', 'g', 'ton', 'piece', 'bunch', 'litre']).withMessage('Valid unit required'),
     body('description').optional().isString(),
   ],

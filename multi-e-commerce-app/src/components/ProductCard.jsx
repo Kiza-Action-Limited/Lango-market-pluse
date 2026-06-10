@@ -73,7 +73,6 @@ const ProductCard = ({ product }) => {
           <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium">KE</span>
           <span>{campusLabel || 'Online Seller'}</span>
         </div>
-
         <Link to={`/products/${productId}`}>
           <h3 className="mb-1 line-clamp-2 min-h-[2.2rem] text-[13px] leading-5 font-medium text-[#111827] hover:text-[#F97316]">
             {product.name}

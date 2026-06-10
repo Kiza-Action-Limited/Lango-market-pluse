@@ -13,10 +13,10 @@ const DepartmentsMenu = ({ onClose }) => {
   const popularCategories = [
     { name: 'Electronics', link: '/products?category=electronics' },
     { name: 'Fashion', link: '/products?category=fashion' },
-    { name: 'Home & Kitchen', link: '/products?category=home' },
-    { name: 'Beauty', link: '/products?category=beauty' },
-    { name: 'Sports', link: '/products?category=sports' },
-    { name: 'Groceries', link: '/products?category=groceries' },
+    { name: 'Home and Garden', link: '/products?category=home-garden' },
+    { name: 'Beauty and Health', link: '/products?category=beauty-health' },
+    { name: 'Sports and Outdoor', link: '/products?category=sports-outdoor' },
+    { name: 'Grocery', link: '/products?category=grocery' },
   ];
 
   const businessTypes = [

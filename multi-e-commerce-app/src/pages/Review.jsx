@@ -1,17 +1,22 @@
 // src/pages/Reviews.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { FaStar, FaStarHalfAlt, FaRegStar } from 'react-icons/fa';
 import toast from 'react-hot-toast';
+import { productService } from '../services/productService';
 
 const Reviews = () => {
   const { productId } = useParams();
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const [reviews, setReviews] = useState([]);
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [reviewEligibility, setReviewEligibility] = useState({
+    loading: false,
+    canReview: false,
+    message: 'Complete payment for this product before writing a review.',
+  });
   const [newReview, setNewReview] = useState({
     rating: 5,
     comment: ''
@@ -23,18 +28,48 @@ const Reviews = () => {
 
   const fetchReviews = async () => {
     try {
-      const [productRes, reviewsRes] = await Promise.all([
-        axios.get(`http://localhost:5000/api/products/${productId}`),
-        axios.get(`http://localhost:5000/api/products/${productId}/reviews`)
-      ]);
-      setProduct(productRes.data.product);
-      setReviews(reviewsRes.data.reviews);
+      const requests = [
+        productService.getById(productId),
+        productService.getReviews(productId),
+      ];
+
+      const [productRes, reviewsRes] = await Promise.all(requests);
+      setProduct(productRes?.product || productRes?.data || productRes);
+      setReviews(reviewsRes?.reviews || []);
     } catch (error) {
       console.error('Error fetching reviews:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setReviewEligibility({
+        loading: false,
+        canReview: false,
+        message: 'Log in after completing payment to review this product.',
+      });
+      return;
+    }
+
+    setReviewEligibility((prev) => ({ ...prev, loading: true }));
+    productService.getReviewEligibility(productId)
+      .then((response) => {
+        setReviewEligibility({
+          loading: false,
+          canReview: Boolean(response.canReview),
+          message: response.message || 'Complete payment for this product before writing a review.',
+        });
+      })
+      .catch((error) => {
+        setReviewEligibility({
+          loading: false,
+          canReview: false,
+          message: error?.response?.data?.message || 'Complete payment for this product before writing a review.',
+        });
+      });
+  }, [productId, isAuthenticated]);
 
   const handleSubmitReview = async (e) => {
     e.preventDefault();
@@ -43,17 +78,28 @@ const Reviews = () => {
       return;
     }
 
+    if (!reviewEligibility.canReview) {
+      toast.error(reviewEligibility.message);
+      return;
+    }
+
     try {
-      const response = await axios.post(
-        `http://localhost:5000/api/products/${productId}/reviews`,
-        newReview,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
-      );
-      setReviews([response.data.review, ...reviews]);
+      const response = await productService.addReview(productId, newReview);
+      const createdReview = response?.review || response?.data?.review || response?.data || response;
+      setReviews((prev) => {
+        const createdReviewId = createdReview?._id || createdReview?.id;
+        const createdReviewUserId = createdReview?.user?._id || createdReview?.user;
+        const next = prev.filter((review) => {
+          const reviewId = review?._id || review?.id;
+          const reviewUserId = review?.user?._id || review?.user;
+          return reviewId !== createdReviewId && String(reviewUserId || '') !== String(createdReviewUserId || '');
+        });
+        return [createdReview, ...next];
+      });
       setNewReview({ rating: 5, comment: '' });
       toast.success('Review submitted successfully');
     } catch (error) {
-      toast.error('Failed to submit review');
+      toast.error(error?.response?.data?.message || 'Failed to submit review');
     }
   };
 
@@ -87,7 +133,16 @@ const Reviews = () => {
       </div>
 
       {/* Write Review */}
-      {isAuthenticated && (
+      {!isAuthenticated ? (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-semibold mb-2">Write a Review</h2>
+          <p className="text-gray-600">Log in after completing payment to review this product.</p>
+        </div>
+      ) : reviewEligibility.loading ? (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8 text-gray-600">
+          Checking review eligibility...
+        </div>
+      ) : reviewEligibility.canReview ? (
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">Write a Review</h2>
           <form onSubmit={handleSubmitReview}>
@@ -125,6 +180,11 @@ const Reviews = () => {
             </button>
           </form>
         </div>
+      ) : (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-xl font-semibold mb-2">Write a Review</h2>
+          <p className="text-gray-600">{reviewEligibility.message}</p>
+        </div>
       )}
 
       {/* Reviews List */}
@@ -139,7 +199,7 @@ const Reviews = () => {
           </div>
         ) : (
           reviews.map((review) => (
-            <div key={review.id} className="bg-white rounded-lg shadow-md p-6">
+            <div key={review.id || review._id} className="bg-white rounded-lg shadow-md p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white font-bold">

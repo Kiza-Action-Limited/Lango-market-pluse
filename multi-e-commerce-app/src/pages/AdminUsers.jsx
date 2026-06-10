@@ -2,30 +2,27 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../config/axios';
-import { FaSearch, FaBan, FaCheckCircle, FaUsers, FaStore, FaUserTie, FaUser, FaBrain, FaFilter } from 'react-icons/fa';
+import { FaSearch, FaBan, FaCheckCircle, FaUsers, FaStore, FaUserTie, FaUser, FaBrain, FaFilter, FaEye } from 'react-icons/fa';
 import toast from 'react-hot-toast';
+import { getEffectiveUserCategory, isSellerUser } from '../utils/userCategory';
+import UserDetailsModal from '../components/admin/UserDetailsModal';
 
 const AdminUsers = () => {
   const [searchParams] = useSearchParams();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUserDetails, setSelectedUserDetails] = useState(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState(searchParams.get('role') || 'all');
-  const sellerTypeCategories = ['wholesaler', 'farmer', 'retailer', 'manufacturer', 'other_business'];
+  const sellerTypeCategories = ['brand', 'wholesaler', 'farmer', 'retailer', 'manufacturer', 'small_business'];
   const formatCategoryLabel = (value) =>
     String(value || '')
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase());
 
-  const getUserCategory = (user) => {
-    const role = String(user?.role || '').toLowerCase();
-    const businessType = String(user?.businessType || '').toLowerCase();
-    if (sellerTypeCategories.includes(role)) return role;
-    if (sellerTypeCategories.includes(businessType)) return businessType;
-    if (role === 'seller') return 'other_business';
-    if (role === 'buyer' || role === 'consumer' || businessType === 'consumer') return 'consumer';
-    return role || businessType || 'unknown';
-  };
+  const getUserCategory = (user) => getEffectiveUserCategory(user);
 
   const getDisplayCategory = (user) => {
     if (String(user?.role || '').toLowerCase() === 'admin') return 'admin';
@@ -44,7 +41,7 @@ const AdminUsers = () => {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/v1/admin/users');
-      const allUsers = response.data.users || [];
+      const allUsers = Array.isArray(response.data.users) ? response.data.users.filter(Boolean) : [];
       const nonAdminUsers = allUsers.filter((u) => String(u?.role || '').toLowerCase() !== 'admin');
       setUsers(nonAdminUsers);
     } catch (error) {
@@ -65,23 +62,43 @@ const AdminUsers = () => {
     }
   };
 
+  const handleViewUserDetails = async (userRow) => {
+    const userId = userRow?._id || userRow?.id || userRow?.userId;
+    if (!userId) return;
+
+    setSelectedUser(userRow);
+    setSelectedUserDetails(null);
+    setDetailsLoading(true);
+
+    try {
+      const response = await api.get(`/v1/admin/users/${userId}`);
+      setSelectedUserDetails(response.data);
+    } catch (error) {
+      console.error('Error fetching user details:', error);
+      toast.error(error.response?.data?.message || 'Failed to load user details');
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
   // Calculate statistics
   const stats = {
     total: users.length,
-    active: users.filter(u => !u.isBlocked).length,
-    blocked: users.filter(u => u.isBlocked).length,
+    active: users.filter(u => !u?.isBlocked).length,
+    blocked: users.filter(u => u?.isBlocked).length,
     consumers: users.filter(u => getUserCategory(u) === 'consumer').length,
-    sellers: users.filter(u => sellerTypeCategories.includes(getUserCategory(u))).length,
-    admins: users.filter(u => u.role === 'admin').length,
+    sellers: users.filter(u => isSellerUser(u)).length,
+    admins: users.filter(u => String(u?.role || '').toLowerCase() === 'admin').length,
   };
 
-  const filteredUsers = users.filter(user => {
-    const matchesSearch = user.name?.toLowerCase().includes(search.toLowerCase()) ||
-                          user.email?.toLowerCase().includes(search.toLowerCase());
+  const filteredUsers = users.filter(Boolean).filter(user => {
+    const userRole = String(user?.role || '').toLowerCase();
+    const matchesSearch = String(user?.name || user?.fullName || '').toLowerCase().includes(search.toLowerCase()) ||
+                          String(user?.email || '').toLowerCase().includes(search.toLowerCase());
     const matchesFilter = filter === 'all' || 
-                         (filter === 'active' && !user.isBlocked) ||
-                         (filter === 'blocked' && user.isBlocked) ||
-                         (filter === user.role) ||
+                         (filter === 'active' && !user?.isBlocked) ||
+                         (filter === 'blocked' && user?.isBlocked) ||
+                         (filter === userRole) ||
                          (filter === getDisplayCategory(user)) ||
                          (filter === getUserCategory(user));
     return matchesSearch && matchesFilter;
@@ -89,7 +106,7 @@ const AdminUsers = () => {
 
   const getDisplayRole = (user) => {
     const category = getDisplayCategory(user);
-    if (sellerTypeCategories.includes(category)) return 'seller';
+    if (isSellerUser(user)) return 'seller';
     if (category === 'consumer') return 'consumer';
     return category;
   };
@@ -175,7 +192,7 @@ const AdminUsers = () => {
                 <option value="farmer">Farmers</option>
                 <option value="retailer">Retailers</option>
                 <option value="manufacturer">Manufacturers</option>
-                <option value="other_business">Other Business</option>
+                <option value="small_business">Small Business</option>
               </select>
             </div>
           </div>
@@ -212,17 +229,21 @@ const AdminUsers = () => {
                  </tr>
               </thead>
               <tbody>
-                {filteredUsers.map((user, index) => (
-                  <tr key={user._id || user.id} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
+                {filteredUsers.map((user, index) => {
+                  const userId = user?._id || user?.id || user?.userId || `user-${index}`;
+                  const displayName = user?.name || user?.fullName || 'Unknown User';
+
+                  return (
+                  <tr key={userId} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-10 h-10 bg-linear-to-br from-[#F97316] to-[#FB923C] rounded-full flex items-center justify-center text-white font-bold shadow-sm">
-                          {user.name?.charAt(0).toUpperCase()}
+                          {displayName.charAt(0).toUpperCase()}
                         </div>
-                        <span className="font-medium text-[#111827]">{user.name}</span>
+                        <span className="font-medium text-[#111827]">{displayName}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-[#6B7280]">{user.email}</td>
+                    <td className="px-6 py-4 text-[#6B7280]">{user?.email || '-'}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         {getRoleIcon(getDisplayRole(user))}
@@ -239,32 +260,42 @@ const AdminUsers = () => {
                       {formatCategoryLabel(getUserCategory(user))}
                     </td>
                     <td className="px-6 py-4 text-[#6B7280] text-sm">
-                      {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
+                      {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                        !user.isBlocked 
+                        !user?.isBlocked 
                           ? 'bg-[#16A34A]/10 text-[#16A34A] border border-[#16A34A]/20' 
                           : 'bg-red-100 text-red-800 border border-red-200'
                       }`}>
-                        {user.isBlocked ? 'Blocked' : 'Active'}
+                        {user?.isBlocked ? 'Blocked' : 'Active'}
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <button
-                        onClick={() => handleBlockUser(user._id || user.id, !user.isBlocked)}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1 transition-colors ${
-                          user.isBlocked 
-                            ? 'bg-[#16A34A] text-white hover:bg-[#16A34A]/90' 
-                            : 'bg-[#F97316] text-white hover:bg-[#F97316]/90'
-                        }`}
-                      >
-                        {user.isBlocked ? <FaCheckCircle size={12} /> : <FaBan size={12} />}
-                        <span>{user.isBlocked ? 'Unblock' : 'Block'}</span>
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => handleViewUserDetails(user)}
+                          className="px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1 border border-[#F97316] text-[#F97316] hover:bg-[#FFF7ED] transition-colors"
+                        >
+                          <FaEye size={12} />
+                          <span>Details</span>
+                        </button>
+                        <button
+                          onClick={() => handleBlockUser(userId, !user?.isBlocked)}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1 transition-colors ${
+                            user?.isBlocked 
+                              ? 'bg-[#16A34A] text-white hover:bg-[#16A34A]/90' 
+                              : 'bg-[#F97316] text-white hover:bg-[#F97316]/90'
+                          }`}
+                        >
+                          {user?.isBlocked ? <FaCheckCircle size={12} /> : <FaBan size={12} />}
+                          <span>{user?.isBlocked ? 'Unblock' : 'Block'}</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -287,6 +318,16 @@ const AdminUsers = () => {
           </div>
         )}
       </div>
+      <UserDetailsModal
+        open={Boolean(selectedUser)}
+        loading={detailsLoading}
+        details={selectedUserDetails}
+        fallbackUser={selectedUser}
+        onClose={() => {
+          setSelectedUser(null);
+          setSelectedUserDetails(null);
+        }}
+      />
     </div>
   );
 };

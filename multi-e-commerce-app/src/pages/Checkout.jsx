@@ -45,35 +45,6 @@ const Checkout = () => {
     });
   };
 
-  const getItemProductId = (item) => {
-    const productId = item.productId || item.product?._id || item.product?.id || item.id || item._id;
-    if (typeof productId === 'object') return productId?._id || productId?.id || '';
-    return productId;
-  };
-
-  const getItemImage = (item) => {
-    const image = item.image || item.product?.images?.[0] || item.images?.[0];
-    return typeof image === 'string' ? image : image?.url;
-  };
-
-  const buildReviewItems = () => {
-    const seen = new Set();
-
-    return cartItems
-      .map((item) => {
-        const productId = String(getItemProductId(item) || '');
-        if (!productId || seen.has(productId)) return null;
-        seen.add(productId);
-
-        return {
-          productId,
-          name: item.name || item.product?.name || 'Purchased product',
-          image: getItemImage(item),
-        };
-      })
-      .filter(Boolean);
-  };
-
   const closeReviewPopup = () => {
     setReviewItems([]);
     navigate(postOrderPath);
@@ -124,7 +95,6 @@ const Checkout = () => {
     setLoading(true);
 
     try {
-      const purchasedReviewItems = buildReviewItems();
       const orderData = {
         items: cartItems.map(item => ({
           productId: item.productId,
@@ -147,7 +117,7 @@ const Checkout = () => {
         }
       }
 
-      toast.success('Order placed successfully!');
+      toast.success('Order placed successfully! Complete payment before reviewing products.');
       const orderId =
         response?.data?.order?.id ||
         response?.data?.order?._id ||
@@ -157,15 +127,8 @@ const Checkout = () => {
         response?.data?.data?._id;
       const nextPath = orderId ? `/orders/${orderId}/track` : '/orders';
 
-      setPostOrderPath(nextPath);
-      setActiveReviewIndex(0);
-      setReviewDraft({ rating: 5, comment: '' });
-      setReviewItems(purchasedReviewItems);
       await clearCart();
-
-      if (purchasedReviewItems.length === 0) {
-        navigate(nextPath);
-      }
+      navigate(nextPath);
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to place order');
     } finally {

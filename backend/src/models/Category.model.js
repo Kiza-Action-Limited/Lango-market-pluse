@@ -28,10 +28,13 @@ const categorySchema = new mongoose.Schema(
     categoryType: {
       type: String,
       enum: [
+        'brand',
         'farmer',
         'wholesaler',
         'retailer',
         'manufacturer',
+        'small_business',
+        'logistics',
         'general'
       ],
       default: 'general'
@@ -45,7 +48,7 @@ const categorySchema = new mongoose.Schema(
 
     createdByRole: {
       type: String,
-      enum: ['farmer', 'wholesaler', 'retailer', 'manufacturer', 'admin'],
+      enum: ['brand', 'farmer', 'wholesaler', 'retailer', 'manufacturer', 'small_business', 'logistics', 'admin', 'seller'],
       required: true
     },
 

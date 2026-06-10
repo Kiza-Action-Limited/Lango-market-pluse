@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Category = require('../models/Category.model');
 const Product = require('../models/Product.model');
+const { getEffectiveUserCategory, isSellerUser } = require('../utils/userCategory');
 
 /**
  * GET ALL CATEGORIES
@@ -30,8 +31,8 @@ exports.getAllCategories = async (req, res, next) => {
     const formattedCategories = await Promise.all(
       categories.map(async (category) => {
         const productCount = await Product.countDocuments({
-          category: category._id,
-          isActive: true
+          category: category.slug || category.name,
+          isPublished: true
         });
 
         return {
@@ -76,10 +77,10 @@ exports.createCategory = async (req, res, next) => {
     // Get user from request (set by auth middleware)
     const user = req.user;
 
-    // Define allowed roles for category creation
-    const allowedRoles = ['farmer', 'wholesaler', 'retailer', 'manufacturer', 'admin'];
+    const effectiveCategory = getEffectiveUserCategory(user);
+    const canCreateCategory = user.role === 'admin' || isSellerUser(user);
     
-    if (!allowedRoles.includes(user.role)) {
+    if (!canCreateCategory) {
       return res.status(403).json({
         success: false,
         message: 'You are not authorized to create categories'
@@ -118,7 +119,7 @@ exports.createCategory = async (req, res, next) => {
       slug,
       description,
       image,
-      categoryType: categoryType || user.role, // Use user's role if categoryType not specified
+      categoryType: categoryType || (user.role === 'admin' ? 'general' : effectiveCategory),
       createdBy: user._id,
       createdByRole: user.role
     });
@@ -250,8 +251,8 @@ exports.deleteCategory = async (req, res, next) => {
 
     // Check products
     const productCount = await Product.countDocuments({
-      category: category._id,
-      isActive: true
+      category: category.slug || category.name,
+      isPublished: true
     });
 
     if (productCount > 0) {

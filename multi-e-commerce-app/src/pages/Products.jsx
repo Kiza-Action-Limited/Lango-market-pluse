@@ -6,12 +6,12 @@ import { FaFilter, FaTimes } from 'react-icons/fa';
 import { productService } from '../services/productService';
 
 const CATEGORY_LABELS = {
-  cereals: 'Cereals',
-  vegetables: 'Vegetables',
-  fruits: 'Fruits',
-  livestock: 'Livestock',
-  dairy: 'Dairy',
-  other: 'Other',
+  electronics: 'Electronics',
+  fashion: 'Fashion',
+  'home-garden': 'Home and Garden',
+  'beauty-health': 'Beauty and Health',
+  'sports-outdoor': 'Sports and Outdoor',
+  grocery: 'Grocery',
 };
 
 const toTitleCase = (value) =>

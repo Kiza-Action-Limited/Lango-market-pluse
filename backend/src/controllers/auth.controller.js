@@ -93,6 +93,8 @@ const mapBusinessType = (role, businessType) => {
     // Small business mappings
     'small business': 'small_business',
     'small_business': 'small_business',
+    'other business': 'small_business',
+    'other_business': 'small_business',
     'sme': 'small_business',
     
     // Analytics mappings
@@ -650,6 +652,7 @@ exports.completeRegistration = async (req, res) => {
       fullName, 
       role,
       businessType,
+      businessName,
       businessLogoUrl 
     } = req.body;
 
@@ -663,6 +666,7 @@ exports.completeRegistration = async (req, res) => {
       fullName,
       role,
       businessType,
+      businessName,
       businessLogoUrl,
       isPhoneVerified: true,
       isEmailVerified: true,
@@ -729,6 +733,7 @@ exports.register = async (req, res) => {
       fullName, 
       role, 
       businessType, 
+      businessName,
       businessLogoUrl,
       phoneOtpCode,
       emailOtpCode
@@ -770,6 +775,7 @@ exports.register = async (req, res) => {
       fullName,
       role,
       businessType,
+      businessName,
       businessLogoUrl,
       isPhoneVerified: !!phoneOtpCode,
       isEmailVerified: !!(email && emailOtpCode),

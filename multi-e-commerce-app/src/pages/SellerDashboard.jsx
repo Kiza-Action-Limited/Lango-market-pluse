@@ -7,8 +7,9 @@ import { formatCurrency } from '../utils/formatters';
 import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
 import { productService } from '../services/productService';
 import { orderService } from '../services/orderService';
-import { DonutGauge, KpiCard, Panel, ProgressRow, StatusPill } from '../components/dashboard/DashboardWidgets';
+import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill } from '../components/dashboard/DashboardWidgets';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
+import { buildReviewSummary, buildSalesByLocation, isPaidOrder } from '../utils/dashboardMetrics';
 
 const SellerDashboard = () => {
   const { activePlan, hasFeature } = useAuth();
@@ -163,6 +164,9 @@ const SellerDashboard = () => {
     return acc;
   }, {});
   const topCustomerLocations = Object.entries(customerLocationCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const paidSellerOrders = recentOrders.filter(isPaidOrder);
+  const salesByLocationRows = buildSalesByLocation(recentOrders);
+  const reviewSummary = buildReviewSummary(products, paidSellerOrders.length);
   const averageRating = products.length
     ? products.reduce((sum, product) => sum + Number(product.rating || 0), 0) / products.length
     : 0;
@@ -353,6 +357,19 @@ const SellerDashboard = () => {
             <p className="text-sm text-gray-500">Size/color variant sales will appear after product variants are stored on orders.</p>
           </div>
         </Panel>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <SalesByLocationPanel
+          className="xl:col-span-5"
+          locations={salesByLocationRows}
+          action={<Link to="/seller/orders" className="text-xs font-medium text-[#F97316]">View orders</Link>}
+        />
+        <CustomerReviewsPanel
+          className="xl:col-span-7"
+          summary={reviewSummary}
+          action={<Link to="/seller/products" className="text-xs font-medium text-[#F97316]">View all</Link>}
+        />
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">

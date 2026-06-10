@@ -37,6 +37,7 @@ const DEFAULT_REGISTRATION_DATA = {
   confirmPassword: '',
   role: 'buyer',
   businessType: '',
+  businessName: '',
   businessLogoUrl: '',
 };
 
@@ -88,6 +89,7 @@ const Register = () => {
         ...prev,
         role: roleParam,
         businessType: roleParam === 'seller' ? prev.businessType : '',
+        businessName: roleParam === 'seller' ? prev.businessName : '',
       }));
     }
   }, [searchParams]);
@@ -97,6 +99,7 @@ const Register = () => {
       ...prev,
       role,
       businessType: role === 'seller' ? prev.businessType : '',
+      businessName: role === 'seller' ? prev.businessName : '',
     }));
 
     const params = new URLSearchParams(searchParams);
@@ -271,6 +274,10 @@ const Register = () => {
     }
 
     if (targetStep === 4 && formData.role === 'seller') {
+      if (!formData.businessName.trim()) {
+        setError('Please enter your business name');
+        return false;
+      }
       if (!formData.businessType) {
         setError('Please select your business type');
         return false;
@@ -313,6 +320,11 @@ const Register = () => {
       return;
     }
 
+    if (formData.role === 'seller' && !formData.businessName.trim()) {
+      setError('Please enter your business name');
+      return;
+    }
+
     if (formData.role === 'seller' && !formData.businessLogoUrl) {
       setError('Please upload your business logo');
       return;
@@ -338,6 +350,7 @@ const Register = () => {
     setLoading(true);
     const { confirmPassword, ...registerData } = formData;
     registerData.phone = phoneValue;
+    registerData.businessName = registerData.role === 'seller' ? registerData.businessName.trim().replace(/\s+/g, ' ') : '';
     registerData.businessType = registerData.role === 'seller' ? registerData.businessType : registerData.role === 'logistics' ? 'logistics' : 'consumer';
 
     const result = await register(registerData);
@@ -579,6 +592,20 @@ const Register = () => {
               <div className="space-y-4">
                 {formData.role === 'seller' ? (
                   <div className="space-y-3">
+                    <div className="relative">
+                      <FaStore className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
+                      <input
+                        type="text"
+                        name="businessName"
+                        required
+                        minLength={2}
+                        maxLength={120}
+                        value={formData.businessName}
+                        onChange={handleChange}
+                        className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
+                        placeholder="Business name customers will see"
+                      />
+                    </div>
                     <div className="relative">
                       <FaStore className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
                       <select

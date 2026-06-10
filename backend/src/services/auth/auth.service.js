@@ -26,7 +26,7 @@ class AuthService {
   }
 
   async register(userData) {
-    const { password, email, fullName, role, businessType, businessLogoUrl } = userData;
+    const { password, email, fullName, role, businessType, businessLogoUrl, businessName } = userData;
     const phone = this.normalizePhone(userData.phone);
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : undefined;
 
@@ -47,12 +47,14 @@ class AuthService {
     const normalizedRole = typeof role === 'string' ? role.trim().toLowerCase() : undefined;
     const normalizedBusinessType = typeof businessType === 'string' ? businessType.trim().toLowerCase() : null;
     const normalizedBusinessLogoUrl = typeof businessLogoUrl === 'string' ? businessLogoUrl.trim() : '';
+    const normalizedBusinessName = typeof businessName === 'string' ? businessName.trim().replace(/\s+/g, ' ') : '';
     const roleMap = {
       seller: 'seller',
       farmer: 'farmer',
       wholesaler: 'seller',
       manufacturer: 'seller',
       retailer: 'seller',
+      vendor: 'seller',
       analytics: 'seller',
       analystic: 'seller',
       logistic: 'logistics',
@@ -74,11 +76,20 @@ class AuthService {
       throw error;
     }
 
+    if (userPayload.role === 'seller' && normalizedBusinessName.length < 2) {
+      const error = new Error('Business name is required for seller accounts');
+      error.statusCode = 400;
+      throw error;
+    }
+
     if (normalizedEmail) {
       userPayload.email = normalizedEmail;
     }
     if (normalizedBusinessType) {
       userPayload.businessType = normalizedBusinessType;
+    }
+    if (normalizedBusinessName) {
+      userPayload.businessName = normalizedBusinessName;
     }
     if (normalizedBusinessLogoUrl) {
       userPayload.businessLogoUrl = normalizedBusinessLogoUrl;

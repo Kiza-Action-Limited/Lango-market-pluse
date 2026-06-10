@@ -1,6 +1,6 @@
 // src/pages/ProductDetail.jsx
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { productService } from '../services/productService';
@@ -21,6 +21,11 @@ const ProductDetail = () => {
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [newReview, setNewReview] = useState({ rating: 5, comment: '' });
+  const [reviewEligibility, setReviewEligibility] = useState({
+    loading: false,
+    canReview: false,
+    message: 'Complete payment for this product before writing a review.',
+  });
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [activeImage, setActiveImage] = useState(0);
 
@@ -43,6 +48,7 @@ const ProductDetail = () => {
       setReviews(productPayload?.reviews || []);
       if (isAuthenticated) {
         checkWishlist();
+        checkReviewEligibility();
       }
     } catch (error) {
       console.error('Error fetching product:', error);
@@ -59,6 +65,25 @@ const ProductDetail = () => {
       setIsWishlisted(Boolean(response?.isWishlisted));
     } catch (error) {
       console.error('Error checking wishlist:', error);
+    }
+  };
+
+  const checkReviewEligibility = async () => {
+    setReviewEligibility((prev) => ({ ...prev, loading: true }));
+    try {
+      const response = await productService.getReviewEligibility(id);
+      setReviewEligibility({
+        loading: false,
+        canReview: Boolean(response?.canReview),
+        message: response?.message || 'Complete payment for this product before writing a review.',
+      });
+    } catch (error) {
+      const message = error?.response?.data?.message || 'Complete payment for this product before writing a review.';
+      setReviewEligibility({
+        loading: false,
+        canReview: false,
+        message,
+      });
     }
   };
 
@@ -122,6 +147,11 @@ const ProductDetail = () => {
       return;
     }
 
+    if (!reviewEligibility.canReview) {
+      toast.error(reviewEligibility.message);
+      return;
+    }
+
     try {
       const response = await productService.addReview(id, newReview);
       const createdReview = response?.review || response?.data?.review || response?.data || response;
@@ -130,7 +160,16 @@ const ProductDetail = () => {
         throw new Error('Review was not returned by the API');
       }
 
-      setReviews((prev) => [createdReview, ...prev]);
+      setReviews((prev) => {
+        const createdReviewId = createdReview?._id || createdReview?.id;
+        const createdReviewUserId = createdReview?.user?._id || createdReview?.user;
+        const next = prev.filter((review) => {
+          const reviewId = review?._id || review?.id;
+          const reviewUserId = review?.user?._id || review?.user;
+          return reviewId !== createdReviewId && String(reviewUserId || '') !== String(createdReviewUserId || '');
+        });
+        return [createdReview, ...next];
+      });
       setNewReview({ rating: 5, comment: '' });
       toast.success('Review submitted');
     } catch (error) {
@@ -172,6 +211,8 @@ const ProductDetail = () => {
   const availableStock = Number(product.stock ?? product.quantityAvailable ?? 0);
   const minOrderQty = getMinimumOrderQuantity(product);
   const isMqqRestricted = minOrderQty > 1;
+  const sellerId = product?.seller?._id || product?.seller?.id || product?.seller;
+  const sellerBusinessName = product?.seller?.businessName || product?.seller?.fullName || product?.seller?.name || 'Verified Seller';
   const metadataEntries = Object.entries(product.attributes || {}).filter(([, value]) => value !== '' && value !== null && value !== undefined);
 
   return (
@@ -224,7 +265,13 @@ const ProductDetail = () => {
           <div className="mb-4">
             <div className="flex items-center mb-2">
               <span className="font-semibold w-24">Seller:</span>
-              <span>{product.seller?.businessName}</span>
+              {sellerId ? (
+                <Link to={`/businesses/${sellerId}`} className="font-semibold text-[#F97316] hover:underline">
+                  {sellerBusinessName}
+                </Link>
+              ) : (
+                <span className="font-semibold text-[#111827]">{sellerBusinessName}</span>
+              )}
               <span className="ml-2 text-sm text-gray-500">({product.seller?.businessType})</span>
             </div>
             <div className="flex items-center">
@@ -349,7 +396,19 @@ const ProductDetail = () => {
         <h2 className="text-2xl font-bold mb-6">Customer Reviews</h2>
         
         {/* Write Review */}
-        {isAuthenticated && (
+        {!isAuthenticated ? (
+          <div className="bg-gray-50 p-6 rounded-lg mb-8 text-center">
+            <h3 className="text-lg font-semibold mb-2">Write a Review</h3>
+            <p className="text-gray-600">Log in after completing payment to review this product.</p>
+            <button type="button" onClick={() => navigate('/login')} className="btn-primary mt-4">
+              Log In
+            </button>
+          </div>
+        ) : reviewEligibility.loading ? (
+          <div className="bg-gray-50 p-6 rounded-lg mb-8 text-gray-600">
+            Checking review eligibility...
+          </div>
+        ) : reviewEligibility.canReview ? (
           <form onSubmit={handleSubmitReview} className="bg-gray-50 p-6 rounded-lg mb-8">
             <h3 className="text-lg font-semibold mb-4">Write a Review</h3>
             <div className="mb-4">
@@ -385,6 +444,11 @@ const ProductDetail = () => {
               Submit Review
             </button>
           </form>
+        ) : (
+          <div className="bg-gray-50 p-6 rounded-lg mb-8">
+            <h3 className="text-lg font-semibold mb-2">Write a Review</h3>
+            <p className="text-gray-600">{reviewEligibility.message}</p>
+          </div>
         )}
 
         {/* Reviews List */}
@@ -393,7 +457,7 @@ const ProductDetail = () => {
             <p className="text-gray-500 text-center py-8">No reviews yet. Be the first to review!</p>
           ) : (
             reviews.map((review) => (
-              <div key={review.id} className="border-b pb-4">
+              <div key={review.id || review._id} className="border-b pb-4">
                 <div className="flex items-center mb-2">
                   <div className="flex mr-2">{renderStars(review.rating)}</div>
                   <span className="font-semibold">{review.user?.name}</span>

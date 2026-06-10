@@ -9,19 +9,10 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
-router.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Notifications API is available',
-    endpoints: [
-      '/sms',
-      '/push',
-      '/email',
-      '/register-token',
-      '/preferences'
-    ]
-  });
-});
+router.get('/', notificationController.getNotifications);
+router.get('/unread-count', notificationController.getUnreadCount);
+router.put('/read-all', notificationController.markAllAsRead);
+router.delete('/', notificationController.deleteAllNotifications);
 
 router.post(
   '/sms',
@@ -65,5 +56,7 @@ router.post(
 
 router.get('/preferences', notificationController.getPreferences);
 router.put('/preferences', notificationController.updatePreferences);
+router.put('/:notificationId/read', notificationController.markAsRead);
+router.delete('/:notificationId', notificationController.deleteNotification);
 
 module.exports = router;

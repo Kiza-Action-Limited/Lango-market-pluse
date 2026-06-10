@@ -4,6 +4,12 @@ const { body } = require('express-validator');
 const authController = require('../../controllers/auth.controller');
 const { protect } = require('../../middleware/auth');
 
+const requireSellerBusinessName = body('businessName')
+  .if((value, { req }) => ['seller', 'vendor', 'farmer'].includes(String(req.body.role || '').toLowerCase()))
+  .trim()
+  .isLength({ min: 2, max: 120 })
+  .withMessage('Business name is required for seller accounts and must be 2-120 characters');
+
 // ============================================
 // Step-by-Step Registration Routes (v1)
 // ============================================
@@ -73,6 +79,7 @@ router.post(
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     body('fullName').notEmpty().withMessage('Full name is required'),
     body('role').isIn(['farmer', 'buyer', 'vendor', 'admin', 'seller', 'logistics']).withMessage('Invalid role'),
+    requireSellerBusinessName,
     body('businessType').optional(),
     body('businessLogoUrl').optional().isURL().withMessage('Valid URL is required for business logo'),
   ],
@@ -220,6 +227,7 @@ router.post(
     body('email').optional().isEmail().withMessage('Valid email address is required'),
     body('fullName').notEmpty().withMessage('Full name is required'),
     body('role').isIn(['farmer', 'buyer', 'vendor', 'admin', 'seller', 'logistics']).withMessage('Invalid role'),
+    requireSellerBusinessName,
   ],
   authController.register
 );

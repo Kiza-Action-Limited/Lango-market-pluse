@@ -40,7 +40,14 @@ const ProductSchema = new mongoose.Schema(
     category: {
       type: String,
       required: true,
-      enum: ['cereals', 'vegetables', 'fruits', 'livestock', 'dairy', 'other'],
+      enum: [
+        'electronics',
+        'fashion',
+        'home-garden',
+        'beauty-health',
+        'sports-outdoor',
+        'grocery',
+      ],
       index: true,
     },
     description: String,

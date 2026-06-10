@@ -1,8 +1,10 @@
 const Product = require('../models/Product.model');
+const Order = require('../models/Order.model');
 const { validationResult } = require('express-validator');
 const planService = require('../services/subscription/plan.service');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary.config');
 const { PLAN_IDS } = require('../config/subscriptionPlans');
+const { isFarmerUser, isSellerUser } = require('../utils/userCategory');
 
 const PLAN_PRODUCT_LIMITS = {
   free: 30,
@@ -14,7 +16,7 @@ const PLAN_PRODUCT_LIMITS = {
   [PLAN_IDS.MIZIGO]: 0,
 };
 
-const SELLER_ROLES = new Set(['seller', 'farmer']);
+const PAID_REVIEW_STATUSES = ['payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed'];
 
 const getEffectivePlan = async (userId) => {
   try {
@@ -37,10 +39,17 @@ const getProductLimitForPlan = (plan) => PLAN_PRODUCT_LIMITS[plan] ?? PLAN_PRODU
  */
 exports.createProduct = async (req, res, next) => {
   try {
-    if (!SELLER_ROLES.has(req.user.role)) {
+    if (!isSellerUser(req.user)) {
       return res.status(403).json({
         success: false,
         message: 'Only sellers or farmers can add products.',
+      });
+    }
+
+    if (!String(req.user.businessName || '').trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Business name is required before adding products. Update your seller business profile first.',
       });
     }
 
@@ -99,12 +108,17 @@ exports.createProduct = async (req, res, next) => {
       }
     }
 
+    let category = String(req.body.category || '').trim().toLowerCase();
+    if (isFarmerUser(req.user)) {
+      category = 'grocery';
+    }
+
     const productData = {
       name: req.body.name,
       description: req.body.description,
       price: parseFloat(req.body.price),
       quantityAvailable: parseInt(req.body.quantityAvailable, 10),
-      category: req.body.category,
+      category,
       unit: req.body.unit,
       locationHub: req.body.locationHub || '',
       images: uploadedImages,
@@ -187,7 +201,7 @@ exports.getProducts = async (req, res, next) => {
       .sort(sort)
       .skip(skip)
       .limit(parseInt(limit))
-      .populate('seller', 'fullName name email businessType businessLogoUrl');
+      .populate('seller', 'fullName name email businessName businessType businessLogoUrl');
 
     const totalProducts = await Product.countDocuments(filter);
     const totalPages = Math.ceil(totalProducts / parseInt(limit));
@@ -211,7 +225,7 @@ exports.getProducts = async (req, res, next) => {
  */
 exports.getProductById = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id).populate('seller', 'fullName name email businessType businessLogoUrl');
+    const product = await Product.findById(req.params.id).populate('seller', 'fullName name email businessName businessType businessLogoUrl');
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
@@ -277,6 +291,10 @@ exports.updateProduct = async (req, res, next) => {
         else product[field] = req.body[field];
       }
     });
+
+    if (isFarmerUser(req.user)) {
+      product.category = 'grocery';
+    }
 
     // Handle customAttributes
     if (req.body.customAttributes) {
@@ -438,7 +456,7 @@ exports.getLowStockProducts = async (req, res, next) => {
  */
 exports.getMyProducts = async (req, res, next) => {
   try {
-    if (!SELLER_ROLES.has(req.user.role)) {
+    if (!isSellerUser(req.user)) {
       return res.status(403).json({
         success: false,
         message: 'Only sellers or farmers can access this dashboard.',
@@ -537,6 +555,48 @@ exports.getProductReviews = async (req, res, next) => {
 };
 
 /**
+ * Check whether authenticated user can review a product
+ * GET /api/v1/products/:id/reviews/eligibility
+ */
+exports.getReviewEligibility = async (req, res, next) => {
+  try {
+    const product = await Product.findById(req.params.id).select('seller');
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    if (String(product.seller) === String(req.user.id)) {
+      return res.status(200).json({
+        success: true,
+        canReview: false,
+        message: 'You cannot review your own product.',
+      });
+    }
+
+    const paidOrder = await Order.findOne({
+      buyer: req.user.id,
+      product: req.params.id,
+      $or: [
+        { status: { $in: PAID_REVIEW_STATUSES } },
+        { paymentStatus: 'completed' },
+      ],
+    }).select('_id status paymentStatus');
+
+    res.status(200).json({
+      success: true,
+      canReview: Boolean(paidOrder),
+      message: paidOrder
+        ? 'You can review this product.'
+        : 'Complete payment for this product before writing a review.',
+      orderId: paidOrder?._id,
+    });
+  } catch (error) {
+    console.error('Error in getReviewEligibility:', error);
+    next(error);
+  }
+};
+
+/**
  * Add product review
  * POST /api/v1/products/:id/reviews
  */
@@ -552,6 +612,26 @@ exports.addProductReview = async (req, res, next) => {
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    if (String(product.seller) === String(req.user.id)) {
+      return res.status(403).json({ success: false, message: 'You cannot review your own product.' });
+    }
+
+    const paidOrder = await Order.exists({
+      buyer: req.user.id,
+      product: req.params.id,
+      $or: [
+        { status: { $in: PAID_REVIEW_STATUSES } },
+        { paymentStatus: 'completed' },
+      ],
+    });
+
+    if (!paidOrder) {
+      return res.status(403).json({
+        success: false,
+        message: 'Complete payment for this product before writing a review.',
+      });
     }
 
     const existingReviewIndex = product.reviews.findIndex(

@@ -28,6 +28,19 @@ const UserSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    businessName: {
+      type: String,
+      trim: true,
+      minlength: [2, 'Business name must be at least 2 characters'],
+      maxlength: [120, 'Business name cannot exceed 120 characters'],
+      required: [
+        function requiredBusinessNameOnCreate() {
+          return this.isNew && ['seller', 'farmer'].includes(this.role);
+        },
+        'Business name is required for seller accounts',
+      ],
+      index: true,
+    },
     role: {
       type: String,
       enum: ['seller', 'farmer', 'buyer', 'logistics', 'admin'],

@@ -65,8 +65,13 @@ export const NotificationProvider = ({ children }) => {
     try {
       setLoading(true);
       const response = await notificationService.getNotifications();
-      setNotifications(response.notifications);
-      setUnreadCount(response.notifications.filter(n => !n.read).length);
+      const nextNotifications = Array.isArray(response.notifications) ? response.notifications : [];
+      setNotifications(nextNotifications);
+      setUnreadCount(
+        typeof response.unreadCount === 'number'
+          ? response.unreadCount
+          : nextNotifications.filter(n => !n.read).length
+      );
     } catch (error) {
       console.error('Error fetching notifications:', error);
     } finally {
@@ -82,12 +87,15 @@ export const NotificationProvider = ({ children }) => {
   const markAsRead = async (notificationId) => {
     try {
       await notificationService.markAsRead(notificationId);
+      const wasUnread = notifications.some(n => n.id === notificationId && !n.read);
       setNotifications(prev =>
         prev.map(n =>
           n.id === notificationId ? { ...n, read: true } : n
         )
       );
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      if (wasUnread) {
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
     } catch (error) {
       console.error('Error marking notification as read:', error);
     }

@@ -23,23 +23,26 @@ const NotificationBell = () => {
   return (
     <div className="relative" ref={dropdownRef}>
       <button
+        type="button"
+        aria-label="Open notifications"
         onClick={() => setIsOpen(!isOpen)}
-        className="relative hover:text-primary-light transition"
+        className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 transition hover:bg-gray-100 hover:text-primary"
       >
         <FaBell size={20} />
         {unreadCount > 0 && (
-          <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+          <span className="absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-xs font-semibold leading-none text-white">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg overflow-hidden z-50">
+        <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg sm:w-96">
           <div className="p-3 border-b flex justify-between items-center">
             <h3 className="font-semibold">Notifications</h3>
             {unreadCount > 0 && (
               <button
+                type="button"
                 onClick={markAllAsRead}
                 className="text-xs text-primary hover:underline"
               >
@@ -54,22 +57,33 @@ const NotificationBell = () => {
                 No notifications
               </div>
             ) : (
-              notifications.map((notification) => (
+              notifications.map((notification) => {
+                const notificationId = notification.id || notification._id;
+                const source = notification.data?.source || notification.type || 'system';
+                const message = notification.message || notification.body || '';
+
+                return (
                 <div
-                  key={notification.id}
+                  key={notificationId}
                   className={`p-3 border-b hover:bg-gray-50 cursor-pointer ${!notification.read ? 'bg-blue-50' : ''}`}
                   onClick={() => {
-                    markAsRead(notification.id);
+                    markAsRead(notificationId);
                     setIsOpen(false);
                   }}
                 >
-                  <p className="text-sm font-medium">{notification.title}</p>
-                  <p className="text-xs text-gray-600 mt-1">{notification.message}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-medium text-gray-900">{notification.title}</p>
+                    <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium capitalize text-gray-600">
+                      {source.replace('_', ' ')}
+                    </span>
+                  </div>
+                  {message && <p className="text-xs text-gray-600 mt-1">{message}</p>}
                   <p className="text-xs text-gray-400 mt-1">
                     {formatDate(notification.createdAt)}
                   </p>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

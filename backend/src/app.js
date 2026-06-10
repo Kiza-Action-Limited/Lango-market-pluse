@@ -97,8 +97,10 @@ app.use('/api/v1/cart', cartRoutes);
 app.use('/api/v1/wishlist', wishlistRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/v1/categories', categoryRoutes);
+app.use('/api/categories', categoryRoutes);
 app.use('/api/v1/subscriptions', subscriptionRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/v1/logistics', logisticsRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/payments', paymentRoutes);
@@ -117,7 +119,9 @@ app.get('/api/test', (req, res) => {
       notifications: '/api/v1/notifications',
       cart: '/api/v1/cart',
       categories: '/api/v1/categories',
+      categoriesLegacy: '/api/categories',
       admin: '/api/v1/admin',
+      adminLegacy: '/api/admin',
       logistics: '/api/v1/logistics',
       analytics: '/api/v1/analytics',
       subscriptions: '/api/v1/subscriptions',

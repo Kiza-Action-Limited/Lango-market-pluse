@@ -8,11 +8,17 @@ import {
   FaDollarSign, FaBoxes, FaMapMarkerAlt, FaExclamationTriangle,
   FaLeaf, FaCalendarAlt, FaTint, FaBarcode
 } from 'react-icons/fa';
+import { useAuth } from '../contexts/AuthContext';
 import { productService } from '../services/productService';
+import { getUserCategoryLabel, isFarmerUser } from '../utils/userCategory';
 
 const AddProduct = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isFarmer = isFarmerUser(user);
+  const userCategoryLabel = getUserCategoryLabel(user);
+  const hasBusinessName = Boolean(String(user?.businessName || '').trim());
   const [loading, setLoading] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [planUsage, setPlanUsage] = useState(null);
@@ -33,12 +39,11 @@ const AddProduct = () => {
   const [errors, setErrors] = useState({});
 
   const categories = [
-    { value: 'cereals', label: 'Cereals & Grains', icon: '🌾' },
-    { value: 'vegetables', label: 'Vegetables', icon: '🥬' },
-    { value: 'fruits', label: 'Fruits', icon: '🍎' },
-    { value: 'livestock', label: 'Livestock', icon: '🐄' },
-    { value: 'dairy', label: 'Dairy Products', icon: '🥛' },
-    { value: 'other', label: 'Other', icon: '📦' },
+    { value: 'electronics', label: 'Electronics', icon: '📱' },
+    { value: 'fashion', label: 'Fashion', icon: '👗' },
+    { value: 'home-garden', label: 'Home and Garden', icon: '🏡' },
+    { value: 'beauty-health', label: 'Beauty and Health', icon: '💄' },
+    { value: 'sports-outdoor', label: 'Sports and Outdoor', icon: '🏀' },
   ];
 
   const units = [
@@ -56,6 +61,12 @@ const AddProduct = () => {
       fetchProduct();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (isFarmer && formData.category !== 'grocery') {
+      setFormData((prev) => ({ ...prev, category: 'grocery' }));
+    }
+  }, [isFarmer, formData.category]);
 
   const checkPlanUsage = async () => {
     try {
@@ -108,11 +119,15 @@ const AddProduct = () => {
     if (!formData.name.trim()) {
       newErrors.name = 'Product name is required';
     }
-    if (!formData.price || parseFloat(formData.price) < 0) {
-      newErrors.price = 'Valid price is required';
+
+    const price = Number(formData.price);
+    if (formData.price === '' || Number.isNaN(price) || price < 0) {
+      newErrors.price = 'Enter a valid price of 0 or more';
     }
-    if (!formData.quantityAvailable || parseInt(formData.quantityAvailable) < 0) {
-      newErrors.quantityAvailable = 'Valid quantity is required';
+
+    const quantity = Number(formData.quantityAvailable);
+    if (formData.quantityAvailable === '' || Number.isNaN(quantity) || quantity < 0) {
+      newErrors.quantityAvailable = 'Enter a valid stock quantity of 0 or more';
     }
     if (!formData.category) {
       newErrors.category = 'Please select a category';
@@ -122,7 +137,7 @@ const AddProduct = () => {
     }
     
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    return newErrors;
   };
 
   const handleChange = (e) => {
@@ -224,9 +239,16 @@ const AddProduct = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!hasBusinessName) {
+      toast.error('Add your business name in your seller profile before creating products');
+      return;
+    }
     
-    if (!validateForm()) {
-      toast.error('Please fix the errors in the form');
+    const formErrors = validateForm();
+    const firstError = Object.values(formErrors)[0];
+    if (firstError) {
+      toast.error(firstError);
       return;
     }
     
@@ -311,9 +333,23 @@ const AddProduct = () => {
             </h1>
           </div>
           <p className="text-gray-600">
-            List your products and reach customers across Kenya
+            List products for your {userCategoryLabel} account and reach customers across Kenya
           </p>
         </div>
+
+        {!hasBusinessName && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
+            <div className="flex items-start gap-3">
+              <FaExclamationTriangle className="mt-0.5 text-red-600" />
+              <div>
+                <p className="font-semibold">Business name required</p>
+                <p className="mt-1 text-sm">
+                  Add a business name to your seller profile before creating products. Customers use it to view business details.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Plan Usage Alert */}
         {planUsage && !id && (
@@ -437,17 +473,27 @@ const AddProduct = () => {
                     name="category"
                     value={formData.category}
                     onChange={handleChange}
+                    disabled={isFarmer}
                     className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
                       errors.category ? 'border-red-500' : 'border-gray-300'
                     }`}
                   >
                     <option value="">Select category</option>
-                    {categories.map(cat => (
-                      <option key={cat.value} value={cat.value}>
-                        {cat.icon} {cat.label}
-                      </option>
-                    ))}
+                    {isFarmer ? (
+                      <option value="grocery">Grocery</option>
+                    ) : (
+                      categories.filter((cat) => cat.value !== 'grocery').map(cat => (
+                        <option key={cat.value} value={cat.value}>
+                          {cat.label}
+                        </option>
+                      ))
+                    )}
                   </select>
+                  {isFarmer && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Your account category is Farmer, so all products are automatically categorized as Grocery.
+                    </p>
+                  )}
                   {errors.category && <p className="text-red-500 text-sm mt-1">{errors.category}</p>}
                 </div>
                 
@@ -644,8 +690,14 @@ const AddProduct = () => {
             </button>
             <button
               type="submit"
-              disabled={loading || (planUsage && planUsage.remainingSlots === 0 && !id)}
-              title={planUsage && planUsage.remainingSlots === 0 && !id ? 'Plan limit reached. Upgrade to Smart or Growth for unlimited SKUs.' : ''}
+              disabled={loading || !hasBusinessName || (planUsage && planUsage.remainingSlots === 0 && !id)}
+              title={
+                !hasBusinessName
+                  ? 'Add your business name before creating products.'
+                  : planUsage && planUsage.remainingSlots === 0 && !id
+                    ? 'Plan limit reached. Upgrade to Smart or Growth for unlimited SKUs.'
+                    : ''
+              }
               className="px-8 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
             >
               {loading ? (

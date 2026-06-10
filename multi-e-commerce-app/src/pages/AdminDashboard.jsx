@@ -17,8 +17,10 @@ import {
   FaChartPie, FaCalendarAlt, FaFileExport, FaBellSlash
 } from 'react-icons/fa';
 import { formatCurrency, formatDate, formatDateTime } from '../utils/formatters';
-import { DonutGauge, KpiCard, Panel, ProgressRow, StatusPill } from '../components/dashboard/DashboardWidgets';
+import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill, StoreVisitsBySourcePanel } from '../components/dashboard/DashboardWidgets';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
+import { buildReviewSummary, buildSalesByLocation, buildStoreVisitSources, isPaidOrder } from '../utils/dashboardMetrics';
+import UserDetailsModal from '../components/admin/UserDetailsModal';
 
 const AdminDashboard = ({ section = 'dashboard' }) => {
   const { token, user } = useAuth();
@@ -71,10 +73,12 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [userDetailsLoading, setUserDetailsLoading] = useState(false);
   
   // Selected items
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUserDetails, setSelectedUserDetails] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedLogistics, setSelectedLogistics] = useState(null);
   const [selectedPayment, setSelectedPayment] = useState(null);
@@ -154,7 +158,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               limit: itemsPerPage
             }
           });
-          setUsers(usersRes.data.users);
+          setUsers(Array.isArray(usersRes.data.users) ? usersRes.data.users.filter(Boolean) : []);
           setTotalPages(usersRes.data.pagination?.pages || 1);
           break;
           
@@ -276,6 +280,26 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     } catch (error) {
       console.error('Error changing user role:', error);
       alert('Failed to change user role');
+    }
+  };
+
+  const handleViewUserDetails = async (userRow) => {
+    const userId = userRow?._id || userRow?.id || userRow?.userId;
+    if (!userId) return;
+
+    setSelectedUser(userRow);
+    setSelectedUserDetails(null);
+    setShowUserModal(true);
+    setUserDetailsLoading(true);
+
+    try {
+      const response = await api.get(`/v1/admin/users/${userId}`);
+      setSelectedUserDetails(response.data);
+    } catch (error) {
+      console.error('Error loading user details:', error);
+      alert(error.response?.data?.message || 'Failed to load user details');
+    } finally {
+      setUserDetailsLoading(false);
     }
   };
 
@@ -433,6 +457,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     const topLocations = Object.entries(locationCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
+    const paidOrders = orders.filter(isPaidOrder);
+    const salesByLocationRows = buildSalesByLocation(orders);
+    const reviewSummary = buildReviewSummary(products, paidOrders.length);
+    const storeVisitSources = buildStoreVisitSources({
+      orders,
+      usersTotal: totalUsers,
+      productsTotal: totalProducts,
+    });
     const lowStockCount = products.filter((product) => Number(product.stock ?? product.quantityAvailable ?? 0) > 0 && Number(product.stock ?? product.quantityAvailable ?? 0) <= 10).length;
     const outOfStockProducts = products.filter((product) => Number(product.stock ?? product.quantityAvailable ?? 0) <= 0).length;
     const topStockProducts = [...products]
@@ -576,6 +608,24 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                 <ProgressRow label="Out of stock" value={stats.products.outOfStock || 0} max={Math.max(totalProducts, 1)} color="#DC2626" detail={`${stats.products.outOfStock || 0}`} />
               </div>
             </Panel>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <SalesByLocationPanel
+              className="xl:col-span-4"
+              locations={salesByLocationRows}
+              action={<button onClick={() => handleExportData('orders')} className="text-xs font-medium text-[#F97316]">Export</button>}
+            />
+            <StoreVisitsBySourcePanel
+              className="xl:col-span-4"
+              sources={storeVisitSources.sources}
+              totalLabel={storeVisitSources.totalLabel}
+            />
+            <CustomerReviewsPanel
+              className="xl:col-span-4"
+              summary={reviewSummary}
+              action={<button onClick={() => navigate('/admin/products')} className="text-xs font-medium text-[#F97316]">View all</button>}
+            />
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -969,6 +1019,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
       consumer: 'bg-indigo-100 text-indigo-800',
       logistics: 'bg-cyan-100 text-cyan-800'
     };
+    const visibleUsers = users.filter(Boolean);
 
     return (
       <div className="bg-[#F9FAFB] min-h-screen py-8">
@@ -1049,25 +1100,29 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user, index) => (
-                    <tr key={user._id} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                  {visibleUsers.map((user, index) => {
+                    const userId = user._id || user.id || user.userId || `user-${index}`;
+                    const userRole = user?.role || 'consumer';
+
+                    return (
+                    <tr key={userId} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                       <td className="px-6 py-4">
                         <div>
-                          <p className="font-medium text-[#111827]">{user.name}</p>
-                          <p className="text-xs text-gray-500">ID: {user._id.slice(-8)}</p>
+                          <p className="font-medium text-[#111827]">{user.name || user.fullName || 'Unknown User'}</p>
+                          <p className="text-xs text-gray-500">ID: {String(userId).slice(-8)}</p>
                         </div>
                       </td>
                       <td className="px-6 py-4">
                         <div>
-                          <p className="text-sm">{user.email}</p>
-                          <p className="text-xs text-gray-500">{user.phone}</p>
+                          <p className="text-sm">{user.email || '-'}</p>
+                          <p className="text-xs text-gray-500">{user.phone || '-'}</p>
                         </div>
                       </td>
                       <td className="px-6 py-4">
                         <select
-                          value={user.role}
-                          onChange={(e) => handleChangeUserRole(user._id, e.target.value)}
-                          className={`px-2 py-1 rounded-full text-xs font-medium border ${roleColors[user.role]}`}
+                          value={userRole}
+                          onChange={(e) => handleChangeUserRole(userId, e.target.value)}
+                          className={`px-2 py-1 rounded-full text-xs font-medium border ${roleColors[userRole] || 'bg-gray-100 text-gray-800'}`}
                         >
                           <option value="farmer">Farmer</option>
                           <option value="wholesaler">Wholesaler</option>
@@ -1097,14 +1152,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                       <td className="px-6 py-4">
                         <div className="flex gap-2">
                           <button
-                            onClick={() => handleVerifyUser(user._id, !user.isVerified)}
+                            onClick={() => handleVerifyUser(userId, !user.isVerified)}
                             className="p-1 text-blue-600 hover:text-blue-800"
                             title={user.isVerified ? 'Unverify' : 'Verify'}
                           >
                             <FaUserCheck />
                           </button>
                           <button
-                            onClick={() => handleBlockUser(user._id, !user.isBlocked)}
+                            onClick={() => handleBlockUser(userId, !user.isBlocked)}
                             className={`p-1 ${user.isBlocked ? 'text-green-600' : 'text-red-600'} hover:opacity-80`}
                             title={user.isBlocked ? 'Unblock' : 'Block'}
                           >
@@ -1112,8 +1167,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                           </button>
                           <button
                             onClick={() => {
-                              setSelectedUser(user);
-                              setShowUserModal(true);
+                              handleViewUserDetails(user);
                             }}
                             className="p-1 text-[#F97316] hover:text-[#FB923C]"
                             title="View Details"
@@ -1123,7 +1177,8 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1674,6 +1729,22 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   }
 
   // ==================== MODALS ====================
+
+  if (showUserModal && selectedUser) {
+    return (
+      <UserDetailsModal
+        open={showUserModal}
+        loading={userDetailsLoading}
+        details={selectedUserDetails}
+        fallbackUser={selectedUser}
+        onClose={() => {
+          setShowUserModal(false);
+          setSelectedUser(null);
+          setSelectedUserDetails(null);
+        }}
+      />
+    );
+  }
   
   // Broadcast Modal
   if (showBroadcastModal) {

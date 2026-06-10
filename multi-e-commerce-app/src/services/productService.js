@@ -46,4 +46,9 @@ export const productService = {
     const response = await api.get(`/v1/products/${productId}/reviews`);
     return response.data;
   },
+
+  getReviewEligibility: async (productId) => {
+    const response = await api.get(`/v1/products/${productId}/reviews/eligibility`);
+    return response.data;
+  },
 };

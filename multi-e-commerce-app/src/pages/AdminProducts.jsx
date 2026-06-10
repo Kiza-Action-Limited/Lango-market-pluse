@@ -13,12 +13,13 @@ const AdminProducts = () => {
 
   const getProductId = (product) => product?._id || product?.id;
   const isProductActive = (product) => {
+    if (typeof product?.isPublished === 'boolean') return product.isPublished;
     if (typeof product?.isActive === 'boolean') return product.isActive;
     if (typeof product?.active === 'boolean') return product.active;
     if (typeof product?.status === 'string') return product.status.toLowerCase() === 'active';
     return false;
   };
-  const getStock = (product) => product?.stock ?? product?.quantity ?? product?.inventory ?? product?.inventoryCount ?? 0;
+  const getStock = (product) => product?.stock ?? product?.quantityAvailable ?? product?.quantity ?? product?.inventory ?? product?.inventoryCount ?? 0;
   const getSellerName = (product) =>
     product?.seller?.businessName ||
     product?.seller?.name ||

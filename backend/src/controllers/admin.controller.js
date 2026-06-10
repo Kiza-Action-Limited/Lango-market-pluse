@@ -5,6 +5,7 @@ const Category = require('../models/Category.model');
 const Transaction = require('../models/Transaction.model');
 const Logistics = require('../models/Logistics.model');
 const Analytics = require('../models/Analytics.model');
+const { validationResult } = require('express-validator');
 
 /**
  * Get comprehensive system statistics
@@ -14,16 +15,16 @@ exports.getStats = async (req, res, next) => {
   try {
     // User statistics by role
     const totalUsers = await User.countDocuments();
-    const farmers = await User.countDocuments({ role: 'farmer' });
-    const wholesalers = await User.countDocuments({ role: 'wholesaler' });
-    const retailers = await User.countDocuments({ role: 'retailer' });
-    const consumers = await User.countDocuments({ role: 'consumer' });
-    const logistics = await User.countDocuments({ role: 'logistics' });
+    const farmers = await User.countDocuments({ $or: [{ role: 'farmer' }, { businessType: 'farmer' }] });
+    const wholesalers = await User.countDocuments({ businessType: 'wholesaler' });
+    const retailers = await User.countDocuments({ businessType: 'retailer' });
+    const consumers = await User.countDocuments({ $or: [{ role: 'buyer' }, { role: 'consumer' }, { businessType: 'consumer' }] });
+    const logistics = await User.countDocuments({ $or: [{ role: 'logistics' }, { businessType: 'logistics' }] });
     
     // Product statistics
     const totalProducts = await Product.countDocuments();
-    const activeProducts = await Product.countDocuments({ isActive: true });
-    const outOfStock = await Product.countDocuments({ stock: 0 });
+    const activeProducts = await Product.countDocuments({ isPublished: true });
+    const outOfStock = await Product.countDocuments({ quantityAvailable: 0 });
     
     // Order statistics
     const totalOrders = await Order.countDocuments();
@@ -85,7 +86,15 @@ exports.getAllUsers = async (req, res, next) => {
     const { role, status, search, page = 1, limit = 20 } = req.query;
     const query = {};
     
-    if (role && role !== 'all') query.role = role;
+    if (role && role !== 'all') {
+      if (['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business', 'logistics'].includes(role)) {
+        query.$or = [{ role }, { businessType: role }];
+      } else if (role === 'consumer') {
+        query.$or = [{ role: 'buyer' }, { role: 'consumer' }, { businessType: 'consumer' }];
+      } else {
+        query.role = role;
+      }
+    }
     if (status === 'active') query.isActive = true;
     if (status === 'blocked') query.isBlocked = true;
     if (status === 'verified') query.isVerified = true;
@@ -123,31 +132,90 @@ exports.getAllUsers = async (req, res, next) => {
  */
 exports.getUserDetails = async (req, res, next) => {
   try {
-    const user = await User.findById(req.params.userId).select('-password');
+    const user = await User.findById(req.params.userId).select('-password').lean();
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+    const userId = user._id;
     
-    // Get user specific analytics
-    const orderStats = await Order.aggregate([
-      { $match: { $or: [{ customer: user._id }, { seller: user._id }] } },
+    const orderMatch = { $or: [{ buyer: userId }, { customer: userId }, { seller: userId }] };
+    const [orderStats, recentOrders, sellerProducts, buyerOrderCount, sellerOrderCount] = await Promise.all([
+      Order.aggregate([
+      { $match: orderMatch },
       { $group: {
         _id: null,
         totalOrders: { $sum: 1 },
-        totalSpent: { $sum: '$total' },
-        avgOrderValue: { $avg: '$total' }
+        totalSpent: {
+          $sum: {
+            $cond: [
+              { $eq: ['$buyer', userId] },
+              { $ifNull: ['$totalAmount', { $ifNull: ['$total', 0] }] },
+              0,
+            ],
+          },
+        },
+        totalSales: {
+          $sum: {
+            $cond: [
+              { $eq: ['$seller', userId] },
+              { $ifNull: ['$totalAmount', { $ifNull: ['$total', 0] }] },
+              0,
+            ],
+          },
+        },
+        avgOrderValue: { $avg: { $ifNull: ['$totalAmount', { $ifNull: ['$total', 0] }] } }
       }}
-    ]);
-    
-    const recentOrders = await Order.find({ $or: [{ customer: user._id }, { seller: user._id }] })
+    ]),
+      Order.find(orderMatch)
       .sort('-createdAt')
       .limit(10)
-      .populate('items.product', 'name');
+        .populate('buyer', 'fullName name email phone role businessType')
+        .populate('seller', 'fullName name businessName email phone role businessType')
+        .populate('product', 'name price category images')
+        .lean(),
+      Product.find({ seller: userId })
+        .select('name category price quantityAvailable isPublished soldCount rating reviews createdAt')
+        .sort('-createdAt')
+        .limit(10)
+        .lean(),
+      Order.countDocuments({ $or: [{ buyer: userId }, { customer: userId }] }),
+      Order.countDocuments({ seller: userId }),
+    ]);
+
+    const productStats = await Product.aggregate([
+      { $match: { seller: userId } },
+      {
+        $group: {
+          _id: null,
+          totalProducts: { $sum: 1 },
+          publishedProducts: { $sum: { $cond: ['$isPublished', 1, 0] } },
+          lowStockProducts: { $sum: { $cond: [{ $lte: ['$quantityAvailable', 5] }, 1, 0] } },
+          totalSold: { $sum: { $ifNull: ['$soldCount', 0] } },
+          avgRating: { $avg: { $ifNull: ['$rating', 0] } },
+        },
+      },
+    ]);
     
     res.status(200).json({
       success: true,
       user,
-      analytics: orderStats[0] || { totalOrders: 0, totalSpent: 0, avgOrderValue: 0 },
+      analytics: {
+        totalOrders: 0,
+        buyerOrders: buyerOrderCount,
+        sellerOrders: sellerOrderCount,
+        totalSpent: 0,
+        totalSales: 0,
+        avgOrderValue: 0,
+        ...(orderStats[0] || {}),
+      },
+      productStats: productStats[0] || {
+        totalProducts: 0,
+        publishedProducts: 0,
+        lowStockProducts: 0,
+        totalSold: 0,
+        avgRating: 0,
+      },
+      products: sellerProducts,
       recentOrders
     });
   } catch (error) {
@@ -161,10 +229,11 @@ exports.getUserDetails = async (req, res, next) => {
  */
 exports.updateUser = async (req, res, next) => {
   try {
-    const { role, isBlocked, isVerified, userType, businessName, phone, address } = req.body;
+    const { role, businessType, isBlocked, isVerified, userType, businessName, phone, address } = req.body;
     const updates = {};
     
     if (role) updates.role = role;
+    if (businessType) updates.businessType = businessType;
     if (isBlocked !== undefined) updates.isBlocked = isBlocked;
     if (isVerified !== undefined) updates.isVerified = isVerified;
     if (userType) updates.userType = userType;
@@ -392,8 +461,8 @@ exports.getAllProducts = async (req, res, next) => {
     const query = {};
     
     if (category && category !== 'all') query.category = category;
-    if (status === 'active') query.isActive = true;
-    if (status === 'inactive') query.isActive = false;
+    if (status === 'active') query.isPublished = true;
+    if (status === 'inactive') query.isPublished = false;
     if (minPrice) query.price = { $gte: parseFloat(minPrice) };
     if (maxPrice) query.price = { ...query.price, $lte: parseFloat(maxPrice) };
     if (farmer) query.seller = farmer;
@@ -421,6 +490,9 @@ exports.getAllProducts = async (req, res, next) => {
       
       return {
         ...product.toObject(),
+        isActive: product.isPublished,
+        active: product.isPublished,
+        stock: product.quantityAvailable,
         analytics: {
           totalSold: salesData[0]?.totalSold || 0,
           totalRevenue: salesData[0]?.totalRevenue || 0,
@@ -433,6 +505,99 @@ exports.getAllProducts = async (req, res, next) => {
       success: true,
       products: enhancedProducts,
       pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Update product status/details as admin
+ * PUT /api/v1/admin/products/:productId
+ */
+exports.updateProduct = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const product = await Product.findById(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    const allowedUpdates = [
+      'name',
+      'description',
+      'price',
+      'quantityAvailable',
+      'unit',
+      'category',
+      'locationHub',
+      'isPublished',
+    ];
+
+    allowedUpdates.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        if (field === 'price') product[field] = parseFloat(req.body[field]);
+        else if (field === 'quantityAvailable') product[field] = parseInt(req.body[field], 10);
+        else if (field === 'isPublished') product[field] = req.body[field] === true || req.body[field] === 'true';
+        else product[field] = req.body[field];
+      }
+    });
+
+    if (req.body.isActive !== undefined) {
+      product.isPublished = req.body.isActive === true || req.body.isActive === 'true';
+    }
+
+    await product.save();
+
+    const responseProduct = product.toObject();
+    responseProduct.isActive = product.isPublished;
+    responseProduct.active = product.isPublished;
+    responseProduct.stock = product.quantityAvailable;
+
+    res.status(200).json({
+      success: true,
+      message: 'Product updated successfully',
+      product: responseProduct,
+      data: responseProduct,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Toggle product published status as admin
+ * PUT /api/v1/admin/products/:productId/toggle
+ */
+exports.toggleProductStatus = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const product = await Product.findById(req.params.productId);
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    product.isPublished = !product.isPublished;
+    await product.save();
+
+    const responseProduct = product.toObject();
+    responseProduct.isActive = product.isPublished;
+    responseProduct.active = product.isPublished;
+    responseProduct.stock = product.quantityAvailable;
+
+    res.status(200).json({
+      success: true,
+      message: product.isPublished ? 'Product activated' : 'Product deactivated',
+      product: responseProduct,
+      data: responseProduct,
     });
   } catch (error) {
     next(error);

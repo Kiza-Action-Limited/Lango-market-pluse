@@ -53,7 +53,7 @@ const getProductSellerType = (product = {}) =>
   clean(product?.seller?.businessType || product?.seller?.role || product?.businessType || product?.sellerType);
 
 export const buildSupplierCards = (products = [], users = [], premiumProfiles = [], businesses = []) => {
-  const sellerUsers = users.filter((user) => user.role === 'seller');
+  const sellerUsers = users.filter((user) => user?.role === 'seller');
   const businessById = new Map(
     businesses.map((biz) => [
       String(biz?.id || biz?._id || biz?.userId || ''),

@@ -27,6 +27,8 @@ router.put('/orders/:orderId/status', param('orderId').isMongoId(), [
 
 // Product Management
 router.get('/products', adminController.getAllProducts);
+router.put('/products/:productId/toggle', param('productId').isMongoId(), adminController.toggleProductStatus);
+router.put('/products/:productId', param('productId').isMongoId(), adminController.updateProduct);
 
 // Logistics Management
 router.get('/logistics', adminController.getLogistics);

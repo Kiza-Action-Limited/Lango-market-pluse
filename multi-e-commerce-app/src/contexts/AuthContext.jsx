@@ -10,6 +10,7 @@ import {
   resolveActivePlan,
 } from '../utils/subscription';
 import { subscriptionService } from '../services/subscriptionService';
+import { isBuyerUser, isSellerUser } from '../utils/userCategory';
 
 const AuthContext = createContext();
 
@@ -137,11 +138,6 @@ export const AuthProvider = ({ children }) => {
   };
 
   const hasFeature = (featureKey) => hasFeatureAccess(activePlan, featureKey);
-  const roleValue = String(user?.role || '').toLowerCase();
-  const businessTypeValue = String(user?.businessType || '').toLowerCase();
-  const sellerCategories = new Set(['seller', 'wholesaler', 'farmer', 'retailer', 'manufacturer']);
-  const buyerCategories = new Set(['buyer', 'consumer']);
-
   const value = {
     user,
     loading,
@@ -157,8 +153,8 @@ export const AuthProvider = ({ children }) => {
     resetPlanToDefault,
     isAuthenticated: !!user,
     isAdmin: user?.role === 'admin',
-    isSeller: user?.role === 'admin' || sellerCategories.has(roleValue) || sellerCategories.has(businessTypeValue),
-    isBuyer: buyerCategories.has(roleValue) || buyerCategories.has(businessTypeValue)
+    isSeller: isSellerUser(user),
+    isBuyer: isBuyerUser(user)
   };
 
   return (
