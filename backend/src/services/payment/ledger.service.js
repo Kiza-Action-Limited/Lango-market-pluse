@@ -1,48 +1,59 @@
 const Transaction = require('../../models/Transaction.model');
-const User = require('../../models/User.model');
+const Wallet = require('../../models/Wallet.model');
 
 class LedgerService {
   async holdInEscrow(orderId, buyerId, amount) {
-    // Deduct from buyer's wallet and move to escrow
-    const buyer = await User.findById(buyerId);
-    if (buyer.walletBalance < amount) throw new Error('Insufficient funds');
-    buyer.walletBalance -= amount;
-    buyer.escrowBalance += amount;
-    await buyer.save();
+    const wallet = await Wallet.findOne({ user: buyerId });
+    if (!wallet || wallet.balance < amount) throw new Error('Insufficient funds');
+    
+    wallet.lockedBalance += amount;
+    await wallet.save();
 
     await Transaction.create({
       user: buyerId,
       type: 'escrow_hold',
       amount,
-      balanceAfter: buyer.walletBalance,
-      reference: orderId,
+      status: 'completed',
       description: `Escrow hold for order ${orderId}`,
+      orderId,
     });
   }
 
   async transferEscrowToWallet(orderId, sellerId, amount) {
-    const seller = await User.findById(sellerId);
-    seller.walletBalance += amount;
-    await seller.save();
+    const wallet = await Wallet.findOne({ user: sellerId });
+    if (!wallet) {
+      const newWallet = new Wallet({ user: sellerId, balance: amount });
+      await newWallet.save();
+    } else {
+      wallet.balance += amount;
+      await wallet.save();
+    }
 
-    // Also reduce escrow balance of buyer? This requires tracking per order.
-    // Simplified: we don't track per-order escrow on user doc; we trust order status.
-    // For production, you'd have a separate EscrowTransaction model.
+    await Transaction.create({
+      user: sellerId,
+      type: 'escrow_release',
+      amount,
+      status: 'completed',
+      description: `Escrow release for order ${orderId}`,
+      orderId,
+    });
   }
 
   async refundToBuyer(orderId, buyerId, amount) {
-    const buyer = await User.findById(buyerId);
-    buyer.walletBalance += amount;
-    buyer.escrowBalance -= amount;
-    await buyer.save();
+    const wallet = await Wallet.findOne({ user: buyerId });
+    if (!wallet) throw new Error('Wallet not found');
+    
+    wallet.lockedBalance -= amount;
+    wallet.balance += amount;
+    await wallet.save();
 
     await Transaction.create({
       user: buyerId,
       type: 'refund',
       amount,
-      balanceAfter: buyer.walletBalance,
-      reference: orderId,
+      status: 'completed',
       description: `Refund for cancelled order ${orderId}`,
+      orderId,
     });
   }
 

@@ -15,7 +15,8 @@ exports.initiateMpesaPayment = async (req, res, next) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { orderId, phoneNumber } = req.body;
+    const orderId = req.body.orderId || req.params.id;
+    const phoneNumber = req.body.phoneNumber || req.user.phone;
     const result = await mpesaService.initiatePayment(orderId, phoneNumber, req.user.id);
     res.status(200).json({
       success: true,

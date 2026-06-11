@@ -5,23 +5,15 @@
  * Kakuma–Kitale Corridor | Plan 4 "Mizigo"
  *
  * Base path: /api/v1/logistics
- *
- * Role access:
- *  admin      — full access
- *  logistics  — driver/fleet operations (own records + job acceptance)
- *  wholesaler — read own shipments, create logistics for their orders
- *  retailer   — read own inbound shipments, confirm QR delivery
- *  farmer     — read own outbound shipments
- *  manufacturer — read own outbound shipments
  */
 
-const express    = require('express');
+const express = require('express');
 const { body, param, query } = require('express-validator');
-const ctrl       = require('../../controllers/logistics.controller');
+const ctrl = require('../../controllers/logistics.controller');
 const { protect, authorize } = require('../../middleware/auth');
-const { validate }   = require('../../middleware/validation');
+const { validate } = require('../../middleware/validation');
 const subscriptionGate = require('../../middleware/subscriptionGate');
-const requireApprovedLogistics = require('../../middleware/requireApprovedLogistics');
+const requireVerified = require('../../middleware/requireVerified');
 const { uploadDocuments, handleUploadError } = require('../../middleware/upload');
 
 const router = express.Router();
@@ -57,7 +49,6 @@ router
   .route('/')
   .post(
     authorize('admin', 'wholesaler', 'manufacturer', 'farmer'),
-    requireApprovedLogistics,
     subscriptionGate(['growth', 'mizigo']),
     [
       body('orderId').isMongoId().withMessage('Valid order ID required.'),
@@ -77,7 +68,7 @@ router
     subscriptionGate(['growth', 'mizigo']),
     [
       query('page').optional().isInt({ min: 1 }),
-      query('limit').optional().isInt({ min: 1, max: 100 }), 
+      query('limit').optional().isInt({ min: 1, max: 100 }),
       query('status').optional().isString(),
     ],
     validate,
@@ -116,6 +107,32 @@ router.post(
   ],
   validate,
   ctrl.bulkUpdateStatus
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QR TOKEN MANAGEMENT (MISSING ROUTES - ADD THIS SECTION)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Generate QR tokens for existing logistics record
+router.post(
+  '/:id/generate-qr-tokens',
+  authorize('admin', 'wholesaler', 'manufacturer', 'farmer'),
+  [
+    param('id').isMongoId(),
+  ],
+  validate,
+  ctrl.generateQrTokens
+);
+
+// Get QR tokens for a logistics record
+router.get(
+  '/:id/qr-tokens',
+  authorize('admin', 'logistics', 'farmer', 'wholesaler', 'manufacturer', 'retailer'),
+  [
+    param('id').isMongoId(),
+  ],
+  validate,
+  ctrl.getQrTokens
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,11 +222,39 @@ router.post(
   [
     param('id').isMongoId(),
     body('step').isIn(['pickup', 'delivery']).withMessage('step must be "pickup" or "delivery".'),
+    body('token').isString().notEmpty().withMessage('A single-use QR token is required.'),
     body('gpsCoords.lat').optional().isFloat({ min: -90, max: 90 }),
     body('gpsCoords.lng').optional().isFloat({ min: -180, max: 180 }),
   ],
   validate,
   ctrl.processQrScan
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ESCROW & DISPUTES - REQUIRE KYB VERIFICATION (Financial transactions)
+// ─────────────────────────────────────────────────────────────────────────────
+
+router.post(
+  '/:id/escrow/release',
+  authorize('admin', 'logistics', 'wholesaler', 'manufacturer'),
+  requireVerified,
+  [
+    param('id').isMongoId(),
+    body('triggeredBy').optional().isString(),
+  ],
+  validate,
+  ctrl.releaseEscrow
+);
+
+router.post(
+  '/:id/dispute',
+  authorize('admin', 'logistics', 'wholesaler', 'manufacturer', 'retailer'),
+  requireVerified,
+  [
+    param('id').isMongoId(),
+  ],
+  validate,
+  ctrl.openDispute
 );
 
 module.exports = router;

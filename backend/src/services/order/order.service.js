@@ -136,7 +136,7 @@ class OrderService {
 
   async cancelOrder(orderId, userId, userRole, reason) {
     const order = await this.getOrderById(orderId, userId, userRole);
-    if (!['pending_payment', 'payment_escrowed'].includes(order.status)) {
+    if (!['pending_payment', 'AWAITING_PAYMENT', 'payment_escrowed', 'FUNDS_HELD'].includes(order.status)) {
       throw httpError('Order cannot be cancelled at this stage', 409, { currentStatus: order.status });
     }
 
@@ -144,7 +144,7 @@ class OrderService {
     await productService.releaseReservedStock(order.product, order.quantity);
 
     // If payment was escrowed, refund
-    if (order.status === 'payment_escrowed') {
+    if (['payment_escrowed', 'FUNDS_HELD'].includes(order.status)) {
       await escrowService.cancelEscrow(orderId, reason, userId);
     }
 
@@ -165,30 +165,40 @@ class OrderService {
     if (!order) throw httpError('Order not found', 404);
     if (order.buyer.toString() !== buyerId) throw httpError('Unauthorized', 403);
 
-    if (order.status === 'completed') {
+    if (['completed', 'RELEASED'].includes(order.status)) {
       return order;
     }
 
-    if (['cancelled', 'disputed'].includes(order.status)) {
+    if (['cancelled', 'disputed', 'DISPUTED'].includes(order.status)) {
       throw httpError(`Cannot confirm delivery for a ${order.status} order`, 409, {
         currentStatus: order.status,
         expectedStatus: 'delivered',
       });
     }
 
-    if (order.status !== 'delivered') {
+    if (!['delivered', 'DELIVERED'].includes(order.status)) {
       throw httpError('Order must be marked delivered before buyer confirmation', 409, {
         currentStatus: order.status,
         expectedStatus: 'delivered',
       });
     }
 
-    order.status = 'completed';
-    // Escrow will be auto-released by job, but we set escrowReleaseDate
-    order.escrowReleaseDate = new Date(Date.now() + 72 * 60 * 60 * 1000);
-    await order.save();
+    const release = await escrowService.releasePayment(orderId, {
+      releasedBy: buyerId,
+      forceRelease: false,
+      releaseMethod: 'manual_confirm',
+    });
 
-    return order;
+    return release.escrow ? await Order.findById(orderId) : order;
+  }
+
+  async raiseDispute(orderId, userId, data) {
+    const order = await Order.findById(orderId);
+    if (!order) throw httpError('Order not found', 404);
+    const isParty = order.buyer.toString() === userId || order.seller.toString() === userId;
+    if (!isParty) throw httpError('Unauthorized', 403);
+
+    return escrowService.raiseDispute(orderId, userId, data);
   }
 
   async updateOrderStatus(orderId, userId, userRole, nextStatus) {
@@ -203,9 +213,18 @@ class OrderService {
 
     const allowedTransitions = {
       pending_payment: ['processing', 'cancelled'],
+      AWAITING_PAYMENT: ['EXPIRED', 'cancelled'],
       payment_escrowed: ['processing', 'cancelled'],
+      FUNDS_HELD: ['IN_TRANSIT', 'DISPUTED', 'cancelled'],
       processing: ['dispatched', 'cancelled'],
       dispatched: ['delivered'],
+      IN_TRANSIT: ['DELIVERED', 'DISPUTED'],
+      DELIVERED: ['RELEASED', 'DISPUTED'],
+      DISPUTED: [],
+      RELEASED: [],
+      REFUNDED: [],
+      PARTIAL_REFUND: [],
+      EXPIRED: [],
       delivered: [],
       completed: [],
       cancelled: [],

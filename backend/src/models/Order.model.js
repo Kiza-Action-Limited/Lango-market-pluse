@@ -62,6 +62,15 @@ const OrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        'AWAITING_PAYMENT',
+        'FUNDS_HELD',
+        'IN_TRANSIT',
+        'DELIVERED',
+        'RELEASED',
+        'DISPUTED',
+        'REFUNDED',
+        'PARTIAL_REFUND',
+        'EXPIRED',
         'pending_payment',
         'payment_escrowed',
         'processing',
@@ -75,6 +84,9 @@ const OrderSchema = new mongoose.Schema(
       index: true,
     },
     escrowReleaseDate: Date,
+    paidAt: Date,
+    deliveredAt: Date,
+    releasedAt: Date,
     paymentIntentId: String,
     deliveryAddress: AddressSchema,
     deliveryAddressText: {

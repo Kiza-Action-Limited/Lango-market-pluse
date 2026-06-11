@@ -12,6 +12,9 @@ const startServer = async () => {
       process.env.AUTH_FALLBACK_MODE = 'true';
       console.warn('Auth fallback mode enabled (in-memory users).');
     }
+    if (process.env.REDIS_ENABLED === 'true') {
+      require('./jobs/escrowAutoRelease');
+    }
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });

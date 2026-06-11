@@ -194,3 +194,16 @@ exports.getEscrowSummary = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.resolveDispute = async (req, res, next) => {
+  try {
+    const result = await escrowService.resolveDispute(req.params.id, req.user.id, req.body);
+    res.status(200).json({
+      success: true,
+      message: 'Dispute resolved',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

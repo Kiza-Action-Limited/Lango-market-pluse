@@ -1,53 +1,60 @@
-const { Queue, Worker } = require('bull');
-const { redisClient } = require('../config/redis');
-const Order = require('../models/Order.model');
-const Logistics = require('../models/Logistics.model');
+const { Worker } = require('bullmq');
+const { redisClient, escrowQueue } = require('../config/redis');
+const Escrow = require('../models/Escrow.model');
 const escrowService = require('../services/order/escrow.service');
 const logger = require('../utils/logger');
 
-const escrowQueue = new Queue('escrow', { connection: redisClient });
+const scheduleAutoRelease = async (orderId, releaseDate) => escrowService.scheduleAutoRelease(orderId, releaseDate);
+const cancelAutoRelease = async (orderId) => escrowService.cancelAutoRelease(orderId);
 
-// Schedule auto-release for orders that have escrowReleaseDate set
-const scheduleAutoRelease = async (orderId, releaseDate) => {
-  const delay = releaseDate.getTime() - Date.now();
-  if (delay > 0) {
-    await escrowQueue.add('release', { orderId }, { delay });
-    logger.info(`Scheduled escrow release for order ${orderId} in ${delay}ms`);
-  }
-};
+let worker = null;
 
-// Worker to process releases
-const worker = new Worker('escrow', async (job) => {
-  const { orderId } = job.data;
-  logger.info(`Auto-releasing escrow for order ${orderId}`);
-  await escrowService.releasePayment(orderId, { forceRelease: false });
-}, { connection: redisClient });
+if (redisClient) {
+  worker = new Worker(
+    'escrow',
+    async (job) => {
+      if (job.name === 'auto-release') {
+        logger.info(`Auto-releasing escrow for order ${job.data.orderId}`);
+        return escrowService.releasePayment(job.data.orderId, {
+          forceRelease: false,
+          releaseMethod: 'auto_72h',
+        });
+      }
 
-// Also add a recurring job to catch any missed releases (runs every 15 min)
-escrowQueue.add('catchup', {}, {
-  repeat: { cron: '*/15 * * * *' },
-  removeOnComplete: true,
-});
+      if (job.name === 'catchup') {
+        const pending = await Escrow.find({
+          status: 'DELIVERED',
+          autoReleaseAt: { $lte: new Date() },
+        }).select('order');
 
-const catchupWorker = new Worker('escrow', async (job) => {
-  if (job.name === 'catchup') {
-    const now = new Date();
-    const orders = await Order.find({
-      status: 'completed',
-      escrowReleaseDate: { $lte: now },
-      $or: [{ 'timeline.status': { $ne: 'escrow_released' } }],
-    });
-    for (const order of orders) {
-      logger.info(`Catchup releasing escrow for order ${order._id}`);
-      await escrowService.releasePayment(order._id, { forceRelease: false });
+        for (const escrow of pending) {
+          await escrowService.releasePayment(escrow.order, {
+            forceRelease: false,
+            releaseMethod: 'auto_72h_catchup',
+          });
+        }
+
+        return { processed: pending.length };
+      }
+
+      return null;
+    },
+    { connection: redisClient }
+  );
+
+  worker.on('failed', (job, error) => {
+    logger.error(`Escrow job ${job?.id} failed: ${error.message}`);
+  });
+
+  escrowQueue.add(
+    'catchup',
+    {},
+    {
+      jobId: 'escrow-catchup',
+      repeat: { pattern: '*/15 * * * *' },
+      removeOnComplete: true,
     }
+  ).catch((error) => logger.error(`Failed to schedule escrow catchup: ${error.message}`));
+}
 
-    const pendingLogistics = await Logistics.findPendingAutoReleases();
-    for (const shipment of pendingLogistics) {
-      logger.info(`Catchup releasing logistics escrow for shipment ${shipment._id}`);
-      await shipment.releaseEscrow('auto');
-    }
-  }
-}, { connection: redisClient });
-
-module.exports = { escrowQueue, scheduleAutoRelease, worker, catchupWorker };
+module.exports = { escrowQueue, scheduleAutoRelease, cancelAutoRelease, worker };

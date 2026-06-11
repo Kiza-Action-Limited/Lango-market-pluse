@@ -3,18 +3,18 @@
 /**
  * Lango MarketPulse — Logistics Controller
  * Kakuma–Kitale Corridor | Plan 4 "Mizigo"
- *
- * Handles all HTTP logic for logistics records.
- * Business logic (escrow, QR, notifications) lives in services.
  */
 
-const Logistics  = require('../models/Logistics.model');
-const Order      = require('../models/Order.model');
-const User       = require('../models/User.model');
+const Logistics = require('../models/Logistics.model');
+const Order = require('../models/Order.model');
+const User = require('../models/User.model');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { validationResult } = require('express-validator');
 const dispatchSvc = require('../services/notification/dispatch.service');
-const logger     = require('../utils/logger');
+const qrChainSvc = require('../services/order/qrChain.service');
+const escrowService = require('../services/order/escrow.service');
+const QRToken = require('../models/QRToken.model');
+const logger = require('../utils/logger');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
@@ -68,10 +68,6 @@ const uploadLogisticsDocument = async (file, userId, documentType) => {
 // LOGISTICS APPLICATION FLOW
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * POST /api/v1/logistics/apply
- * Registers a user into the logistics verification pipeline.
- */
 exports.applyAsLogistics = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -157,10 +153,6 @@ exports.applyAsLogistics = async (req, res, next) => {
   }
 };
 
-/**
- * GET /api/v1/logistics/me/application
- * Returns the current logistics application state.
- */
 exports.getMyLogisticsApplication = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id).select(
@@ -188,10 +180,6 @@ exports.getMyLogisticsApplication = async (req, res, next) => {
 // CREATE
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Create a new logistics record for an approved order.
- * POST /api/v1/logistics
- */
 exports.createLogistics = async (req, res, next) => {
   try {
     const { orderId, carrier, pickupAddress, shippingAddress, weight, weightUnit, dimensions, cargoType, isExpress, notes } = req.body;
@@ -199,6 +187,18 @@ exports.createLogistics = async (req, res, next) => {
     const order = await Order.findById(orderId).populate('seller buyer');
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found.' });
+    }
+
+    const userId = req.user._id || req.user.id;
+    const isSeller = order.seller._id.toString() === userId.toString();
+    const isBuyer = order.buyer._id.toString() === userId.toString();
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isSeller && !isBuyer && !isAdmin) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'You can only create logistics for your own orders.' 
+      });
     }
 
     const existing = await Logistics.findOne({ order: orderId });
@@ -216,26 +216,34 @@ exports.createLogistics = async (req, res, next) => {
       : order.deliveryAddress;
 
     const logistics = await Logistics.create({
-      order           : orderId,
+      order: orderId,
       orderNumber,
-      seller          : order.seller._id,
-      buyer           : order.buyer._id,
-      carrier         : carrier ?? 'solo_owner_operator',
-      pickupAddress   : normalizeAddress(pickupAddress),
-      shippingAddress : normalizeAddress(shippingAddress, orderDeliveryAddress),
+      seller: order.seller._id,
+      buyer: order.buyer._id,
+      carrier: carrier ?? 'solo_owner_operator',
+      pickupAddress: normalizeAddress(pickupAddress),
+      shippingAddress: normalizeAddress(shippingAddress, orderDeliveryAddress),
       weight,
       weightUnit,
       dimensions,
       cargoType,
-      isExpress       : isExpress ?? false,
+      isExpress: isExpress ?? false,
       notes,
-      status          : 'pending',
+      status: 'pending',
     });
 
+    const qrTokens = await qrChainSvc.generateTripTokens(logistics);
+
     return res.status(201).json({
-      success : true,
-      message : 'Logistics record created.',
-      data    : logistics,
+      success: true,
+      message: 'Logistics record created.',
+      data: {
+        logistics,
+        qrTokens: {
+          pickup: qrTokens.pickupToken,
+          delivery: qrTokens.deliveryToken,
+        },
+      },
     });
   } catch (err) {
     next(err);
@@ -246,31 +254,27 @@ exports.createLogistics = async (req, res, next) => {
 // READ
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * List all logistics records with optional filters and pagination.
- * GET /api/v1/logistics
- */
 exports.getAllLogistics = async (req, res, next) => {
   try {
     const { status, carrier, driverId, startDate, endDate, page = 1, limit = 20 } = req.query;
     const query = {};
 
-    if (status   && status   !== 'all') query.status  = status;
-    if (carrier  && carrier  !== 'all') query.carrier = carrier;
+    if (status && status !== 'all') query.status = status;
+    if (carrier && carrier !== 'all') query.carrier = carrier;
     if (driverId) query.driver = driverId;
 
     if (startDate || endDate) {
       query.createdAt = {};
       if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate)   query.createdAt.$lte = new Date(endDate);
+      if (endDate) query.createdAt.$lte = new Date(endDate);
     }
 
     const [records, total, stats] = await Promise.all([
       Logistics.find(query)
         .populate('order', 'orderNumber total')
-        .populate('seller',  'name phone')
-        .populate('buyer',   'name phone')
-        .populate('driver',  'name phone')
+        .populate('seller', 'name phone')
+        .populate('buyer', 'name phone')
+        .populate('driver', 'name phone')
         .sort('-createdAt')
         .skip((page - 1) * limit)
         .limit(parseInt(limit, 10)),
@@ -279,14 +283,14 @@ exports.getAllLogistics = async (req, res, next) => {
     ]);
 
     return res.status(200).json({
-      success    : true,
-      data       : records,
+      success: true,
+      data: records,
       stats,
-      pagination : {
-        page  : parseInt(page, 10),
-        limit : parseInt(limit, 10),
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
         total,
-        pages : Math.ceil(total / limit),
+        pages: Math.ceil(total / limit),
       },
     });
   } catch (err) {
@@ -294,9 +298,6 @@ exports.getAllLogistics = async (req, res, next) => {
   }
 };
 
-/**
- * GET /api/v1/logistics/:id
- */
 exports.getLogisticsById = async (req, res, next) => {
   try {
     const logistics = await Logistics.findById(req.params.id)
@@ -313,9 +314,6 @@ exports.getLogisticsById = async (req, res, next) => {
   }
 };
 
-/**
- * GET /api/v1/logistics/order/:orderId
- */
 exports.getLogisticsByOrder = async (req, res, next) => {
   try {
     const logistics = await Logistics.findOne({ order: req.params.orderId })
@@ -336,10 +334,6 @@ exports.getLogisticsByOrder = async (req, res, next) => {
 // UPDATE — STATUS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Update logistics status with tracking history entry.
- * PUT /api/v1/logistics/:id/status
- */
 exports.updateLogisticsStatus = async (req, res, next) => {
   try {
     const { status, location, notes, gpsCoords } = req.body;
@@ -351,7 +345,6 @@ exports.updateLogisticsStatus = async (req, res, next) => {
 
     await logistics.updateStatus(status, { location, notes, gpsCoords, updatedBy: req.user._id });
 
-    // Mirror status to associated order
     if (status === 'delivered') {
       await Order.findByIdAndUpdate(logistics.order, { status: 'delivered', deliveredAt: new Date() });
     } else if (status === 'in_transit') {
@@ -370,10 +363,6 @@ exports.updateLogisticsStatus = async (req, res, next) => {
 // UPDATE — DRIVER ASSIGNMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Assign or re-assign a driver to a shipment.
- * PUT /api/v1/logistics/:id/assign-driver
- */
 exports.assignDriver = async (req, res, next) => {
   try {
     const { driverId, driverName, driverPhone } = req.body;
@@ -389,27 +378,30 @@ exports.assignDriver = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'User is not a registered logistics driver.' });
       }
 
-      logistics.driver      = driverId;
-      logistics.driverName  = driver.name;
+      logistics.driver = driverId;
+      logistics.driverName = driver.name;
       logistics.driverPhone = driver.phone;
 
-      // Determine payment routing
-      if (driver.fleetOwner) {
-        logistics.fleetOwner = driver.fleetOwner;
-        logistics.carrier    = 'fleet_managed';
+      const fleetOwnerId = driver.employer || driver.logisticsProfile?.fleetOwner || driver.ownerAccount;
+      if (fleetOwnerId) {
+        logistics.fleetOwner = fleetOwnerId;
+        logistics.carrier = 'fleet_managed';
       } else {
         logistics.carrier = 'solo_owner_operator';
       }
+
+      await QRToken.updateOne(
+        { logistics: logistics._id, type: 'DELIVERY', isUsed: false },
+        { $set: { holder: driverId } }
+      );
     } else {
-      // Manual override (external driver without a platform account)
-      logistics.driverName  = driverName;
+      logistics.driverName = driverName;
       logistics.driverPhone = driverPhone;
-      logistics.carrier     = 'third_party';
+      logistics.carrier = 'third_party';
     }
 
     await logistics.updateStatus('driver_assigned', { updatedBy: req.user._id });
 
-    // Notify the seller that a driver has been assigned
     const order = await Order.findById(logistics.order);
     if (order) {
       const eta = logistics.estimatedDelivery
@@ -417,11 +409,11 @@ exports.assignDriver = async (req, res, next) => {
         : 'TBC';
 
       await dispatchSvc.dispatch({
-        userIds : [logistics.seller],
+        userIds: [logistics.seller],
         channels: ['push'],
-        title   : `Driver assigned to your shipment`,
-        body    : `${logistics.driverName} (${logistics.driverPhone}) will collect your cargo. ETA: ${eta}.`,
-        data    : { shipmentId: logistics._id.toString(), driverName: logistics.driverName },
+        title: `Driver assigned to your shipment`,
+        body: `${logistics.driverName} (${logistics.driverPhone}) will collect your cargo. ETA: ${eta}.`,
+        data: { shipmentId: logistics._id.toString(), driverName: logistics.driverName },
       });
     }
 
@@ -435,10 +427,6 @@ exports.assignDriver = async (req, res, next) => {
 // UPDATE — TRACKING INFO
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Update tracking number, carrier, and estimated delivery date.
- * PUT /api/v1/logistics/:id/tracking
- */
 exports.updateTracking = async (req, res, next) => {
   try {
     const { trackingNumber, carrier, estimatedDelivery } = req.body;
@@ -448,8 +436,8 @@ exports.updateTracking = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Logistics record not found.' });
     }
 
-    if (trackingNumber)   logistics.trackingNumber  = trackingNumber;
-    if (carrier)          logistics.carrier         = carrier;
+    if (trackingNumber) logistics.trackingNumber = trackingNumber;
+    if (carrier) logistics.carrier = carrier;
     if (estimatedDelivery) logistics.estimatedDelivery = new Date(estimatedDelivery);
 
     await logistics.save();
@@ -461,53 +449,388 @@ exports.updateTracking = async (req, res, next) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QR HANDSHAKE
+// QR TOKEN MANAGEMENT (FIXED - WITH DELETE EXISTING TOKENS)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Process a QR scan event (pickup or delivery step of the 3-way handshake).
- * POST /api/v1/logistics/:id/qr-scan
- *
- * Body: { step: 'pickup' | 'delivery', gpsCoords: { lat, lng } }
+ * Generate QR tokens for existing logistics record
+ * POST /api/v1/logistics/:id/generate-qr-tokens
  */
+exports.generateQrTokens = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const logistics = await Logistics.findById(id);
+    
+    if (!logistics) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Logistics record not found.' 
+      });
+    }
+
+    // Check if user has permission
+    const userId = req.user._id || req.user.id;
+    const isSeller = logistics.seller.toString() === userId.toString();
+    const isAdmin = req.user.role === 'admin';
+    
+    if (!isSeller && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the seller or admin can generate QR tokens.'
+      });
+    }
+
+    // CRITICAL FIX: Delete existing QR tokens to avoid duplicate key error
+    const deletedResult = await QRToken.deleteMany({ logistics: logistics._id });
+    logger.info(`Deleted ${deletedResult.deletedCount} existing QR tokens for logistics ${id}`);
+
+    // Reset QR confirmation flags
+    logistics.pickupQrConfirmed = false;
+    logistics.deliveryQrConfirmed = false;
+    logistics.pickupQrScannedAt = null;
+    logistics.deliveryQrScannedAt = null;
+    logistics.pickupQrScannedBy = null;
+    logistics.deliveryQrScannedBy = null;
+    logistics.pickupQrToken = null;
+    logistics.deliveryQrToken = null;
+    await logistics.save();
+
+    // Generate new QR tokens
+    const qrTokens = await qrChainSvc.generateTripTokens(logistics);
+
+    // Update logistics with QR token references
+    logistics.pickupQrToken = qrTokens.pickupToken;
+    logistics.deliveryQrToken = qrTokens.deliveryToken;
+    await logistics.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'QR tokens generated successfully',
+      data: {
+        pickupToken: qrTokens.pickupToken,
+        deliveryToken: qrTokens.deliveryToken,
+        logisticsId: logistics._id
+      }
+    });
+  } catch (err) {
+    logger.error('Error generating QR tokens:', err);
+    
+    // Handle duplicate key error specifically
+    if (err.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Duplicate key error. Please try again.',
+        errors: [{ message: 'QR tokens already exist. Retrying generation...' }]
+      });
+    }
+    
+    next(err);
+  }
+};
+
+/**
+ * Get QR tokens for a logistics record
+ * GET /api/v1/logistics/:id/qr-tokens
+ */
+exports.getQrTokens = async (req, res, next) => {
+  try {
+    const logistics = await Logistics.findById(req.params.id);
+    
+    if (!logistics) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Logistics record not found.' 
+      });
+    }
+
+    // Check authorization
+    const userId = req.user._id || req.user.id;
+    const isSeller = logistics.seller.toString() === userId.toString();
+    const isBuyer = logistics.buyer.toString() === userId.toString();
+    const isDriver = logistics.driver && logistics.driver.toString() === userId.toString();
+    const isAdmin = req.user.role === 'admin';
+    
+    if (!isSeller && !isBuyer && !isDriver && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to view QR tokens for this shipment.'
+      });
+    }
+
+    // Find QR tokens from database
+    const qrTokens = await QRToken.find({
+      logistics: logistics._id,
+      isUsed: false,
+      expiresAt: { $gt: new Date() }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        logisticsId: logistics._id,
+        pickupQrConfirmed: logistics.pickupQrConfirmed || false,
+        deliveryQrConfirmed: logistics.deliveryQrConfirmed || false,
+        availableTokens: qrTokens.map(t => ({
+          type: t.type,
+          token: t.token,
+          expiresAt: t.expiresAt
+        }))
+      }
+    });
+  } catch (err) {
+    logger.error('Error getting QR tokens:', err);
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QR HANDSHAKE (IMPROVED VERSION)
+// ─────────────────────────────────────────────────────────────────────────────
+
 exports.processQrScan = async (req, res, next) => {
   try {
-    const { step, gpsCoords } = req.body;
+    const { step, token, gpsCoords } = req.body;
+
+    // Validate required fields
+    if (!step) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation failed',
+        errors: [{ 
+          message: 'step is required. Must be "pickup" or "delivery".' 
+        }]
+      });
+    }
+
+    if (!token) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation failed',
+        errors: [{ 
+          message: 'token is required. Please provide the QR token.',
+          hint: 'Generate QR tokens first using POST /api/v1/logistics/:id/generate-qr-tokens'
+        }]
+      });
+    }
+
+    if (!['pickup', 'delivery'].includes(step)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation failed',
+        errors: [{ 
+          message: 'step must be either "pickup" or "delivery".' 
+        }]
+      });
+    }
 
     const logistics = await Logistics.findById(req.params.id)
       .populate('order')
-      .populate('seller buyer driver', 'name phone');
+      .populate('seller buyer driver fleetOwner', 'fullName name phone location role');
 
     if (!logistics) {
-      return res.status(404).json({ success: false, message: 'Logistics record not found.' });
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Logistics record not found.',
+        errors: [{ message: `No logistics record found with ID: ${req.params.id}` }]
+      });
     }
 
-    await logistics.recordQrScan(step, req.user._id, gpsCoords);
+    // Check if this step has already been confirmed
+    if (step === 'pickup' && logistics.pickupQrConfirmed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pickup already confirmed',
+        errors: [{ 
+          message: 'QR code for pickup has already been scanned.',
+          scannedAt: logistics.pickupQrScannedAt
+        }]
+      });
+    }
 
+    if (step === 'delivery' && logistics.deliveryQrConfirmed) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delivery already confirmed',
+        errors: [{ 
+          message: 'QR code for delivery has already been scanned.',
+          scannedAt: logistics.deliveryQrScannedAt
+        }]
+      });
+    }
+
+    // Check authorization - only driver or admin can scan
+    const userId = req.user._id || req.user.id;
+    const userRole = req.user.role;
+    
+    const isDriver = logistics.driver && logistics.driver._id.toString() === userId.toString();
+    const isAdmin = userRole === 'admin';
+    
+    if (!isDriver && !isAdmin) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Not authorized',
+        errors: [{ 
+          message: 'Only the assigned driver or admin can scan QR codes.',
+          details: {
+            userId: userId.toString(),
+            driverId: logistics.driver?._id?.toString(),
+            role: userRole
+          }
+        }]
+      });
+    }
+
+    // Verify QR token
+    let verificationResult;
+    try {
+      if (step === 'delivery') {
+        const buyerFence = logistics.buyer?.location?.coordinates?.length === 2
+          ? { lng: logistics.buyer.location.coordinates[0], lat: logistics.buyer.location.coordinates[1] }
+          : { lat: logistics.shippingAddress?.gpsLat, lng: logistics.shippingAddress?.gpsLng };
+
+        verificationResult = await qrChainSvc.consumeToken({
+          token,
+          type: 'DELIVERY',
+          logisticsId: logistics._id,
+          scannedBy: userId,
+          gpsCoords,
+          buyerFence,
+        });
+      } else {
+        verificationResult = await qrChainSvc.consumeToken({
+          token,
+          type: 'PICKUP',
+          logisticsId: logistics._id,
+          scannedBy: userId,
+          gpsCoords,
+        });
+      }
+    } catch (qrError) {
+      logger.error('QR verification failed:', qrError);
+      
+      let errorMessage = 'QR verification failed';
+      if (qrError.message.includes('expired')) {
+        errorMessage = 'QR token has expired. Please generate new QR tokens.';
+      } else if (qrError.message.includes('already used')) {
+        errorMessage = 'QR token has already been used. Each QR code can only be used once.';
+      } else if (qrError.message.includes('invalid')) {
+        errorMessage = 'Invalid QR token. Please check the token and try again.';
+      }
+      
+      return res.status(400).json({ 
+        success: false, 
+        message: errorMessage,
+        errors: [{ message: qrError.message }]
+      });
+    }
+
+    // Mark QR as confirmed in logistics
     if (step === 'pickup') {
-      await Order.findByIdAndUpdate(logistics.order._id || logistics.order, { status: 'dispatched' });
-
-      await dispatchSvc.dispatch({
-        userIds : [logistics.seller._id || logistics.seller],
-        channels: ['push'],
-        title   : 'Cargo pickup confirmed',
-        body    : `${logistics.cargoType ?? 'Cargo'} is now in transit to ${logistics.shippingAddress.town}.`,
-        data    : { shipmentId: logistics._id.toString(), status: 'in_transit' },
-      });
-    } else if (step === 'delivery') {
-      await Order.findByIdAndUpdate(logistics.order._id || logistics.order, { status: 'delivered', deliveredAt: new Date() });
-
-      await dispatchSvc.dispatch({
-        userIds : [logistics.seller._id || logistics.seller, logistics.driver?._id || logistics.driver].filter(Boolean),
-        channels: ['push'],
-        title   : 'Delivery confirmed',
-        body    : `${logistics.cargoType ?? 'Cargo'} was delivered and is ready for buyer confirmation.`,
-        data    : { shipmentId: logistics._id.toString(), status: 'delivered' },
-      });
+      logistics.pickupQrConfirmed = true;
+      logistics.pickupQrScannedAt = new Date();
+      logistics.pickupQrScannedBy = userId;
+    } else {
+      logistics.deliveryQrConfirmed = true;
+      logistics.deliveryQrScannedAt = new Date();
+      logistics.deliveryQrScannedBy = userId;
     }
 
-    return res.status(200).json({ success: true, message: `QR step "${step}" recorded.`, data: logistics });
+    // Record the QR scan in logistics history
+    if (!logistics.qrScans) {
+      logistics.qrScans = [];
+    }
+    logistics.qrScans.push({
+      step,
+      token,
+      scannedBy: userId,
+      gpsCoords,
+      timestamp: new Date()
+    });
+
+    // Handle business logic based on step
+    if (step === 'pickup') {
+      logistics.status = 'in_transit';
+      logistics.pickupTime = new Date();
+      await logistics.save();
+
+      if (escrowService && escrowService.markInTransit) {
+        try {
+          await escrowService.markInTransit(logistics.order._id || logistics.order, userId, gpsCoords);
+        } catch (escrowError) {
+          logger.warn('Escrow update failed:', escrowError);
+        }
+      }
+
+      await Order.findByIdAndUpdate(logistics.order, { 
+        status: 'dispatched',
+        dispatchedAt: new Date()
+      });
+
+      if (dispatchSvc && logistics.seller) {
+        await dispatchSvc.dispatch({
+          userIds: [logistics.seller._id || logistics.seller],
+          channels: ['push', 'email'],
+          title: 'Cargo pickup confirmed',
+          body: `${logistics.cargoType || 'Cargo'} is now in transit to ${logistics.shippingAddress?.town || 'destination'}.`,
+          data: { 
+            shipmentId: logistics._id.toString(), 
+            status: 'in_transit',
+            timestamp: new Date().toISOString()
+          },
+        });
+      }
+
+    } else if (step === 'delivery') {
+      logistics.status = 'delivered';
+      logistics.actualDelivery = new Date();
+      await logistics.save();
+
+      if (escrowService && escrowService.markDelivered) {
+        try {
+          await escrowService.markDelivered(logistics.order._id || logistics.order, userId, gpsCoords);
+        } catch (escrowError) {
+          logger.warn('Escrow update failed:', escrowError);
+        }
+      }
+
+      await Order.findByIdAndUpdate(logistics.order, { 
+        status: 'delivered', 
+        deliveredAt: new Date() 
+      });
+
+      const recipients = [];
+      if (logistics.seller) recipients.push(logistics.seller._id || logistics.seller);
+      if (logistics.buyer) recipients.push(logistics.buyer._id || logistics.buyer);
+      
+      if (dispatchSvc && recipients.length > 0) {
+        await dispatchSvc.dispatch({
+          userIds: recipients,
+          channels: ['push', 'email'],
+          title: 'Delivery confirmed',
+          body: `${logistics.cargoType || 'Cargo'} has been delivered successfully.`,
+          data: { 
+            shipmentId: logistics._id.toString(), 
+            status: 'delivered',
+            deliveredAt: new Date().toISOString()
+          },
+        });
+      }
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      message: `QR step "${step}" recorded successfully.`, 
+      data: {
+        logisticsId: logistics._id,
+        status: logistics.status,
+        step: step,
+        qrConfirmed: step === 'pickup' ? logistics.pickupQrConfirmed : logistics.deliveryQrConfirmed,
+        timestamp: new Date().toISOString()
+      }
+    });
   } catch (err) {
+    logger.error('QR scan processing error:', err);
     next(err);
   }
 };
@@ -516,10 +839,6 @@ exports.processQrScan = async (req, res, next) => {
 // ESCROW & DISPUTES
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * POST /api/v1/logistics/:id/escrow/release
- * Release escrow after QR confirmation or 72-hour window
- */
 exports.releaseEscrow = async (req, res, next) => {
   try {
     const { triggeredBy = 'auto' } = req.body;
@@ -533,12 +852,20 @@ exports.releaseEscrow = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Can only release escrow for delivered shipments.' });
     }
 
-    if (logistics.escrow.status === 'released') {
+    if (logistics.escrow?.status === 'released') {
       return res.status(400).json({ success: false, message: 'Escrow already released.' });
+    }
+
+    if (!logistics.escrow) {
+      logistics.escrow = {};
     }
 
     logistics.escrow.status = 'released';
     logistics.escrow.releasedAt = new Date();
+    
+    if (!logistics.step3_autoRelease) {
+      logistics.step3_autoRelease = {};
+    }
     logistics.step3_autoRelease.releasedAt = new Date();
     logistics.step3_autoRelease.triggeredBy = triggeredBy;
 
@@ -550,10 +877,6 @@ exports.releaseEscrow = async (req, res, next) => {
   }
 };
 
-/**
- * POST /api/v1/logistics/:id/dispute
- * Open a dispute and freeze escrow
- */
 exports.openDispute = async (req, res, next) => {
   try {
     const logistics = await Logistics.findById(req.params.id);
@@ -562,6 +885,10 @@ exports.openDispute = async (req, res, next) => {
     }
 
     logistics.status = 'disputed';
+    
+    if (!logistics.escrow) {
+      logistics.escrow = {};
+    }
     logistics.escrow.status = 'disputed';
 
     await logistics.save();
@@ -576,51 +903,71 @@ exports.openDispute = async (req, res, next) => {
 // STATS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * GET /api/v1/logistics/stats/delivery
- */
 exports.getDeliveryStats = async (req, res, next) => {
   try {
     const { startDate, endDate } = req.query;
 
-    const [byStatus, onTimeResult] = await Promise.all([
-      Logistics.getDeliveryStats(startDate, endDate),
-      Logistics.aggregate([
-        {
-          $match: {
-            status            : 'delivered',
-            actualDelivery    : { $exists: true },
-            estimatedDelivery : { $exists: true },
-          },
+    let dateFilter = {};
+    if (startDate || endDate) {
+      dateFilter.createdAt = {};
+      if (startDate) dateFilter.createdAt.$gte = new Date(startDate);
+      if (endDate) dateFilter.createdAt.$lte = new Date(endDate);
+    }
+
+    const byStatus = await Logistics.aggregate([
+      { $match: dateFilter },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
         },
-        {
-          $project: {
-            onTime: { $lte: ['$actualDelivery', '$estimatedDelivery'] },
-          },
-        },
-        {
-          $group: {
-            _id    : null,
-            total  : { $sum: 1 },
-            onTime : { $sum: { $cond: ['$onTime', 1, 0] } },
-          },
-        },
-      ]),
+      },
     ]);
 
-    const onTimeRate = onTimeResult[0]
-      ? ((onTimeResult[0].onTime / onTimeResult[0].total) * 100).toFixed(1)
-      : '0.0';
+    const onTimeResult = await Logistics.aggregate([
+      {
+        $match: {
+          status: 'delivered',
+          actualDelivery: { $exists: true },
+          estimatedDelivery: { $exists: true },
+          ...dateFilter,
+        },
+      },
+      {
+        $project: {
+          onTime: { $lte: ['$actualDelivery', '$estimatedDelivery'] },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          onTime: { $sum: { $cond: ['$onTime', 1, 0] } },
+        },
+      },
+    ]);
+
+    const totalDelivered = onTimeResult[0]?.total || 0;
+    const onTimeCount = onTimeResult[0]?.onTime || 0;
+    const onTimeRate = totalDelivered > 0 ? ((onTimeCount / totalDelivered) * 100).toFixed(1) : '0.0';
+
+    const statusMap = {};
+    byStatus.forEach(item => {
+      statusMap[item._id] = item.count;
+    });
 
     return res.status(200).json({
-      success : true,
-      data    : {
-        byStatus,
-        onTimeDeliveryRate : parseFloat(onTimeRate),
-        totalDelivered     : onTimeResult[0]?.total ?? 0,
+      success: true,
+      data: {
+        byStatus: statusMap,
+        onTimeDeliveryRate: parseFloat(onTimeRate),
+        totalDelivered,
+        totalOnTime: onTimeCount,
+        totalLate: totalDelivered - onTimeCount,
       },
     });
   } catch (err) {
+    logger.error('Error getting delivery stats:', err);
     next(err);
   }
 };
@@ -629,32 +976,65 @@ exports.getDeliveryStats = async (req, res, next) => {
 // BULK
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Bulk status update (admin only).
- * POST /api/v1/logistics/bulk-update
- */
 exports.bulkUpdateStatus = async (req, res, next) => {
   try {
     const { logisticsIds, status, notes } = req.body;
 
-    const outcomes = await Promise.allSettled(
-      logisticsIds.map(async (id) => {
-        const logistics = await Logistics.findById(id);
-        if (!logistics) return { id, success: false, error: 'Not found' };
-        await logistics.updateStatus(status, { notes, updatedBy: req.user._id });
-        return { id, success: true };
-      })
-    );
+    if (!logisticsIds || !Array.isArray(logisticsIds) || logisticsIds.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'logisticsIds array is required.' 
+      });
+    }
 
-    const results   = outcomes.map((o) => (o.status === 'fulfilled' ? o.value : { success: false, error: o.reason?.message }));
-    const succeeded = results.filter((r) => r.success).length;
+    if (!status) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'status is required.' 
+      });
+    }
+
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Only admins can perform bulk updates.' 
+      });
+    }
+
+    const results = [];
+    let succeeded = 0;
+
+    for (const id of logisticsIds) {
+      try {
+        const logistics = await Logistics.findById(id);
+        if (!logistics) {
+          results.push({ id, success: false, error: 'Logistics record not found' });
+          continue;
+        }
+
+        await logistics.updateStatus(status, { 
+          notes, 
+          updatedBy: req.user._id || req.user.id 
+        });
+        
+        results.push({ id, success: true });
+        succeeded++;
+      } catch (error) {
+        results.push({ id, success: false, error: error.message });
+      }
+    }
 
     return res.status(200).json({
-      success : true,
-      message : `Updated ${succeeded} of ${logisticsIds.length} records.`,
-      data    : results,
+      success: true,
+      message: `Updated ${succeeded} of ${logisticsIds.length} records.`,
+      data: {
+        succeeded,
+        failed: logisticsIds.length - succeeded,
+        details: results,
+      },
     });
   } catch (err) {
+    logger.error('Bulk update error:', err);
     next(err);
   }
 };

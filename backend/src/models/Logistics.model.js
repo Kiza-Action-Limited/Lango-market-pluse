@@ -330,9 +330,9 @@ logisticsSchema.methods.recordQrScan = async function (step, scannedBy, gpsCoord
 
   // Auto-advance status
   if (step === 'pickup') {
-    await this.updateStatus('picked_up', { notes: 'QR Step 1 — seller QR scanned', gpsCoords, updatedBy: scannedBy });
+    await this.updateStatus('in_transit', { notes: 'QR Step 1 - seller QR scanned', gpsCoords, updatedBy: scannedBy });
   } else if (step === 'delivery') {
-    await this.updateStatus('delivered', { notes: 'QR Step 2 — buyer QR scanned', gpsCoords, updatedBy: scannedBy });
+    await this.updateStatus('delivered', { notes: 'QR Step 2 - buyer QR scanned', gpsCoords, updatedBy: scannedBy });
   }
 
   return this.save();

@@ -1,50 +1,62 @@
-const User = require('../../models/User.model');
+const Wallet = require('../../models/Wallet.model');
 const Transaction = require('../../models/Transaction.model');
-const ledgerService = require('./ledger.service');
-const mpesaService = require('./mpesa.service');
+const User = require('../../models/User.model');
+const mongoose = require('mongoose');
 
 class WalletService {
+  async getWallet(userId) {
+    let wallet = await Wallet.findOne({ user: userId });
+    if (!wallet) {
+      wallet = await Wallet.create({
+        user: userId,
+        balance: 0,
+        lockedBalance: 0,
+      });
+    }
+    return wallet;
+  }
+
   async getBalance(userId) {
-    const user = await User.findById(userId);
-    if (!user) throw new Error('User not found');
-    return user.walletBalance;
+    const wallet = await this.getWallet(userId);
+    return {
+      availableBalance: wallet.balance - wallet.lockedBalance,
+      totalBalance: wallet.balance,
+      lockedBalance: wallet.lockedBalance,
+      currency: wallet.currency,
+    };
   }
 
   async creditWallet(userId, amount, reference, description) {
-    const user = await User.findById(userId);
-    if (!user) throw new Error('User not found');
-    user.walletBalance += amount;
-    await user.save();
+    const wallet = await this.getWallet(userId);
+    wallet.balance += amount;
+    await wallet.save();
 
     await Transaction.create({
       user: userId,
       type: 'deposit',
       amount,
-      balanceAfter: user.walletBalance,
-      reference,
-      description,
+      status: 'completed',
+      description: description || `Wallet credit`,
     });
 
-    return { balance: user.walletBalance };
+    return { balance: wallet.balance };
   }
 
   async debitWallet(userId, amount, reference, description) {
-    const user = await User.findById(userId);
-    if (!user) throw new Error('User not found');
-    if (user.walletBalance < amount) throw new Error('Insufficient balance');
-    user.walletBalance -= amount;
-    await user.save();
+    const wallet = await this.getWallet(userId);
+    if (wallet.balance < amount) throw new Error('Insufficient balance');
+    wallet.balance -= amount;
+    await wallet.save();
 
     await Transaction.create({
       user: userId,
       type: 'withdrawal',
       amount,
-      balanceAfter: user.walletBalance,
-      reference,
-      description,
+      status: 'completed',
+      description: description || `Wallet debit`,
     });
 
-    return { balance: user.walletBalance };
+    return { balance: wallet.balance };
   }
 
   async transfer(fromUserId, toUserId, amount, description) {

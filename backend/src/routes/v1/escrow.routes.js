@@ -4,8 +4,10 @@ const { body, param } = require('express-validator');
 const escrowController = require('../../controllers/escrow.controller');
 const { protect: authMiddleware } = require('../../middleware/auth');
 const rbacMiddleware = require('../../middleware/rbac');
+const requireVerified = require('../../middleware/requireVerified');
 
 router.use(authMiddleware);
+router.use(requireVerified);
 
 // Buyer / seller views
 router.get('/status/:orderId', param('orderId').isMongoId(), escrowController.getEscrowStatus);

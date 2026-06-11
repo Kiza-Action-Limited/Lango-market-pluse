@@ -1,38 +1,61 @@
 const express = require('express');
 const router = express.Router();
 const mpesaService = require('../../services/payment/mpesa.service');
+const darajaIpWhitelist = require('../../middleware/darajaIpWhitelist');
+const { extractStkMetadata } = require('../../config/mpesa');
+
+router.use(darajaIpWhitelist);
 
 /**
  * M-Pesa STK Push callback endpoint.
  * Safaricom will POST here after user completes payment.
  */
-router.post('/callback', async (req, res) => {
+const stkCallbackHandler = async (req, res) => {
   try {
-    const { Body } = req.body;
-    const resultCode = Body.stkCallback.ResultCode;
+    const stkCallback = req.body?.Body?.stkCallback;
+    if (!stkCallback) return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
-    if (resultCode === 0) {
-      // Success
-      const { CheckoutRequestID, Amount, MpesaReceiptNumber, TransactionDate } = Body.stkCallback;
+    if (stkCallback.ResultCode === 0) {
+      const metadata = extractStkMetadata(stkCallback);
       await mpesaService.handleSuccessCallback({
-        checkoutRequestId: CheckoutRequestID,
-        amount: Amount,
-        transactionId: MpesaReceiptNumber,
-        transactionDate: TransactionDate,
+        checkoutRequestId: stkCallback.CheckoutRequestID,
+        amount: metadata.amount,
+        transactionId: metadata.mpesaReceiptNumber,
+        transactionDate: metadata.transactionDate,
       });
     } else {
-      // Failure
-      const { CheckoutRequestID, ResultDesc } = Body.stkCallback;
       await mpesaService.handleFailureCallback({
-        checkoutRequestId: CheckoutRequestID,
-        errorMessage: ResultDesc,
+        checkoutRequestId: stkCallback.CheckoutRequestID,
+        errorMessage: stkCallback.ResultDesc,
       });
     }
 
-    // Always respond with success to M-Pesa
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
   } catch (error) {
     console.error('M-Pesa webhook error:', error);
+    res.status(200).json({ ResultCode: 0, ResultDesc: 'Error logged' });
+  }
+};
+
+router.post('/callback', stkCallbackHandler);
+router.post('/stk-callback', stkCallbackHandler);
+
+router.post('/b2c-result', async (req, res) => {
+  try {
+    await mpesaService.handleB2CResult(req.body);
+    res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
+  } catch (error) {
+    console.error('M-Pesa B2C result error:', error);
+    res.status(200).json({ ResultCode: 0, ResultDesc: 'Error logged' });
+  }
+});
+
+router.post('/b2c-timeout', async (req, res) => {
+  try {
+    await mpesaService.handleB2CTimeout(req.body);
+    res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
+  } catch (error) {
+    console.error('M-Pesa B2C timeout error:', error);
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Error logged' });
   }
 });

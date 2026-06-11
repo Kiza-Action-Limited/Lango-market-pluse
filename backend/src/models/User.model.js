@@ -72,6 +72,19 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    verificationStatus: {
+      type: String,
+      enum: ['unverified', 'pending', 'verified', 'gold', 'rejected', 'restricted'],
+      default: 'unverified',
+      index: true,
+    },
+    trustScore: {
+      type: Number,
+      min: 0,
+      max: 5,
+      default: 5,
+      index: true,
+    },
     kycDetails: {
       idNumber: String,
       idImageUrl: String,
@@ -95,6 +108,12 @@ const UserSchema = new mongoose.Schema(
       index: true,
     },
     ownerAccount: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    employer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       default: null,

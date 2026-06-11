@@ -1,11 +1,12 @@
 const Redis = require('ioredis');
-const { Queue } = require('bull');
+const { Queue } = require('bullmq');
 
 const redisEnabled = process.env.REDIS_ENABLED === 'true';
 const redisUrl = process.env.REDIS_URL;
 
 const createNoopQueue = () => ({
   add: async () => ({ skipped: true }),
+  getJob: async () => null,
 });
 
 const createNoopExports = () => ({
@@ -22,7 +23,7 @@ if (!redisEnabled || !redisUrl) {
 } else {
   const redisClient = new Redis(redisUrl, {
     lazyConnect: true,
-    maxRetriesPerRequest: 1,
+    maxRetriesPerRequest: null,
     connectTimeout: 5000,
     retryStrategy: () => null,
   });

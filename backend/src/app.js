@@ -19,8 +19,16 @@ const logisticsRoutes = require('./routes/v1/logistics.routes');
 const analyticsRoutes = require('./routes/v1/analytics.routes');
 const subscriptionRoutes = require('./routes/v1/subscriptions.routes');
 const paymentRoutes = require('./routes/v1/payments.routes');
+const walletRoutes = require('./routes/v1/wallet.routes');
 const groupBuyRoutes = require('./routes/v1/groupbuy.routes');
 const escrowRoutes = require('./routes/v1/escrow.routes');
+const disputeRoutes = require('./routes/v1/disputes.routes');
+const transactionRoutes = require('./routes/v1/transactions.routes');
+const reviewRoutes = require('./routes/v1/reviews.routes');
+const qrtokenRoutes = require('./routes/v1/qrtokens.routes');
+const sinkingfundRoutes = require('./routes/v1/sinkingfund.routes');
+const auditRoutes = require('./routes/v1/audit.routes');
+const mpesaWebhookRoutes = require('./routes/webhooks/mpesa.webhook');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -104,8 +112,21 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/v1/logistics', logisticsRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/wallet', walletRoutes);
+app.use('/api/v1/transactions', transactionRoutes);
+app.use('/api/v1/reviews', reviewRoutes);
 app.use('/api/v1/groupbuy', groupBuyRoutes);
 app.use('/api/v1/escrow', escrowRoutes);
+app.use('/api/v1/disputes', disputeRoutes);
+app.use('/api/disputes', disputeRoutes);
+app.use('/api/v1/qr-tokens', qrtokenRoutes);
+app.use('/api/qr-tokens', qrtokenRoutes);
+app.use('/api/v1/sinking-fund', sinkingfundRoutes);
+app.use('/api/sinking-fund', sinkingfundRoutes);
+app.use('/api/v1/audit', auditRoutes);
+app.use('/api/audit', auditRoutes);
+app.use('/webhooks/mpesa', mpesaWebhookRoutes);
+app.use('/api/mpesa', mpesaWebhookRoutes);
 
 // Test route to verify server is working
 app.get('/api/test', (req, res) => {
@@ -118,6 +139,7 @@ app.get('/api/test', (req, res) => {
       orders: '/api/v1/orders',
       notifications: '/api/v1/notifications',
       cart: '/api/v1/cart',
+      wishlist: '/api/v1/wishlist',
       categories: '/api/v1/categories',
       categoriesLegacy: '/api/categories',
       admin: '/api/v1/admin',
@@ -126,8 +148,16 @@ app.get('/api/test', (req, res) => {
       analytics: '/api/v1/analytics',
       subscriptions: '/api/v1/subscriptions',
       payments: '/api/v1/payments',
+      wallet: '/api/v1/wallet',
+      transactions: '/api/v1/transactions',
+      reviews: '/api/v1/reviews',
       groupbuy: '/api/v1/groupbuy',
-      escrow: '/api/v1/escrow'
+      escrow: '/api/v1/escrow',
+      disputes: '/api/v1/disputes',
+      qrTokens: '/api/v1/qr-tokens',
+      sinkingFund: '/api/v1/sinking-fund',
+      audit: '/api/v1/audit',
+      webhooks: '/webhooks/mpesa'
     }
   });
 });

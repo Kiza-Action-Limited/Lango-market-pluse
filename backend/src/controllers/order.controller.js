@@ -94,8 +94,21 @@ exports.confirmDelivery = async (req, res, next) => {
     const order = await orderService.confirmDelivery(req.params.id, req.user.id);
     res.status(200).json({
       success: true,
-      message: 'Delivery confirmed, escrow will be released in 72 hours',
+      message: 'Delivery confirmed and escrow release started',
       data: order,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.raiseDispute = async (req, res, next) => {
+  try {
+    const dispute = await orderService.raiseDispute(req.params.id, req.user.id, req.body);
+    res.status(201).json({
+      success: true,
+      message: 'Dispute opened and escrow frozen',
+      data: dispute,
     });
   } catch (error) {
     next(error);
