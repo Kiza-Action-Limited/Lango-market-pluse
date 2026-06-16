@@ -38,6 +38,8 @@ const httpError = (message, statusCode, details = {}) => {
   return error;
 };
 
+const idsMatch = (left, right) => left != null && right != null && left.toString() === right.toString();
+
 class OrderService {
   async createOrder(orderData) {
     const { buyer, product, quantity, deliveryAddress } = orderData;
@@ -192,13 +194,16 @@ class OrderService {
     return release.escrow ? await Order.findById(orderId) : order;
   }
 
-  async raiseDispute(orderId, userId, data) {
+  async raiseDispute(orderId, userId, data, userRole) {
     const order = await Order.findById(orderId);
     if (!order) throw httpError('Order not found', 404);
-    const isParty = order.buyer.toString() === userId || order.seller.toString() === userId;
-    if (!isParty) throw httpError('Unauthorized', 403);
+    const isParty = idsMatch(order.buyer, userId) || idsMatch(order.seller, userId);
+    const isAdmin = userRole === 'admin';
+    if (!isParty && !isAdmin) {
+      throw httpError('Not authorized to create dispute for this order', 403);
+    }
 
-    return escrowService.raiseDispute(orderId, userId, data);
+    return escrowService.raiseDispute(orderId, userId, data, userRole);
   }
 
   async updateOrderStatus(orderId, userId, userRole, nextStatus) {

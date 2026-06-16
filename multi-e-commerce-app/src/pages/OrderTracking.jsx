@@ -1,18 +1,17 @@
 // src/pages/OrderTracking.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
-import { useAuth } from '../context/AuthContext';
 import { 
   FaCheckCircle, FaTruck, FaBox, FaHourglassHalf, FaMapMarkerAlt, 
   FaClock, FaUser, FaPhone, FaEnvelope, FaBrain, FaArrowLeft 
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
+import { orderService } from '../services/orderService';
+import { normalizeOrder, normalizeTracking } from '../utils/orderAdapter';
 
 const OrderTracking = () => {
   const { id } = useParams();
-  const { token } = useAuth();
   const [order, setOrder] = useState(null);
   const [tracking, setTracking] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,16 +22,10 @@ const OrderTracking = () => {
 
   const fetchOrderDetails = async () => {
     try {
-      const [orderRes, trackingRes] = await Promise.all([
-        axios.get(`http://localhost:5000/api/orders/${id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }),
-        axios.get(`http://localhost:5000/api/orders/${id}/tracking`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-      ]);
-      setOrder(orderRes.data.order);
-      setTracking(trackingRes.data.tracking);
+      const response = await orderService.getById(id);
+      const normalizedOrder = normalizeOrder(response.data || response.order || response);
+      setOrder(normalizedOrder);
+      setTracking(normalizeTracking(normalizedOrder));
     } catch (error) {
       console.error('Error fetching order details:', error);
       toast.error('Failed to load order details');
@@ -44,12 +37,21 @@ const OrderTracking = () => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'pending':
+      case 'pending_payment':
+      case 'AWAITING_PAYMENT':
         return 'text-[#F97316] border-[#F97316]/30 bg-[#F97316]/5';
       case 'processing':
+      case 'payment_escrowed':
+      case 'FUNDS_HELD':
         return 'text-[#FB923C] border-[#FB923C]/30 bg-[#FB923C]/5';
       case 'shipped':
+      case 'dispatched':
+      case 'IN_TRANSIT':
         return 'text-[#F97316] border-[#F97316]/30 bg-[#F97316]/5';
       case 'delivered':
+      case 'DELIVERED':
+      case 'completed':
+      case 'RELEASED':
         return 'text-[#16A34A] border-[#16A34A]/30 bg-[#16A34A]/5';
       default:
         return 'text-gray-600 border-gray-200 bg-gray-50';
@@ -57,8 +59,11 @@ const OrderTracking = () => {
   };
 
   const getStatusStep = (status) => {
-    const steps = ['pending', 'processing', 'shipped', 'delivered'];
-    return steps.indexOf(status);
+    if (['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(status)) return 0;
+    if (['processing', 'payment_escrowed', 'FUNDS_HELD'].includes(status)) return 1;
+    if (['shipped', 'dispatched', 'IN_TRANSIT'].includes(status)) return 2;
+    if (['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(status)) return 3;
+    return 0;
   };
 
   if (loading) {
@@ -95,9 +100,9 @@ const OrderTracking = () => {
   ];
 
   const estimatedDelivery = () => {
-    if (order.status === 'delivered') return 'Delivered';
-    if (order.status === 'shipped') return 'Estimated: 2-5 business days';
-    if (order.status === 'processing') return 'Estimated: 3-7 business days';
+    if (['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(order.status)) return 'Delivered';
+    if (['shipped', 'dispatched', 'IN_TRANSIT'].includes(order.status)) return 'Estimated: 2-5 business days';
+    if (['processing', 'payment_escrowed', 'FUNDS_HELD'].includes(order.status)) return 'Estimated: 3-7 business days';
     return 'Processing will begin shortly';
   };
 
@@ -114,7 +119,7 @@ const OrderTracking = () => {
             <FaTruck className="text-[#16A34A] text-3xl" />
             <h1 className="text-3xl font-bold text-[#F97316]">Track Order</h1>
           </div>
-          <p className="text-[#6B7280]">Order #{order.id.slice(-8)} • Placed on {new Date(order.createdAt).toLocaleDateString()}</p>
+          <p className="text-[#6B7280]">Order #{String(order.id).slice(-8)} • Placed on {new Date(order.createdAt).toLocaleDateString()}</p>
         </div>
         
         {/* Order Status Timeline */}
@@ -122,7 +127,7 @@ const OrderTracking = () => {
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-semibold text-[#111827]">Order Status</h2>
             <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(order.status)}`}>
-              {order.status.toUpperCase()}
+              {order.status.replace(/_/g, ' ').toUpperCase()}
             </span>
           </div>
           
@@ -279,10 +284,10 @@ const OrderTracking = () => {
             <div>
               <h4 className="font-semibold text-[#111827] mb-1">AI Intelligence Insight</h4>
               <p className="text-sm text-[#6B7280]">
-                {order.status === 'pending' && "Your order is being processed. You'll receive an email confirmation once it's shipped."}
-                {order.status === 'processing' && "The seller is preparing your order. Most orders ship within 24-48 hours."}
-                {order.status === 'shipped' && "Your package is on its way! Track real-time location updates above."}
-                {order.status === 'delivered' && "Great! Your order has been delivered. Rate your purchase to help other customers."}
+                {['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(order.status) && "Your order is awaiting payment. You'll receive updates once it moves forward."}
+                {['processing', 'payment_escrowed', 'FUNDS_HELD'].includes(order.status) && "The seller is preparing your order. Most orders ship within 24-48 hours."}
+                {['shipped', 'dispatched', 'IN_TRANSIT'].includes(order.status) && "Your package is on its way! Track real-time location updates above."}
+                {['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(order.status) && "Great! Your order has been delivered. Rate your purchase to help other customers."}
               </p>
             </div>
           </div>
@@ -293,3 +298,4 @@ const OrderTracking = () => {
 };
 
 export default OrderTracking;
+

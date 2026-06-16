@@ -58,6 +58,14 @@ const escrowSchema = new mongoose.Schema(
     mpesaCheckoutId: { type: String, trim: true, sparse: true, index: true },
     merchantRequestId: { type: String, trim: true },
     mpesaReceiptNumber: { type: String, trim: true },
+    externalProvider: {
+      type: String,
+      enum: ['escrow_com'],
+    },
+    externalTransactionId: { type: String, trim: true, sparse: true, index: true },
+    externalReference: { type: String, trim: true, sparse: true, index: true },
+    externalStatus: { type: String, trim: true },
+    externalSyncedAt: Date,
     paidAt: Date,
     heldAt: Date,
     deliveredAt: Date,
@@ -84,5 +92,6 @@ const escrowSchema = new mongoose.Schema(
 escrowSchema.index({ status: 1, autoReleaseAt: 1 });
 escrowSchema.index({ buyer: 1, createdAt: -1 });
 escrowSchema.index({ seller: 1, createdAt: -1 });
+escrowSchema.index({ externalProvider: 1, externalTransactionId: 1 });
 
 module.exports = mongoose.model('Escrow', escrowSchema);

@@ -219,8 +219,8 @@ Get transaction history
 
 ## 6. Escrow Routes
 
-### GET /escrow/:orderId
-Get escrow details for order
+### GET /escrow/status/:orderId
+Get escrow status for an order
 
 ### POST /escrow/release/:orderId
 Release escrow funds (Admin/Auto)
@@ -232,6 +232,24 @@ Release escrow funds (Admin/Auto)
 
 ### POST /escrow/hold/:orderId
 Hold escrow (During dispute)
+
+### POST /escrow/external/:orderId/create
+Create an Escrow.com transaction for an order. Buyer/seller requests use the stored order amount and parties. Admins may override customer emails, amount, currency, or force a new external transaction.
+```json
+{
+  "currency": "usd",
+  "buyerCustomer": "buyer@example.com",
+  "sellerCustomer": "seller@example.com",
+  "amount": 100,
+  "inspectionPeriodSeconds": 259200
+}
+```
+
+### GET /escrow/external/:orderId
+Fetch linked Escrow.com transaction details for an order
+
+### POST /escrow/external/:orderId/sync
+Refresh linked Escrow.com transaction details and save latest external status
 
 ---
 

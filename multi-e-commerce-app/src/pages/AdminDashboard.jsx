@@ -18,6 +18,7 @@ import {
 } from 'react-icons/fa';
 import { formatCurrency, formatDate, formatDateTime } from '../utils/formatters';
 import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill, StoreVisitsBySourcePanel } from '../components/dashboard/DashboardWidgets';
+import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { buildReviewSummary, buildSalesByLocation, buildStoreVisitSources, isPaidOrder } from '../utils/dashboardMetrics';
 import UserDetailsModal from '../components/admin/UserDetailsModal';
@@ -573,6 +574,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             <KpiCard icon={FaUserCheck} label="New Customers" value={newCustomerCount} detail={`${returningCustomerCount} returning`} color="#16A34A" points={[newCustomerCount, returningCustomerCount]} />
             <KpiCard icon={FaUndo} label="Returning Customers" value={returningCustomerCount} detail={`${uniqueBuyerCount} unique buyers`} color="#8B5CF6" points={[returningCustomerCount, uniqueBuyerCount]} />
             <KpiCard icon={FaBell} label="Urgent Alerts" value={lowStockCount + outOfStockProducts} detail={`${outOfStockProducts} out of stock`} color="#DC2626" points={[lowStockCount, outOfStockProducts]} />
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <NotificationPreferencesCard
+              className="xl:col-span-12"
+              title="Notification Preferences"
+              description="Keep notification controls in the admin dashboard so the platform can reach you for order updates, scarcity alerts, and account activity."
+            />
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">

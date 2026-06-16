@@ -2,12 +2,26 @@ const Payment = require('../../models/Payment.model');
 const Wallet = require('../../models/Wallet.model');
 const Order = require('../../models/Order.model');
 const Transaction = require('../../models/Transaction.model');
+const escrowService = require('../order/escrow.service');
 const mongoose = require('mongoose');
 const axios = require('axios');
+const { PLANS, normalizePlanId } = require('../../config/subscriptionPlans');
 
 // --- ADDED: in-memory throttle map to prevent rapid repeated status queries ---
 const statusQueryCache = new Map();
 const STATUS_QUERY_COOLDOWN_MS = 5000; // 5 seconds between queries per checkoutRequestId
+
+const PLAN_PRICES = {
+  solo: 500,
+  smart: 2500,
+  growth: 6500,
+};
+
+const getMetadataValue = (metadata, key) => {
+  if (!metadata) return undefined;
+  if (typeof metadata.get === 'function') return metadata.get(key);
+  return metadata[key];
+};
 
 class MpesaService {
   /**
@@ -77,7 +91,7 @@ class MpesaService {
 
       const payment = new Payment({
         user: userId,
-        order: orderId,
+        order: order._id,
         amount: order.totalAmount,
         currency: 'KES',
         paymentMethod: 'mpesa',
@@ -92,6 +106,11 @@ class MpesaService {
       order.paymentIntentId = response.data.CheckoutRequestID;
       order.status = 'AWAITING_PAYMENT';
       await order.save();
+
+      await escrowService.createPendingEscrow(order, {
+        checkoutRequestId: response.data.CheckoutRequestID,
+        merchantRequestId: response.data.MerchantRequestID,
+      });
 
       return {
         success: true,
@@ -111,6 +130,74 @@ class MpesaService {
       }
       throw new Error(`M-Pesa payment initiation failed: ${error.response?.data?.errorMessage || error.message}`);
     }
+  }
+
+  async initiateSubscriptionPayment(planId, phoneNumber, userId) {
+    const normalizedPlanId = normalizePlanId(planId);
+    const plan = PLANS[normalizedPlanId];
+    const amount = PLAN_PRICES[normalizedPlanId];
+
+    if (!plan || !amount) {
+      const error = new Error('Invalid paid subscription plan');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const token = await this.getAccessToken();
+    const formattedPhone = this.formatPhoneNumber(phoneNumber);
+    const timestamp = this.getTimestamp();
+    const password = this.generatePassword(timestamp);
+    const accountReference = `SUB${normalizedPlanId}${String(userId).slice(-4)}`.substring(0, 12);
+
+    const payload = {
+      BusinessShortCode: process.env.MPESA_SHORT_CODE,
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: 'CustomerPayBillOnline',
+      Amount: Math.ceil(amount),
+      PartyA: formattedPhone,
+      PartyB: process.env.MPESA_SHORT_CODE,
+      PhoneNumber: formattedPhone,
+      CallBackURL: process.env.CALLBACK_URL,
+      AccountReference: accountReference,
+      TransactionDesc: `Sub ${plan.displayName || plan.name}`.substring(0, 13),
+    };
+
+    const response = await axios.post(
+      'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    await Payment.create({
+      user: userId,
+      amount,
+      currency: 'KES',
+      paymentMethod: 'mpesa',
+      status: 'processing',
+      phoneNumber,
+      checkoutRequestId: response.data.CheckoutRequestID,
+      transactionId: response.data.CheckoutRequestID,
+      description: `Subscription payment for ${plan.displayName || plan.name}`,
+      metadata: {
+        purpose: 'subscription',
+        planId: normalizedPlanId,
+        merchantRequestId: response.data.MerchantRequestID,
+      },
+    });
+
+    return {
+      success: true,
+      checkoutRequestId: response.data.CheckoutRequestID,
+      message: response.data.ResponseDescription,
+      planId: normalizedPlanId,
+      amount,
+    };
   }
 
   /**
@@ -263,6 +350,50 @@ class MpesaService {
     } finally {
       session.endSession();
     }
+  }
+
+  async handleSuccessCallback({ checkoutRequestId, amount, transactionId, transactionDate }) {
+    const payment = await Payment.findOne({ checkoutRequestId });
+    if (!payment) return null;
+
+    payment.status = 'completed';
+    payment.paidAt = new Date();
+    if (transactionId) {
+      payment.mpesaReceiptNumber = transactionId;
+    }
+    if (amount != null) {
+      payment.amount = Number(amount);
+    }
+    await payment.save();
+
+    const order = await Order.findById(payment.order);
+    if (order) {
+      await escrowService.createPendingEscrow(order, {
+        checkoutRequestId,
+        merchantRequestId: payment.metadata?.get?.('merchantRequestId') || payment.metadata?.merchantRequestId,
+      });
+    }
+
+    const escrow = await escrowService.markPaymentHeld({
+      checkoutRequestId,
+      amount: amount || payment.amount,
+      transactionId,
+      transactionDate,
+    });
+
+    return { payment, escrow };
+  }
+
+  async handleFailureCallback({ checkoutRequestId, errorMessage }) {
+    const payment = await Payment.findOne({ checkoutRequestId });
+    if (payment) {
+      payment.status = 'failed';
+      payment.failureReason = errorMessage;
+      await payment.save();
+    }
+
+    const escrow = await escrowService.markPaymentFailed({ checkoutRequestId, errorMessage });
+    return { payment, escrow };
   }
 
   /**

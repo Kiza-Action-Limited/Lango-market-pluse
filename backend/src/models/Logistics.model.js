@@ -44,6 +44,18 @@ const CARRIERS = Object.freeze([
 const WEIGHT_UNITS  = Object.freeze(['kg', 'g', 'lb', 'tons']);
 const DIM_UNITS     = Object.freeze(['cm', 'in']);
 
+const generateTripId = () => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `TRIP-${timestamp}-${random}`;
+};
+
+const generateBookingReference = () => {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `BOOK-${timestamp}-${random}`;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SUB-SCHEMAS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -97,7 +109,19 @@ const settlementSchema = new mongoose.Schema(
     driverPayout     : { type: Number, min: 0, default: 0 },
     fleetOwnerPayout : { type: Number, min: 0, default: 0 },    // if fleet_managed
     releasedAt       : { type: Date },
-    releaseMethod    : { type: String, enum: ['qr_confirmed', 'auto_72h', 'admin_override'] },
+    releaseMethod    : {
+      type: String,
+      enum: [
+        'qr_confirmed',
+        'auto_72h',
+        'auto_72h_catchup',
+        'admin_override',
+        'manual_confirm',
+        'admin_refund',
+        'partial_refund',
+        'dispute_resolution',
+      ],
+    },
     mpesaReference   : { type: String, trim: true },
   },
   { _id: false }
@@ -120,6 +144,20 @@ const logisticsSchema = new mongoose.Schema(
       type     : String,
       required : true,
       index    : true,
+    },
+    tripId : {
+      type    : String,
+      unique  : true,
+      sparse  : true,
+      trim    : true,
+      default : generateTripId,
+    },
+    bookingReference : {
+      type    : String,
+      unique  : true,
+      sparse  : true,
+      trim    : true,
+      default : generateBookingReference,
     },
 
     // ── Parties ──────────────────────────────────────────────────────────────
@@ -174,6 +212,61 @@ const logisticsSchema = new mongoose.Schema(
     },
     trackingHistory : [trackingEventSchema],
     qrScans         : [qrScanSchema],
+
+    gpsTracking : {
+      history : [{
+        location : {
+          lat : { type: Number, required: true },
+          lng : { type: Number, required: true },
+        },
+        accuracy   : { type: Number },
+        speed      : { type: Number },
+        heading    : { type: Number },
+        timestamp  : { type: Date, default: Date.now },
+        recordedBy : { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      }],
+      current : {
+        lat        : { type: Number },
+        lng        : { type: Number },
+        accuracy   : { type: Number },
+        lastUpdate : { type: Date },
+      },
+      deliveryGeofence : {
+        center : {
+          lat : { type: Number },
+          lng : { type: Number },
+        },
+        radiusMeters : { type: Number, default: 50 },
+        enteredAt    : { type: Date },
+        exitedAt     : { type: Date },
+      },
+      pickupGeofence : {
+        center : {
+          lat : { type: Number },
+          lng : { type: Number },
+        },
+        radiusMeters : { type: Number, default: 50 },
+        enteredAt    : { type: Date },
+      },
+    },
+
+    routeInfo : {
+      totalDistanceKm      : { type: Number, default: 0 },
+      estimatedDurationMin : { type: Number, default: 0 },
+      actualDurationMin    : { type: Number },
+      waypoints : [{
+        location : {
+          lat : { type: Number },
+          lng : { type: Number },
+        },
+        address       : { type: String },
+        type          : { type: String, enum: ['pickup', 'dropoff'] },
+        sequence      : { type: Number },
+        eta           : { type: Date },
+        actualArrival : { type: Date },
+      }],
+      polyline : { type: String },
+    },
 
     // ── Cargo ─────────────────────────────────────────────────────────────────
     cargoType    : { type: String, trim: true },    // e.g. "Maize"
@@ -397,6 +490,10 @@ logisticsSchema.statics.findPendingAutoRelease = async function () {
 
 /** Auto-generate a tracking number on first status change away from 'pending'. */
 logisticsSchema.pre('save', function (next) {
+  if (!this.bookingReference) {
+    this.bookingReference = generateBookingReference();
+  }
+
   if (!this.trackingNumber && this.status !== 'pending') {
     const prefix    = 'LMP';   // Lango MarketPulse
     const timestamp = Date.now().toString().slice(-8);

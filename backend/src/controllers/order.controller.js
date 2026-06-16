@@ -104,7 +104,7 @@ exports.confirmDelivery = async (req, res, next) => {
 
 exports.raiseDispute = async (req, res, next) => {
   try {
-    const dispute = await orderService.raiseDispute(req.params.id, req.user.id, req.body);
+    const dispute = await orderService.raiseDispute(req.params.id, req.user.id, req.body, req.user.role);
     res.status(201).json({
       success: true,
       message: 'Dispute opened and escrow frozen',

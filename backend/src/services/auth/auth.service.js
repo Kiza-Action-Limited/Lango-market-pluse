@@ -158,8 +158,9 @@ class AuthService {
       throw error;
     }
 
-    user.lastLogin = new Date();
-    await user.save();
+    const loginAt = new Date();
+    user.lastLogin = loginAt;
+    await User.updateOne({ _id: user._id }, { $set: { lastLogin: loginAt } });
 
     const tokens = this.generateTokens(user);
     return { user: this.sanitizeUser(user), ...tokens };
@@ -254,7 +255,12 @@ class AuthService {
       }
 
       const newAccessToken = jwt.sign(
-        { id: this.resolveUserId(user), role: user.role },
+        {
+          id: this.resolveUserId(user),
+          role: user.role,
+          businessType: user.businessType,
+          businessName: user.businessName,
+        },
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
@@ -274,8 +280,14 @@ class AuthService {
     }
     const userId = this.resolveUserId(user);
     const role = user.role || 'buyer';
-    const accessToken = jwt.sign({ id: userId, role }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    const refreshToken = jwt.sign({ id: userId, role }, process.env.JWT_SECRET, { expiresIn: '30d' });
+    const tokenPayload = {
+      id: userId,
+      role,
+      businessType: user.businessType,
+      businessName: user.businessName,
+    };
+    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const refreshToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '30d' });
     return { accessToken, refreshToken };
   }
 

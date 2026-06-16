@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Link, Navigate } from 'react-router-dom';
-import { FaCheckCircle, FaClipboardCheck, FaClock, FaMoneyBillWave, FaQrcode, FaRoute } from 'react-icons/fa';
+import { FaCheckCircle, FaClipboardCheck, FaClock, FaLayerGroup, FaMoneyBillWave, FaQrcode, FaRoute } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import { logisticsService } from '../services/logisticsService';
 import { DonutGauge, KpiCard, Panel, ProgressRow, StatusPill } from '../components/dashboard/DashboardWidgets';
+import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { formatCurrency } from '../utils/formatters';
 
@@ -18,6 +19,13 @@ const LogisticsStatus = () => {
 
   const role = String(user?.role || '').toLowerCase();
   const profileStatus = application?.logisticsProfile?.verificationStatus || 'unverified';
+  const currentUserId = String(user?._id || user?.id || '');
+  const getTripDriverId = (trip) => {
+    const driver = trip?.driver;
+    if (!driver) return '';
+    if (typeof driver === 'object') return String(driver._id || driver.id || '');
+    return String(driver);
+  };
 
   const flowSteps = [
     'Register',
@@ -30,7 +38,7 @@ const LogisticsStatus = () => {
     'Escrow Release',
   ];
 
-  const hasAcceptedTrip = trips.some((trip) => !!trip.driver && String(trip.driver) === String(user?._id || user?.id));
+  const hasAcceptedTrip = trips.some((trip) => getTripDriverId(trip) === currentUserId);
   const hasQrFlowTrip = trips.some((trip) => ['in_transit', 'delivered', 'disputed'].includes(trip.status));
   const hasEscrowReleasedTrip = trips.some((trip) => trip?.escrow?.status === 'released');
 
@@ -86,7 +94,7 @@ const LogisticsStatus = () => {
   };
 
   const handlePickupScan = async (tripId) => {
-    const qrPayload = window.prompt('Enter Seller QR payload to confirm pickup');
+    const qrPayload = window.prompt('Enter the seller PICKUP QR payload to confirm pickup');
     if (!qrPayload) return;
 
     try {
@@ -94,7 +102,50 @@ const LogisticsStatus = () => {
       toast.success('Pickup scan verified. Trip is now in transit.');
       fetchAll();
     } catch (error) {
-      toast.error(error?.response?.data?.message || 'Pickup scan failed');
+      toast.error(error?.response?.data?.message || error?.message || 'Pickup scan failed');
+    }
+  };
+
+  const getCurrentGps = () => new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocation is not supported by this browser.'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      (error) => reject(error),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  });
+
+  const handleDeliveryScan = async (tripId) => {
+    const qrPayload = window.prompt('Enter the buyer DELIVERY QR payload to confirm delivery');
+    if (!qrPayload) return;
+
+    try {
+      const gpsCoords = await getCurrentGps().catch(() => {
+        const manualLat = window.prompt('Enter delivery latitude');
+        const manualLng = window.prompt('Enter delivery longitude');
+        if (!manualLat || !manualLng) return null;
+        return { lat: Number(manualLat), lng: Number(manualLng) };
+      });
+
+      if (!gpsCoords?.lat || !gpsCoords?.lng) {
+        toast.error('GPS coordinates are required for delivery confirmation');
+        return;
+      }
+
+      await logisticsService.scanDelivery(tripId, { qrPayload, gpsCoords });
+      toast.success('Delivery scan verified. Trip is now completed.');
+      fetchAll();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message || 'Delivery scan failed');
     }
   };
 
@@ -145,7 +196,7 @@ const LogisticsStatus = () => {
     const created = new Date(trip.createdAt);
     return created >= new Date(dateRange.start) && created <= new Date(`${dateRange.end}T23:59:59`);
   });
-  const assignedTrips = filteredTrips.filter((trip) => !!trip.driver && String(trip.driver) === String(user?._id || user?.id));
+  const assignedTrips = filteredTrips.filter((trip) => getTripDriverId(trip) === currentUserId);
   const pendingTrips = filteredTrips.filter((trip) => trip.status === 'pending').length;
   const inTransitTrips = filteredTrips.filter((trip) => ['in_transit', 'picked_up', 'out_for_delivery'].includes(trip.status)).length;
   const deliveredTrips = filteredTrips.filter((trip) => trip.status === 'delivered').length;
@@ -200,6 +251,13 @@ const LogisticsStatus = () => {
             <p className="mt-1 text-sm text-gray-500">Track verification, assigned trips, pickup scans, route status, and escrow release.</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to="/logistics/tools"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <FaLayerGroup />
+              Operations Hub
+            </Link>
             <div className="inline-flex h-10 items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 text-xs font-medium text-green-700">
               <span className={`h-2 w-2 rounded-full bg-green-500 ${isRealtimeRefreshing ? 'animate-pulse' : ''}`} />
               Live - {formatRealtimeStamp(lastUpdated)}
@@ -245,6 +303,14 @@ const LogisticsStatus = () => {
           <KpiCard icon={FaRoute} label="Avg Delivery Time" value={avgDeliveryHours === null ? '-' : `${avgDeliveryHours.toFixed(1)}h`} detail="pickup to delivery" color="#3B82F6" points={filteredTrips.map((trip) => (trip.deliveredAt || trip.completedAt ? 1 : 0))} />
           <KpiCard icon={FaClipboardCheck} label="Failed Delivery Rate" value={`${failedRate}%`} detail={`${failedTrips} failed/disputed`} color="#DC2626" points={[failedTrips, filteredTrips.length]} />
           <KpiCard icon={FaMoneyBillWave} label="Driver Earnings" value={formatCurrency(escrowAmount)} detail="escrow/fee tracked" color="#16A34A" points={filteredTrips.map((trip) => Number(trip?.escrow?.amount || trip.deliveryFee || trip.fee || 0))} />
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <NotificationPreferencesCard
+            className="xl:col-span-12"
+            title="Notification Preferences"
+            description="Stay on top of dispatch, pickup, delivery, and account updates without leaving the logistics dashboard."
+          />
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -309,8 +375,11 @@ const LogisticsStatus = () => {
                 </thead>
                 <tbody>
                   {filteredTrips.map((trip) => {
-                    const canAccept = profileStatus === 'verified' && role === 'logistics' && trip.status === 'pending' && (!trip.driver || String(trip.driver) === String(user?._id || user?.id));
-                    const canPickupScan = profileStatus === 'verified' && role === 'logistics' && trip.status === 'pending' && trip.driver && String(trip.driver) === String(user?._id || user?.id);
+                    const tripDriverId = getTripDriverId(trip);
+                    const isMyTrip = tripDriverId === currentUserId;
+                    const canAccept = profileStatus === 'verified' && role === 'logistics' && trip.status === 'pending' && (!tripDriverId || isMyTrip);
+                    const canPickupScan = profileStatus === 'verified' && role === 'logistics' && ['pending', 'driver_assigned', 'en_route_to_pickup'].includes(trip.status) && isMyTrip;
+                    const canDeliveryScan = profileStatus === 'verified' && role === 'logistics' && ['in_transit', 'out_for_delivery', 'delivered'].includes(trip.status) && isMyTrip;
 
                     return (
                       <tr key={trip._id} className="border-b last:border-b-0">
@@ -326,7 +395,12 @@ const LogisticsStatus = () => {
                               <FaQrcode /> Pickup QR
                             </button>
                           )}
-                          {!canAccept && !canPickupScan && <span className="text-xs text-[#6B7280]">No action</span>}
+                          {canDeliveryScan && (
+                            <button onClick={() => handleDeliveryScan(trip._id)} className="ml-2 inline-flex h-8 items-center gap-1 rounded-md bg-[#2563EB] px-3 text-xs font-medium text-white">
+                              <FaQrcode /> Delivery QR
+                            </button>
+                          )}
+                          {!canAccept && !canPickupScan && !canDeliveryScan && <span className="text-xs text-[#6B7280]">No action</span>}
                         </td>
                       </tr>
                     );

@@ -315,13 +315,18 @@ const Register = () => {
     e.preventDefault();
     setError('');
 
+    const normalizedBusinessName = formData.businessName.trim().replace(/\s+/g, ' ');
+
     if (formData.role === 'seller' && !formData.businessType) {
       setError('Please select your business type');
       return;
     }
 
-    if (formData.role === 'seller' && !formData.businessName.trim()) {
-      setError('Please enter your business name');
+    if (
+      formData.role === 'seller' &&
+      (normalizedBusinessName.length < 2 || normalizedBusinessName.length > 120)
+    ) {
+      setError('Business name must be 2-120 characters');
       return;
     }
 
@@ -348,10 +353,16 @@ const Register = () => {
     }
 
     setLoading(true);
-    const { confirmPassword, ...registerData } = formData;
-    registerData.phone = phoneValue;
-    registerData.businessName = registerData.role === 'seller' ? registerData.businessName.trim().replace(/\s+/g, ' ') : '';
-    registerData.businessType = registerData.role === 'seller' ? registerData.businessType : registerData.role === 'logistics' ? 'logistics' : 'consumer';
+    const registerData = {
+      fullName: formData.name.trim().replace(/\s+/g, ' '),
+      email: formData.email.trim().toLowerCase(),
+      phone: phoneValue,
+      password: formData.password,
+      role: formData.role,
+      businessName: formData.role === 'seller' ? normalizedBusinessName : '',
+      businessType: formData.role === 'seller' ? formData.businessType : formData.role === 'logistics' ? 'logistics' : 'consumer',
+      businessLogoUrl: formData.role === 'seller' ? formData.businessLogoUrl : '',
+    };
 
     const result = await register(registerData);
     if (result.success) {

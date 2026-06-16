@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { FaUser, FaEnvelope, FaPhone, FaMapMarkerAlt, FaStore, FaSave, FaBrain, FaShieldAlt, FaCrown } from 'react-icons/fa';
+import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
 
 const Profile = () => {
   const { user, token, activePlan, availablePlans, switchPlan, isSeller } = useAuth();
@@ -123,7 +124,14 @@ const Profile = () => {
             </div>
           </div>
         )}
-        
+
+        <div className="mb-6">
+          <NotificationPreferencesCard
+            title="Notification Preferences"
+            description="Control how you receive order updates, scarcity alerts, and account activity right from your profile dashboard."
+          />
+        </div>
+
         {/* Profile Card */}
         <div className="bg-white rounded-xl shadow-md overflow-hidden">
           {/* Profile Header */}

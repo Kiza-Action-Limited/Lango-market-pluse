@@ -3,6 +3,7 @@ import React, { createContext, useState, useContext, useEffect, useCallback } fr
 import { notificationService } from '../services/notificationService';
 import { useAuth } from './AuthContext';
 import toast from 'react-hot-toast';
+import io from 'socket.io-client';
 
 const NotificationContext = createContext();
 
@@ -18,47 +19,51 @@ export const NotificationProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [socket, setSocket] = useState(null);
   const { token, isAuthenticated } = useAuth();
 
   useEffect(() => {
     if (isAuthenticated && token) {
       fetchNotifications();
-      setupWebSocket();
+      const notificationSocket = setupSocket();
       
       // Poll for new notifications every 30 seconds as fallback
       const interval = setInterval(fetchNotifications, 30000);
       
       return () => {
         clearInterval(interval);
-        if (socket) {
-          socket.close();
-        }
+        notificationSocket?.close();
       };
     }
   }, [isAuthenticated, token]);
 
-  const setupWebSocket = () => {
-    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:5000';
-    const ws = new WebSocket(`${wsUrl}?token=${token}`);
+  const setupSocket = () => {
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '') || 'http://localhost:5000';
+    const notificationSocket = io(socketUrl, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+    });
     
-    ws.onopen = () => {
-      console.log('Notification WebSocket connected');
-    };
+    notificationSocket.on('connect', () => {
+      console.log('Notification socket connected');
+    });
     
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'notification') {
-        addNewNotification(data.notification);
-        toast.info(data.notification.message);
-      }
-    };
+    notificationSocket.on('new_notification', handleIncomingNotification);
+    notificationSocket.on('notification', handleIncomingNotification);
+    notificationSocket.on('order_update', handleIncomingNotification);
     
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
+    notificationSocket.on('connect_error', (error) => {
+      console.error('Notification socket error:', error.message);
+    });
     
-    setSocket(ws);
+    return notificationSocket;
+  };
+
+  const handleIncomingNotification = (payload) => {
+    const notification = payload?.notification || payload;
+    if (!notification) return;
+
+    addNewNotification(notification);
+    toast.info(notification.message || notification.title || 'New notification');
   };
 
   const fetchNotifications = async () => {

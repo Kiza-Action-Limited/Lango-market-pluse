@@ -94,6 +94,15 @@ router.put(
   disputeController.updateStatus
 );
 
+router.patch(
+  '/:id/status',
+  [
+    param('id').isMongoId(),
+    body('status').isIn(['open', 'under_review', 'resolved_buyer', 'resolved_seller', 'partial_refund', 'closed']),
+  ],
+  disputeController.updateStatus
+);
+
 // DELETE /api/v1/disputes/:id - Close dispute (admin only)
 router.delete(
   '/:id',

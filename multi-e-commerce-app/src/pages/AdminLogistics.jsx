@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
+import { Link } from 'react-router-dom';
 import { FaCheckCircle, FaTimesCircle, FaTruck, FaUserCheck } from 'react-icons/fa';
 import { logisticsService } from '../services/logisticsService';
 
@@ -49,6 +50,12 @@ const AdminLogistics = () => {
         <div>
           <h1 className="text-3xl font-bold text-[#111827]">Logistics Admin Review</h1>
           <p className="text-[#6B7280] mt-1">Verify logistics applications and monitor active delivery records.</p>
+          <Link
+            to="/admin/logistics-tools"
+            className="mt-3 inline-flex items-center rounded-lg bg-[#111827] px-4 py-2 text-sm font-medium text-white hover:bg-black"
+          >
+            Open Logistics Tools
+          </Link>
         </div>
 
         <section className="bg-white rounded-xl border border-gray-200 p-6">

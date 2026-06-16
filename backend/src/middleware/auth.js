@@ -64,6 +64,8 @@ const protect = async (req, res, next) => {
         id: decoded.id,
         userId: decoded.id,
         role: decoded.role || 'buyer',
+        businessType: decoded.businessType || null,
+        businessName: decoded.businessName || null,
         isActive: true,
       };
     } else {
@@ -92,7 +94,9 @@ const protect = async (req, res, next) => {
       id: user.id || user._id?.toString() || decoded.id,
       _id: user._id || decoded.id,
       userId: user.userId || user.id || user._id?.toString() || decoded.id,
-      role: user.role || decoded.role || 'buyer'
+      role: user.role || decoded.role || 'buyer',
+      businessType: user.businessType || decoded.businessType || null,
+      businessName: user.businessName || decoded.businessName || null,
     };
     
     // Attach userId directly for convenience

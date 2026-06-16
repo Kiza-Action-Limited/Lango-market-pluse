@@ -1,6 +1,16 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const isValidOptionalGeoCoordinates = (value) => (
+  value == null ||
+  (Array.isArray(value) && value.length === 0) ||
+  (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((coordinate) => Number.isFinite(Number(coordinate)))
+  )
+);
+
 const UserSchema = new mongoose.Schema(
   {
     phone: {
@@ -168,6 +178,34 @@ const UserSchema = new mongoose.Schema(
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
       },
+      isOnline: {
+        type: Boolean,
+        default: false,
+      },
+      currentLocation: {
+        lat: { type: Number },
+        lng: { type: Number },
+        accuracy: { type: Number },
+        heading: { type: Number },
+        speed: { type: Number },
+        updatedAt: { type: Date },
+      },
+      location: {
+        type: {
+          type: String,
+          enum: ['Point'],
+        },
+        coordinates: {
+          type: [Number],
+          default: undefined,
+          validate: {
+            validator: function (value) {
+              return isValidOptionalGeoCoordinates(value);
+            },
+            message: 'Logistics location coordinates must contain [longitude, latitude]',
+          },
+        },
+      },
       verifiedAt: Date,
       applicationSubmittedAt: Date,
       reviewedAt: Date,
@@ -198,10 +236,10 @@ const UserSchema = new mongoose.Schema(
       },
       coordinates: {
         type: [Number], // [longitude, latitude]
+        default: undefined,
         validate: {
           validator: function (value) {
-            if (value == null) return true;
-            return Array.isArray(value) && value.length === 2;
+            return isValidOptionalGeoCoordinates(value);
           },
           message: 'Location coordinates must contain [longitude, latitude]',
         },

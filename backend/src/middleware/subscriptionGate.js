@@ -95,7 +95,13 @@ const checkRole = (...allowedRoles) => (req, res, next) => {
   }
 
   const accountRole = req.user.accountRole || 'OWNER';
-  if (!allowedRoles.includes(accountRole)) {
+  const normalizedUserRole = String(req.user.role || '').toUpperCase();
+  const isAllowedByRole = allowedRoles.includes(accountRole) ||
+    allowedRoles.includes(normalizedUserRole) ||
+    (allowedRoles.includes('DRIVER') && isLogisticsBypass(req.user)) ||
+    (allowedRoles.includes('FLEET_OWNER') && normalizePlanId(req.user.subscriptionTier) === 'mizigo');
+
+  if (!isAllowedByRole) {
     return res.status(403).json({
       success: false,
       message: `Access denied. Required account role: ${allowedRoles.join(' or ')}`,

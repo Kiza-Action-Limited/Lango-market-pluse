@@ -4,7 +4,7 @@ const { validationResult } = require('express-validator');
 const planService = require('../services/subscription/plan.service');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary.config');
 const { PLAN_IDS } = require('../config/subscriptionPlans');
-const { isFarmerUser, isSellerUser } = require('../utils/userCategory');
+const { getEffectiveUserCategory, isFarmerUser, isSellerUser } = require('../utils/userCategory');
 
 const PLAN_PRODUCT_LIMITS = {
   free: 30,
@@ -13,16 +13,20 @@ const PLAN_PRODUCT_LIMITS = {
   [PLAN_IDS.SOLO]: 30,
   [PLAN_IDS.SMART]: Number.MAX_SAFE_INTEGER,
   [PLAN_IDS.GROWTH]: Number.MAX_SAFE_INTEGER,
-  [PLAN_IDS.MIZIGO]: 0,
+  [PLAN_IDS.MIZIGO]: Number.MAX_SAFE_INTEGER,
 };
 
 const PAID_REVIEW_STATUSES = ['payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed'];
 
+const isLogisticsUser = (user = {}) => getEffectiveUserCategory(user) === 'logistics';
+
+const canManageProducts = (user = {}) => isSellerUser(user) || isLogisticsUser(user);
+
 const getEffectivePlan = async (userId) => {
   try {
     const subscription = await planService.getUserSubscription(userId);
-    if (subscription?.isActive) {
-      return planService.normalizePlan(subscription.plan);
+    if (planService.isSubscriptionActive(subscription)) {
+      return planService.normalizePlanId(subscription.plan);
     }
     return PLAN_IDS.SOLO;
   } catch (error) {
@@ -39,14 +43,23 @@ const getProductLimitForPlan = (plan) => PLAN_PRODUCT_LIMITS[plan] ?? PLAN_PRODU
  */
 exports.createProduct = async (req, res, next) => {
   try {
-    if (!isSellerUser(req.user)) {
+    const effectiveCategory = getEffectiveUserCategory(req.user);
+
+    if (!canManageProducts(req.user)) {
       return res.status(403).json({
         success: false,
-        message: 'Only sellers or farmers can add products.',
+        message: 'Only sellers, farmers, or logistics providers can add products.',
+        ...(process.env.NODE_ENV !== 'production' ? {
+          debug: {
+            role: req.user?.role,
+            businessType: req.user?.businessType,
+            effectiveCategory,
+          },
+        } : {}),
       });
     }
 
-    if (!String(req.user.businessName || '').trim()) {
+    if (!isLogisticsUser(req.user) && !String(req.user.businessName || '').trim()) {
       return res.status(400).json({
         success: false,
         message: 'Business name is required before adding products. Update your seller business profile first.',
@@ -456,10 +469,10 @@ exports.getLowStockProducts = async (req, res, next) => {
  */
 exports.getMyProducts = async (req, res, next) => {
   try {
-    if (!isSellerUser(req.user)) {
+    if (!canManageProducts(req.user)) {
       return res.status(403).json({
         success: false,
-        message: 'Only sellers or farmers can access this dashboard.',
+        message: 'Only sellers, farmers, or logistics providers can access this dashboard.',
       });
     }
 

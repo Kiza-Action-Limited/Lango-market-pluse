@@ -8,6 +8,8 @@ import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionP
 import { productService } from '../services/productService';
 import { orderService } from '../services/orderService';
 import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill } from '../components/dashboard/DashboardWidgets';
+import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
+import SellerWalletConsole from '../components/SellerWalletConsole';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { buildReviewSummary, buildSalesByLocation, isPaidOrder } from '../utils/dashboardMetrics';
 
@@ -284,6 +286,18 @@ const SellerDashboard = () => {
         <KpiCard icon={FaDollarSign} label="Average Order Value" value={formatCurrency(filteredAov)} detail={`${filteredOrders.length} filtered orders`} color="#16A34A" points={revenueSeries} />
         <KpiCard icon={FaUsers} label="Customers" value={uniqueCustomerCount} detail={`${returningCustomerCount} returning`} color="#F97316" points={[uniqueCustomerCount, returningCustomerCount]} />
         <KpiCard icon={FaStar} label="Review Score" value={averageRating.toFixed(1)} detail={`${ratedProducts} rated products`} color="#F59E0B" points={products.map((product) => Number(product.rating || 0)).slice(0, 12)} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <NotificationPreferencesCard
+          className="xl:col-span-12"
+          title="Notification Preferences"
+          description="Keep seller alerts inside the dashboard so you can receive order, stock, and account notifications without leaving your workspace."
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <SellerWalletConsole className="xl:col-span-12" />
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">

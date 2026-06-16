@@ -29,6 +29,7 @@ const getEffectiveUserCategory = (user = {}) => {
   if (role === 'admin') return 'admin';
   if (role === 'logistics' || businessType === 'logistics') return 'logistics';
   if (role === 'farmer' || businessType === 'farmer') return 'farmer';
+  if (SELLER_BUSINESS_TYPES.has(role)) return role;
   if (SELLER_BUSINESS_TYPES.has(businessType)) return businessType;
   if (role === 'seller') return businessType || 'retailer';
   if (role === 'buyer' || role === 'consumer') return 'consumer';

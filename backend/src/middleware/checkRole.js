@@ -14,7 +14,7 @@ const checkRole = (requiredStaffRole = 'OWNER') => {
     }
 
     // Apply strict blocking for Growth tier clerks on financial routes.
-    const normalizedPlan = planService.normalizePlan(req.user.subscriptionTier);
+    const normalizedPlan = planService.normalizePlanId(req.user.subscriptionTier);
     if (normalizedPlan === 'growth') {
       return res.status(403).json({
         success: false,

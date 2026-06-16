@@ -28,6 +28,7 @@ const Checkout = lazy(() => import('./pages/Checkout'));
 const Orders = lazy(() => import('./pages/Orders'));
 const OrderTracking = lazy(() => import('./pages/OrderTracking'));
 const Profile = lazy(() => import('./pages/Profile'));
+const NotificationPreferences = lazy(() => import('./pages/NotificationPreferences'));
 const Categories = lazy(() => import('./pages/Categories'));
 const Wishlist = lazy(() => import('./pages/Wishlists'));
 const Reviews = lazy(() => import('./pages/Reviews'));
@@ -53,6 +54,7 @@ const SellerPremiumVerification = lazy(() => import('./pages/SellerPremiumVerifi
 const SellerPremiumPayment = lazy(() => import('./pages/SellerPremiumPayment'));
 const LogisticsApplication = lazy(() => import('./pages/LogisticsApplication'));
 const LogisticsStatus = lazy(() => import('./pages/LogisticsStatus'));
+const LogisticsOperations = lazy(() => import('./pages/LogisticsOperations'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AdminUsers = lazy(() => import('./pages/AdminUsers'));
 const AdminCategories = lazy(() => import('./pages/AdminCategories'));
@@ -62,6 +64,7 @@ const AdminContactQueue = lazy(() => import('./pages/AdminContactQueue'));
 const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
 const AdminProfile = lazy(() => import('./pages/AdminProfile'));
 const AdminLogistics = lazy(() => import('./pages/AdminLogistics'));
+const AdminFinanceAudit = lazy(() => import('./pages/AdminFinanceAudit'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 
 function App() {
@@ -107,10 +110,12 @@ function App() {
                         <Route path="orders" element={<Orders />} />
                         <Route path="orders/:id/track" element={<OrderTracking />} />
                         <Route path="profile" element={<Profile />} />
+                        <Route path="notifications/preferences" element={<NotificationPreferences />} />
                         <Route path="wishlist" element={<Wishlist />} />
                         <Route path="logistics/apply" element={<LogisticsApplication />} />
                         <Route path="logistics/status" element={<LogisticsStatus />} />
                         <Route path="logistics/dashboard" element={<LogisticsStatus />} />
+                        <Route path="logistics/tools" element={<LogisticsOperations />} />
                       </Route>
 
                       <Route element={<SellerRoute />}>
@@ -140,6 +145,8 @@ function App() {
                           <Route path="products" element={<AdminProducts />} />
                           <Route path="analytics" element={<AdminAnalytics />} />
                           <Route path="logistics" element={<AdminLogistics />} />
+                          <Route path="logistics-tools" element={<LogisticsOperations />} />
+                          <Route path="finance-audit" element={<AdminFinanceAudit />} />
                           <Route path="contact-queue" element={<AdminContactQueue />} />
                           <Route path="profile" element={<AdminProfile />} />
                         </Route>

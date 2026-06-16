@@ -1,13 +1,12 @@
 // src/pages/Orders.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
-import { useAuth } from '../context/AuthContext';
 import { FaEye, FaTruck, FaBox, FaClock, FaCheckCircle, FaBan, FaBrain } from 'react-icons/fa';
 import { formatCurrency } from '../utils/formatters';
+import { orderService } from '../services/orderService';
+import { normalizeOrder } from '../utils/orderAdapter';
 
 const Orders = () => {
-  const { token } = useAuth();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState('all');
@@ -18,10 +17,8 @@ const Orders = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/orders', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setOrders(response.data.orders);
+      const response = await orderService.getAll({ role: 'buyer', page: 1, limit: 50 });
+      setOrders((response.data || response.orders || []).map(normalizeOrder));
     } catch (error) {
       console.error('Error fetching orders:', error);
     } finally {
@@ -32,12 +29,21 @@ const Orders = () => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'pending':
+      case 'pending_payment':
+      case 'AWAITING_PAYMENT':
         return 'bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20';
       case 'processing':
+      case 'payment_escrowed':
+      case 'FUNDS_HELD':
         return 'bg-[#FB923C]/10 text-[#FB923C] border border-[#FB923C]/20';
       case 'shipped':
+      case 'dispatched':
+      case 'IN_TRANSIT':
         return 'bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20';
       case 'delivered':
+      case 'DELIVERED':
+      case 'completed':
+      case 'RELEASED':
         return 'bg-[#16A34A]/10 text-[#16A34A] border border-[#16A34A]/20';
       case 'cancelled':
         return 'bg-red-100 text-red-800 border border-red-200';
@@ -49,12 +55,21 @@ const Orders = () => {
   const getStatusIcon = (status) => {
     switch (status) {
       case 'pending':
+      case 'pending_payment':
+      case 'AWAITING_PAYMENT':
         return <FaClock className="mr-1" size={12} />;
       case 'processing':
+      case 'payment_escrowed':
+      case 'FUNDS_HELD':
         return <FaBox className="mr-1" size={12} />;
       case 'shipped':
+      case 'dispatched':
+      case 'IN_TRANSIT':
         return <FaTruck className="mr-1" size={12} />;
       case 'delivered':
+      case 'DELIVERED':
+      case 'completed':
+      case 'RELEASED':
         return <FaCheckCircle className="mr-1" size={12} />;
       case 'cancelled':
         return <FaBan className="mr-1" size={12} />;
@@ -66,11 +81,7 @@ const Orders = () => {
   const handleCancelOrder = async (orderId) => {
     if (window.confirm('Are you sure you want to cancel this order?')) {
       try {
-        await axios.put(
-          `http://localhost:5000/api/orders/${orderId}/cancel`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+        await orderService.cancel(orderId);
         fetchOrders();
       } catch (error) {
         console.error('Error cancelling order:', error);
@@ -86,10 +97,10 @@ const Orders = () => {
   // Order statistics
   const orderStats = {
     total: orders.length,
-    pending: orders.filter(o => o.status === 'pending').length,
-    processing: orders.filter(o => o.status === 'processing').length,
-    shipped: orders.filter(o => o.status === 'shipped').length,
-    delivered: orders.filter(o => o.status === 'delivered').length,
+    pending: orders.filter(o => ['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(o.status)).length,
+    processing: orders.filter(o => ['processing', 'payment_escrowed', 'FUNDS_HELD'].includes(o.status)).length,
+    shipped: orders.filter(o => ['shipped', 'dispatched', 'IN_TRANSIT'].includes(o.status)).length,
+    delivered: orders.filter(o => ['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(o.status)).length,
     totalSpent: orders.reduce((sum, o) => sum + o.total, 0),
   };
 
@@ -159,7 +170,7 @@ const Orders = () => {
         {/* Filter Tabs */}
         <div className="bg-white rounded-xl shadow-sm p-3 mb-6">
           <div className="flex flex-wrap gap-2">
-            {['all', 'pending', 'processing', 'shipped', 'delivered', 'cancelled'].map((filter) => (
+            {['all', 'pending_payment', 'processing', 'dispatched', 'delivered', 'cancelled'].map((filter) => (
               <button
                 key={filter}
                 onClick={() => setSelectedFilter(filter)}
@@ -179,7 +190,7 @@ const Orders = () => {
                     : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
                 }`}
               >
-                {filter === 'all' ? 'All Orders' : filter}
+                {filter === 'all' ? 'All Orders' : filter.replace(/_/g, ' ')}
                 {filter !== 'all' && (
                   <span className="ml-1 text-xs opacity-75">
                     ({orders.filter(o => o.status === filter).length})
@@ -225,7 +236,7 @@ const Orders = () => {
                 <div className="flex items-center space-x-4">
                   <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 ${getStatusColor(order.status)}`}>
                     {getStatusIcon(order.status)}
-                    {order.status.toUpperCase()}
+                    {order.status.replace(/_/g, ' ').toUpperCase()}
                   </span>
                   <span className="font-bold text-[#16A34A]">{formatCurrency(order.total)}</span>
                 </div>
@@ -266,7 +277,7 @@ const Orders = () => {
                   </Link>
                   
                   <div className="flex gap-3">
-                    {order.status === 'pending' && (
+                    {['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(order.status) && (
                       <button
                         onClick={() => handleCancelOrder(order.id)}
                         className="text-red-600 hover:text-red-700 text-sm font-medium transition-colors"

@@ -164,7 +164,6 @@ exports.sendPhoneVerificationOtp = async (req, res) => {
       success: true,
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
-      ...(channel === 'email' ? { delivered: result.delivered } : {}),
       ...(result.devCode ? { devCode: result.devCode } : {}),
       ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });

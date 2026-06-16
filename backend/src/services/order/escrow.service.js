@@ -8,13 +8,33 @@ const SinkingFund = require('../../models/SinkingFund.model');
 const { escrowQueue } = require('../../config/redis');
 const { b2cPayment, normalizeMpesaPhone } = require('../../config/mpesa');
 const auditService = require('../audit.service');
+const axios = require('axios');
 
 const AUTO_RELEASE_MS = 72 * 60 * 60 * 1000;
 const PLATFORM_FEE_RATE = Number(process.env.PLATFORM_COMMISSION_RATE || 0.075);
 const SINKING_FUND_RATE = Number(process.env.SINKING_FUND_RATE || 0.10);
+const ESCROW_API_TIMEOUT_MS = Number(process.env.ESCROW_API_TIMEOUT_MS || 15000);
+const SUPPORTED_ESCROW_CURRENCIES = ['usd', 'aud', 'euro', 'gbp', 'cad'];
 
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 const isAdminRole = (role) => ['admin', 'ADMIN'].includes(role);
+const httpError = (message, statusCode, details = {}) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  Object.assign(error, details);
+  return error;
+};
+
+const inferEscrowStatusFromOrder = (status) => {
+  if (['DELIVERED', 'delivered'].includes(status)) return 'DELIVERED';
+  if (['IN_TRANSIT', 'dispatched'].includes(status)) return 'IN_TRANSIT';
+  if (['FUNDS_HELD', 'payment_escrowed', 'processing'].includes(status)) return 'HELD';
+  if (['AWAITING_PAYMENT'].includes(status)) return 'AWAITING_PAYMENT';
+  return null;
+};
+
+const truncate = (value, maxLength) => String(value || '').trim().slice(0, maxLength);
+const getId = (value) => value?._id?.toString?.() || value?.toString?.();
 
 class EscrowService {
   async createPendingEscrow(order, { checkoutRequestId, merchantRequestId }) {
@@ -34,7 +54,7 @@ class EscrowService {
           merchantRequestId,
         },
       },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     await auditService.record({
@@ -202,9 +222,9 @@ class EscrowService {
 
   async releasePayment(orderId, options = {}) {
     const { releasedBy, forceRelease = false, releaseMethod = 'manual_confirm', refundAmount = 0 } = options;
-    const escrow = await this.getEscrowByOrder(orderId);
     const order = await Order.findById(orderId);
-    if (!order) throw new Error('Order not found');
+    if (!order) throw httpError('Order not found', 404);
+    const escrow = await this.getOrCreateDisputeEscrow(order);
 
     if (escrow.status === 'RELEASED') {
       return { released: true, alreadyReleased: true, escrow };
@@ -217,7 +237,10 @@ class EscrowService {
     }
 
     if (!forceRelease && escrow.status !== 'DELIVERED') {
-      throw new Error(`Escrow release requires DELIVERED status. Current status: ${escrow.status}`);
+      throw httpError(`Escrow release requires DELIVERED status. Current status: ${escrow.status}`, 409, {
+        currentStatus: escrow.status,
+        expectedStatus: 'DELIVERED',
+      });
     }
 
     await this.cancelAutoRelease(orderId);
@@ -276,7 +299,7 @@ class EscrowService {
             },
           },
         },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
       );
 
       await User.findByIdAndUpdate(driver._id, { $inc: { sinkingFundBalance: split.sinkingFundAmount } });
@@ -429,7 +452,9 @@ class EscrowService {
   }
 
   async holdEscrow(orderId, reason, adminId) {
-    const escrow = await this.getEscrowByOrder(orderId);
+    const order = await Order.findById(orderId);
+    if (!order) throw httpError('Order not found', 404);
+    const escrow = await this.getOrCreateDisputeEscrow(order);
     const oldStatus = escrow.status;
     escrow.status = 'DISPUTED';
     escrow.metadata.set('holdReason', reason);
@@ -449,17 +474,23 @@ class EscrowService {
   }
 
   async cancelEscrow(orderId, reason, adminId) {
+    const order = await Order.findById(orderId);
+    if (!order) throw httpError('Order not found', 404);
+    const escrow = await this.getOrCreateDisputeEscrow(order);
+
     return this.releasePayment(orderId, {
       releasedBy: adminId,
       forceRelease: true,
       releaseMethod: 'admin_refund',
-      refundAmount: (await this.getEscrowByOrder(orderId)).amount,
+      refundAmount: escrow.amount,
       reason,
     });
   }
 
   async partialRelease(orderId, amount, userId, reason) {
-    const escrow = await this.getEscrowByOrder(orderId);
+    const order = await Order.findById(orderId);
+    if (!order) throw httpError('Order not found', 404);
+    const escrow = await this.getOrCreateDisputeEscrow(order);
     const refundAmount = Math.max(escrow.amount - Number(amount), 0);
     return this.releasePayment(orderId, {
       releasedBy: userId,
@@ -470,38 +501,89 @@ class EscrowService {
     });
   }
 
-  async raiseDispute(orderId, raisedBy, { reason, description, evidenceUrls = [] }) {
-    const escrow = await this.getEscrowByOrder(orderId);
+  async raiseDispute(orderId, raisedBy, { reason, description, evidenceUrls = [], evidence = [] }, raisedByRole) {
     const order = await Order.findById(orderId);
-    if (!['DELIVERED', 'HELD', 'FUNDS_HELD', 'payment_escrowed'].includes(escrow.status) && order?.status !== 'DELIVERED') {
-      throw new Error('Disputes can only be raised while funds are held or within the delivery window');
+    if (!order) throw httpError('Order not found', 404);
+
+    const openDispute = await Dispute.findOne({ order: orderId, status: { $ne: 'closed' } });
+    if (openDispute) {
+      throw httpError('A dispute already exists for this order', 400);
     }
 
-    if (escrow.deliveredAt && Date.now() - escrow.deliveredAt.getTime() > AUTO_RELEASE_MS) {
-      throw new Error('The 72-hour dispute window has expired');
+    const escrow = await this.getOrCreateDisputeEscrow(order, { throwIfMissing: false });
+    const allowedEscrowStatuses = ['HELD', 'IN_TRANSIT', 'DELIVERED'];
+    const allowedOrderStatuses = ['FUNDS_HELD', 'IN_TRANSIT', 'DELIVERED', 'payment_escrowed', 'processing', 'dispatched', 'delivered'];
+    if (escrow && !allowedEscrowStatuses.includes(escrow.status) && !allowedOrderStatuses.includes(order?.status)) {
+      throw httpError('Disputes can only be raised while funds are held or within the delivery window', 409, {
+        currentStatus: order?.status,
+        escrowStatus: escrow.status,
+      });
     }
+
+    if (escrow?.deliveredAt && Date.now() - escrow.deliveredAt.getTime() > AUTO_RELEASE_MS) {
+      throw httpError('The 72-hour dispute window has expired', 409);
+    }
+
+    const normalizedEvidenceUrls = Array.isArray(evidenceUrls) && evidenceUrls.length > 0
+      ? evidenceUrls
+      : (Array.isArray(evidence) ? evidence : []);
 
     const dispute = await Dispute.findOneAndUpdate(
       { order: orderId },
       {
-        $setOnInsert: { order: orderId, escrow: escrow._id, raisedBy },
-        $set: { reason, description, evidenceUrls, evidence: evidenceUrls, status: 'open' },
+        $setOnInsert: { order: orderId, ...(escrow?._id ? { escrow: escrow._id } : {}), raisedBy },
+        $set: { reason, description, evidenceUrls: normalizedEvidenceUrls, evidence: normalizedEvidenceUrls, status: 'open' },
+        $push: {
+          messages: {
+            sender: raisedBy,
+            message: `Dispute created: ${reason}. ${description || 'No description provided.'}`,
+            timestamp: new Date(),
+            isAdmin: isAdminRole(raisedByRole),
+          },
+        },
       },
-      { upsert: true, new: true }
+      { upsert: true, returnDocument: 'after' }
     );
 
-    await this.holdEscrow(orderId, reason, raisedBy);
+    if (escrow) {
+      await this.holdEscrow(orderId, reason, raisedBy);
+    } else {
+      order.status = 'disputed';
+      await order.save();
+    }
+
     return dispute;
   }
 
-  async resolveDispute(disputeId, adminId, { refundAmount = 0, resolution, faultParty }) {
+  async resolveDispute(disputeId, adminId, { refundAmount, resolution, faultParty, resolutionAmount }) {
     const dispute = await Dispute.findById(disputeId);
-    if (!dispute) throw new Error('Dispute not found');
+    if (!dispute) throw httpError('Dispute not found', 404);
 
-    dispute.status = refundAmount > 0 ? 'partial_refund' : 'resolved_seller';
-    dispute.resolution = resolution || (refundAmount > 0 ? 'partial_refund' : 'release_to_seller');
-    dispute.refundAmount = refundAmount;
-    dispute.resolutionAmount = refundAmount;
+    const order = await Order.findById(dispute.order);
+    if (!order) throw httpError('Order linked to this dispute was not found', 404);
+
+    const escrow = await this.getOrCreateDisputeEscrow(order);
+    const requestedRefund = refundAmount ?? resolutionAmount;
+    let finalRefundAmount = money(requestedRefund || 0);
+
+    if (resolution === 'refund_buyer' || resolution === 'cancelled') {
+      finalRefundAmount = money(escrow.amount);
+    } else if (resolution === 'release_to_seller') {
+      finalRefundAmount = 0;
+    } else if (resolution === 'partial_refund' && requestedRefund == null) {
+      finalRefundAmount = money(escrow.amount * 0.5);
+    }
+
+    if (finalRefundAmount > escrow.amount) {
+      throw httpError('Refund amount cannot exceed escrow amount', 400, { escrowAmount: escrow.amount });
+    }
+
+    dispute.status = finalRefundAmount > 0
+      ? (finalRefundAmount >= escrow.amount ? 'resolved_buyer' : 'partial_refund')
+      : 'resolved_seller';
+    dispute.resolution = resolution || (finalRefundAmount > 0 ? 'partial_refund' : 'release_to_seller');
+    dispute.refundAmount = finalRefundAmount;
+    dispute.resolutionAmount = finalRefundAmount;
     dispute.faultParty = faultParty;
     dispute.resolvedBy = adminId;
     dispute.resolvedAt = new Date();
@@ -511,7 +593,7 @@ class EscrowService {
       const user = await User.findByIdAndUpdate(
         faultParty,
         { $inc: { trustScore: -0.5 } },
-        { new: true }
+        { returnDocument: 'after' }
       );
       if (user?.trustScore <= 2.5) {
         user.verificationStatus = 'restricted';
@@ -523,7 +605,7 @@ class EscrowService {
       releasedBy: adminId,
       forceRelease: true,
       releaseMethod: 'dispute_resolution',
-      refundAmount,
+      refundAmount: finalRefundAmount,
     });
 
     await auditService.record({
@@ -531,7 +613,7 @@ class EscrowService {
       entityId: dispute._id,
       action: 'DISPUTE_RESOLVED',
       actor: adminId,
-      newValue: { refundAmount, resolution: dispute.resolution, faultParty },
+      newValue: { refundAmount: finalRefundAmount, resolution: dispute.resolution, faultParty },
     });
 
     return { dispute, release };
@@ -560,6 +642,257 @@ class EscrowService {
     });
 
     return payout;
+  }
+
+  getEscrowApiConfig() {
+    const email = process.env.ESCROW_API_EMAIL || process.env.ESCROW_EMAIL;
+    const apiKey = process.env.ESCROW_API_KEY;
+    const defaultBaseUrl = process.env.ESCROW_ENV === 'production'
+      ? 'https://api.escrow.com/2017-09-01'
+      : 'https://api.escrow-sandbox.com/2017-09-01';
+    const baseUrl = (process.env.ESCROW_API_BASE_URL || defaultBaseUrl).replace(/\/+$/, '');
+
+    if (!email) {
+      throw httpError('ESCROW_API_EMAIL or ESCROW_EMAIL is required for Escrow.com API calls', 500);
+    }
+    if (!apiKey) {
+      throw httpError('ESCROW_API_KEY is required for Escrow.com API calls', 500);
+    }
+
+    return { email, apiKey, baseUrl };
+  }
+
+  async escrowApiRequest(method, path, { data, params, asCustomer } = {}) {
+    const { email, apiKey, baseUrl } = this.getEscrowApiConfig();
+    const auth = Buffer.from(`${email}:${apiKey}`).toString('base64');
+
+    try {
+      const response = await axios({
+        method,
+        url: `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`,
+        data,
+        params,
+        timeout: ESCROW_API_TIMEOUT_MS,
+        headers: {
+          Authorization: `Basic ${auth}`,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(asCustomer ? { 'As-Customer': asCustomer } : {}),
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      const status = error.response?.status || 502;
+      const externalMessage = error.response?.data?.message
+        || error.response?.data?.error
+        || error.response?.data?.errors?.[0]?.message
+        || error.message;
+      throw httpError(`Escrow.com API request failed: ${externalMessage}`, status >= 500 ? 502 : status, {
+        externalStatus: error.response?.status,
+      });
+    }
+  }
+
+  assertOrderEscrowAccess(order, userId, userRole) {
+    if (isAdminRole(userRole)) return;
+
+    const requesterId = userId?.toString();
+    if ([getId(order.buyer), getId(order.seller)].includes(requesterId)) return;
+
+    throw httpError('Unauthorized', 403);
+  }
+
+  async getOrderForExternalEscrow(orderId, userId, userRole) {
+    const order = await Order.findById(orderId)
+      .populate('buyer', 'email fullName phone')
+      .populate('seller', 'email fullName businessName phone')
+      .populate('product', 'name description images category');
+
+    if (!order) throw httpError('Order not found', 404);
+    this.assertOrderEscrowAccess(order, userId, userRole);
+    return order;
+  }
+
+  buildEscrowComTransactionPayload(order, options = {}) {
+    const configuredEmail = process.env.ESCROW_API_EMAIL || process.env.ESCROW_EMAIL;
+    const buyerCustomer = options.buyerCustomer
+      || (options.useConfiguredAccountAsBuyer ? 'me' : order.buyer?.email);
+    const sellerCustomer = options.sellerCustomer || order.seller?.email;
+
+    if (!buyerCustomer) {
+      throw httpError('Buyer email is required to create an Escrow.com transaction', 422);
+    }
+    if (!sellerCustomer) {
+      throw httpError('Seller email is required to create an Escrow.com transaction', 422);
+    }
+
+    const currency = String(options.currency || process.env.ESCROW_CURRENCY || 'usd').toLowerCase();
+    if (!SUPPORTED_ESCROW_CURRENCIES.includes(currency)) {
+      throw httpError(`Escrow.com currency must be one of: ${SUPPORTED_ESCROW_CURRENCIES.join(', ')}`, 422);
+    }
+
+    const reference = truncate(options.reference || order.orderNumber || order._id, 24);
+    const title = truncate(options.title || order.product?.name || `Order ${order.orderNumber || order._id}`, 200);
+    const description = truncate(
+      options.description || order.product?.description || `Lango Market Pulse order ${order.orderNumber || order._id}`,
+      500
+    );
+    const amount = money(options.amount || order.totalAmount);
+    const inspectionPeriod = Number(options.inspectionPeriodSeconds || process.env.ESCROW_INSPECTION_PERIOD_SECONDS || AUTO_RELEASE_MS / 1000);
+    const quantity = Math.max(1, Math.ceil(Number(options.quantity || order.quantity || 1)));
+
+    return {
+      parties: [
+        { role: 'buyer', customer: buyerCustomer === configuredEmail ? 'me' : buyerCustomer },
+        { role: 'seller', customer: sellerCustomer === configuredEmail ? 'me' : sellerCustomer },
+      ],
+      currency,
+      description: truncate(options.transactionDescription || `Marketplace escrow for ${title}`, 256),
+      reference,
+      items: [
+        {
+          title,
+          description,
+          type: options.itemType || process.env.ESCROW_ITEM_TYPE || 'general_merchandise',
+          category: options.category || process.env.ESCROW_ITEM_CATEGORY || 'other_merchandise',
+          inspection_period: inspectionPeriod,
+          quantity,
+          schedule: [
+            {
+              amount,
+              payer_customer: buyerCustomer,
+              beneficiary_customer: sellerCustomer,
+            },
+          ],
+          extra_attributes: {
+            merchant_url: options.merchantUrl || process.env.APP_URL,
+            image_url: options.imageUrl || order.product?.images?.[0]?.url,
+          },
+        },
+      ],
+    };
+  }
+
+  summarizeExternalTransaction(transaction) {
+    const items = Array.isArray(transaction?.items) ? transaction.items : [];
+    const schedules = items.flatMap((item) => Array.isArray(item.schedule) ? item.schedule : []);
+    const itemStatuses = items.map((item) => item.status || {});
+    const allSecured = schedules.length > 0 && schedules.every((schedule) => schedule.status?.secured === true);
+    const allShipped = itemStatuses.length > 0 && itemStatuses.every((status) => status.shipped === true);
+    const allReceived = itemStatuses.length > 0 && itemStatuses.every((status) => status.received === true);
+    const allAccepted = itemStatuses.length > 0 && itemStatuses.every((status) => status.accepted === true);
+
+    let status = 'created';
+    if (transaction?.is_cancelled) status = 'cancelled';
+    else if (allAccepted) status = 'accepted';
+    else if (allReceived) status = 'received';
+    else if (allShipped) status = 'shipped';
+    else if (allSecured) status = 'secured';
+
+    return {
+      id: transaction?.id?.toString(),
+      status,
+      currency: transaction?.currency,
+      description: transaction?.description,
+      reference: transaction?.reference,
+      isCancelled: Boolean(transaction?.is_cancelled),
+      isDraft: Boolean(transaction?.is_draft),
+      itemCount: items.length,
+      parties: transaction?.parties,
+    };
+  }
+
+  async createExternalTransaction(orderId, userId, userRole, options = {}) {
+    const order = await this.getOrderForExternalEscrow(orderId, userId, userRole);
+    const isAdmin = isAdminRole(userRole);
+    const adminOnlyOverrides = ['payload', 'forceNew', 'amount', 'buyerCustomer', 'sellerCustomer', 'currency'];
+    const usedAdminOnlyOverride = adminOnlyOverrides.some((field) => options[field] !== undefined);
+    if (usedAdminOnlyOverride && !isAdmin) {
+      throw httpError('Only admins can override Escrow.com transaction parties, amount, currency, or force a new transaction', 403);
+    }
+
+    let escrow = await Escrow.findOne({ order: order._id });
+
+    if (escrow?.externalTransactionId && !options.forceNew) {
+      return {
+        created: false,
+        escrow,
+        transaction: escrow.metadata.get('escrowComTransaction'),
+      };
+    }
+
+    const payload = options.payload || this.buildEscrowComTransactionPayload(order, options);
+    const transaction = await this.escrowApiRequest('post', '/transaction', { data: payload });
+    const summary = this.summarizeExternalTransaction(transaction);
+
+    escrow = await Escrow.findOneAndUpdate(
+      { order: order._id },
+      {
+        $setOnInsert: {
+          order: order._id,
+          buyer: getId(order.buyer),
+          seller: getId(order.seller),
+          amount: order.totalAmount,
+          status: 'AWAITING_PAYMENT',
+          platformFeeRate: PLATFORM_FEE_RATE,
+        },
+        $set: {
+          externalProvider: 'escrow_com',
+          externalTransactionId: summary.id,
+          externalReference: summary.reference,
+          externalStatus: summary.status,
+          externalSyncedAt: new Date(),
+          currency: String(summary.currency || payload.currency || 'USD').toUpperCase(),
+        },
+      },
+      { returnDocument: 'after', upsert: true }
+    );
+
+    escrow.metadata.set('escrowComPayload', payload);
+    escrow.metadata.set('escrowComTransaction', transaction);
+    await escrow.save();
+
+    await auditService.record({
+      entityType: 'Escrow',
+      entityId: escrow._id,
+      action: 'ESCROW_COM_TRANSACTION_CREATED',
+      actor: userId,
+      newValue: { orderId: order._id, externalTransactionId: summary.id, externalStatus: summary.status },
+    });
+
+    return { created: true, escrow, transaction, summary };
+  }
+
+  async getExternalTransaction(orderId, userId, userRole) {
+    const order = await this.getOrderForExternalEscrow(orderId, userId, userRole);
+    const escrow = await Escrow.findOne({ order: order._id });
+    if (!escrow?.externalTransactionId) {
+      throw httpError('No Escrow.com transaction is linked to this order', 404);
+    }
+
+    const transaction = await this.escrowApiRequest('get', `/transaction/${escrow.externalTransactionId}`);
+    return { escrow, transaction, summary: this.summarizeExternalTransaction(transaction) };
+  }
+
+  async syncExternalTransaction(orderId, userId, userRole) {
+    const { escrow, transaction, summary } = await this.getExternalTransaction(orderId, userId, userRole);
+
+    escrow.externalStatus = summary.status;
+    escrow.externalReference = summary.reference || escrow.externalReference;
+    escrow.externalSyncedAt = new Date();
+    escrow.metadata.set('escrowComTransaction', transaction);
+    await escrow.save();
+
+    await auditService.record({
+      entityType: 'Escrow',
+      entityId: escrow._id,
+      action: 'ESCROW_COM_TRANSACTION_SYNCED',
+      actor: userId,
+      newValue: { externalTransactionId: summary.id, externalStatus: summary.status },
+    });
+
+    return { escrow, transaction, summary };
   }
 
   async getEscrowStatus(orderId, userId, userRole) {
@@ -610,9 +943,43 @@ class EscrowService {
 
   async getEscrowByOrder(orderId) {
     const escrow = await Escrow.findOne({ order: orderId });
-    if (!escrow) throw new Error('Escrow not found for order');
+    if (!escrow) throw httpError('Escrow not found for order', 404);
     return escrow;
+  }
+
+  async getOrCreateDisputeEscrow(order, { throwIfMissing = true } = {}) {
+    const existingEscrow = await Escrow.findOne({ order: order._id });
+    if (existingEscrow) return existingEscrow;
+
+    const status = inferEscrowStatusFromOrder(order.status);
+    if (!status || status === 'AWAITING_PAYMENT') {
+      if (!throwIfMissing) return null;
+      throw httpError('Order is not ready for escrow release because payment has not been held yet', 409, {
+        currentStatus: order.status,
+        expectedStatus: 'FUNDS_HELD, IN_TRANSIT, or DELIVERED',
+      });
+    }
+
+    return Escrow.findOneAndUpdate(
+      { order: order._id },
+      {
+        $setOnInsert: {
+          order: order._id,
+          buyer: order.buyer,
+          seller: order.seller,
+          amount: order.totalAmount,
+          currency: 'KES',
+          status,
+          paidAt: order.paidAt,
+          heldAt: ['HELD', 'IN_TRANSIT', 'DELIVERED'].includes(status) ? (order.paidAt || new Date()) : undefined,
+          deliveredAt: status === 'DELIVERED' ? (order.deliveredAt || new Date()) : undefined,
+          autoReleaseAt: status === 'DELIVERED' ? (order.escrowReleaseDate || new Date(Date.now() + AUTO_RELEASE_MS)) : undefined,
+        },
+      },
+      { returnDocument: 'after', upsert: true }
+    );
   }
 }
 
 module.exports = new EscrowService();
+

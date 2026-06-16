@@ -108,6 +108,7 @@ const Navbar = () => {
                         <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin')}>Admin Dashboard</Link>
                       )}
                       <Link to="/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
+                      <Link to="/notifications/preferences" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Notification Preferences</Link>
                       <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
                       <button onClick={handleAuthAction} className="w-full text-left px-4 py-2 hover:bg-gray-100">Sign out</button>
                     </>
@@ -237,6 +238,7 @@ const Navbar = () => {
                       <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin')}>Admin Dashboard</Link>
                     )}
                     <Link to="/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
+                    <Link to="/notifications/preferences" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Notification Preferences</Link>
                     <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
                     <button onClick={handleAuthAction} className="w-full text-left px-4 py-2 hover:bg-gray-100">Sign out</button>
                   </>

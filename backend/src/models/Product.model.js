@@ -47,6 +47,7 @@ const ProductSchema = new mongoose.Schema(
         'beauty-health',
         'sports-outdoor',
         'grocery',
+        'vegetables',
       ],
       index: true,
     },

@@ -1,5 +1,7 @@
 module.exports = (req, res, next) => {
   const user = req.user;
+  if (user?.role === 'admin') return next();
+
   const verified = user?.kycVerified === true
     || ['verified', 'gold'].includes(user?.verificationStatus)
     || user?.logisticsProfile?.verificationStatus === 'verified';

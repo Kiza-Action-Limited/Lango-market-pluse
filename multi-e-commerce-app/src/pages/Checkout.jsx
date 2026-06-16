@@ -7,6 +7,7 @@ import api from '../config/axios';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import { productService } from '../services/productService';
+import { paymentService } from '../services/paymentService';
 import { FaTruck, FaShieldAlt, FaBrain, FaLock, FaArrowLeft, FaStar, FaRegStar, FaTimes } from 'react-icons/fa';
 import { getMinimumOrderQuantity, MQQ_TIERS } from '../utils/moq';
 
@@ -32,6 +33,28 @@ const Checkout = () => {
   });
   const paymentMethod = 'mpesa';
   const showReviewPopup = reviewItems.length > 0;
+
+  const buildDeliveryAddress = () => ({
+    label: [
+      shippingAddress.addressLine1,
+      shippingAddress.addressLine2,
+      shippingAddress.city,
+      shippingAddress.state,
+      shippingAddress.zipCode,
+    ].filter(Boolean).join(', '),
+    street: [shippingAddress.addressLine1, shippingAddress.addressLine2].filter(Boolean).join(', '),
+    town: shippingAddress.city,
+    county: shippingAddress.state,
+    country: shippingAddress.country || 'Kenya',
+  });
+
+  const getOrderId = (response) =>
+    response?.data?.order?.id ||
+    response?.data?.order?._id ||
+    response?.data?.data?.order?.id ||
+    response?.data?.data?.order?._id ||
+    response?.data?.data?.id ||
+    response?.data?.data?._id;
 
   if (cartItems.length === 0 && !showReviewPopup) {
     navigate('/cart');
@@ -95,42 +118,53 @@ const Checkout = () => {
     setLoading(true);
 
     try {
-      const orderData = {
-        items: cartItems.map(item => ({
-          productId: item.productId,
-          quantity: item.quantity,
-          price: item.price
-        })),
-        shippingAddress,
-        paymentMethod: 'mpesa',
-        total: getCartTotal()
-      };
+      const deliveryAddress = buildDeliveryAddress();
+      const orderResponses = [];
 
-      let response;
-      try {
-        response = await api.post('/v1/orders', orderData);
-      } catch (error) {
-        if (error.response?.status === 404) {
-          response = await api.post('/orders', orderData);
-        } else {
-          throw error;
+      for (const item of cartItems) {
+        const product = item.productId || item.product || item.id || item._id;
+        const orderData = {
+          product,
+          quantity: item.quantity,
+          deliveryAddress,
+          paymentMethod,
+        };
+
+        try {
+          orderResponses.push(await api.post('/v1/orders', orderData));
+        } catch (error) {
+          if (error.response?.status === 404) {
+            orderResponses.push(await api.post('/orders', orderData));
+          } else {
+            throw error;
+          }
         }
       }
 
       toast.success('Order placed successfully! Complete payment before reviewing products.');
-      const orderId =
-        response?.data?.order?.id ||
-        response?.data?.order?._id ||
-        response?.data?.data?.order?.id ||
-        response?.data?.data?.order?._id ||
-        response?.data?.data?.id ||
-        response?.data?.data?._id;
+      const orderIds = orderResponses.map(getOrderId).filter(Boolean);
+      const orderId = orderIds[0];
       const nextPath = orderId ? `/orders/${orderId}/track` : '/orders';
 
       await clearCart();
+
+      if (orderId) {
+        try {
+          const paymentResult = await paymentService.initiateMpesaPayment({
+            orderId,
+            phoneNumber: shippingAddress.phone || user?.phone,
+          });
+          const checkoutRequestId = paymentResult?.checkoutRequestId || paymentResult?.CheckoutRequestID || paymentResult?.data?.checkoutRequestId || paymentResult?.data?.CheckoutRequestID;
+          toast.success(checkoutRequestId ? 'M-Pesa prompt sent to your phone' : 'Payment request sent');
+        } catch (paymentError) {
+          toast.error(paymentError?.response?.data?.message || 'Order placed, but payment prompt could not be sent');
+        }
+      }
+
       navigate(nextPath);
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to place order');
+      const validationMessage = error.response?.data?.errors?.[0]?.msg;
+      toast.error(validationMessage || error.response?.data?.message || 'Failed to place order');
     } finally {
       setLoading(false);
     }

@@ -4,6 +4,22 @@ const { generateQR } = require('../../utils/qrGenerator');
 const { distanceBetween } = require('../../utils/geofence');
 
 class QRChainService {
+  normalizeToken(rawToken) {
+    if (rawToken && typeof rawToken === 'object') {
+      return rawToken.token || rawToken.qrPayload || '';
+    }
+
+    const token = String(rawToken || '').trim();
+    if (!token) return '';
+
+    try {
+      const parsed = JSON.parse(token);
+      return parsed?.token || token;
+    } catch {
+      return token;
+    }
+  }
+
   async generateTripTokens(logistics) {
     const pickupToken = await this.createToken(logistics, 'PICKUP', logistics.seller);
     const deliveryToken = await this.createToken(logistics, 'DELIVERY', logistics.driver);
@@ -30,9 +46,52 @@ class QRChainService {
   }
 
   async consumeToken({ token, type, logisticsId, scannedBy, gpsCoords, buyerFence, skipGpsValidation = false }) {
-    const qrToken = await QRToken.findOneAndUpdate(
+    const normalizedToken = this.normalizeToken(token);
+    const qrToken = await QRToken.findOne({ token: normalizedToken });
+
+    if (!qrToken) {
+      const error = new Error('QR token was not found. Generate a fresh QR token for this shipment and try again.');
+      error.code = 'QR_TOKEN_NOT_FOUND';
+      throw error;
+    }
+
+    if (qrToken.logistics.toString() !== logisticsId.toString()) {
+      const error = new Error('QR token belongs to a different logistics shipment.');
+      error.code = 'QR_TOKEN_WRONG_LOGISTICS';
+      error.details = {
+        expectedLogisticsId: logisticsId.toString(),
+        actualLogisticsId: qrToken.logistics.toString(),
+      };
+      throw error;
+    }
+
+    if (qrToken.type !== type) {
+      const error = new Error(`QR token is for ${qrToken.type}, but this scan expects ${type}.`);
+      error.code = 'QR_TOKEN_WRONG_TYPE';
+      error.details = { expectedType: type, actualType: qrToken.type };
+      throw error;
+    }
+
+    if (qrToken.isUsed) {
+      const error = new Error(`QR token was already used${qrToken.usedAt ? ` at ${qrToken.usedAt.toISOString()}` : ''}.`);
+      error.code = 'QR_TOKEN_ALREADY_USED';
+      error.details = {
+        usedAt: qrToken.usedAt,
+        scannedBy: qrToken.scannedBy,
+      };
+      throw error;
+    }
+
+    if (qrToken.expiresAt && qrToken.expiresAt <= new Date()) {
+      const error = new Error(`QR token expired at ${qrToken.expiresAt.toISOString()}.`);
+      error.code = 'QR_TOKEN_EXPIRED';
+      error.details = { expiresAt: qrToken.expiresAt };
+      throw error;
+    }
+
+    const updatedToken = await QRToken.findOneAndUpdate(
       {
-        token,
+        _id: qrToken._id,
         type,
         logistics: logisticsId,
         isUsed: false,
@@ -49,26 +108,28 @@ class QRChainService {
           },
         },
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
-    if (!qrToken) {
-      throw new Error('QR token is invalid, expired, or already used');
+    if (!updatedToken) {
+      const error = new Error('QR token could not be consumed. It may have just been used by another scan.');
+      error.code = 'QR_TOKEN_CONSUME_RACE';
+      throw error;
     }
 
     // Skip GPS validation if requested or for pickup scans
     if (type === 'DELIVERY' && !skipGpsValidation) {
       try {
         const distanceMeters = this.assertDeliveryFence(gpsCoords, buyerFence);
-        qrToken.gpsAtScan.distanceMeters = distanceMeters;
-        await qrToken.save();
+        updatedToken.gpsAtScan.distanceMeters = distanceMeters;
+        await updatedToken.save();
       } catch (error) {
         console.warn('GPS validation failed but continuing:', error.message);
         // Don't throw error, just log warning
       }
     }
 
-    return qrToken;
+    return updatedToken;
   }
 
   assertDeliveryFence(gpsCoords, buyerFence) {

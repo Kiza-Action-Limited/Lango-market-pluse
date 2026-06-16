@@ -1,7 +1,17 @@
 const Dispute = require('../models/Dispute.model');
 const Order = require('../models/Order.model');
 const Escrow = require('../models/Escrow.model');
+const orderService = require('../services/order/order.service');
 const { validationResult } = require('express-validator');
+
+const httpError = (message, statusCode, details = {}) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  Object.assign(error, details);
+  return error;
+};
+
+const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
 /**
  * Create a new dispute
@@ -14,61 +24,8 @@ exports.createDispute = async (req, res, next) => {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const { orderId, reason, description, evidence, evidenceUrls } = req.body;
-
-    // Check if order exists
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
-    }
-
-    // Check if user is involved in the order
-    const userId = req.user.id;
-    const isBuyer = order.buyer.toString() === userId;
-    const isSeller = order.seller.toString() === userId;
-
-    if (!isBuyer && !isSeller) {
-      return res.status(403).json({ success: false, message: 'Not authorized to create dispute for this order' });
-    }
-
-    // Check if dispute already exists for this order
-    const existingDispute = await Dispute.findOne({ order: orderId, status: { $ne: 'closed' } });
-    if (existingDispute) {
-      return res.status(400).json({ success: false, message: 'A dispute already exists for this order' });
-    }
-
-    // Find escrow for this order
-    const escrow = await Escrow.findOne({ order: orderId });
-    if (!escrow) {
-      return res.status(404).json({ success: false, message: 'Escrow not found for this order' });
-    }
-
-    // Create dispute
-    const dispute = new Dispute({
-      order: orderId,
-      escrow: escrow._id,
-      raisedBy: userId,
-      reason,
-      description,
-      evidence: evidence || [],
-      evidenceUrls: evidenceUrls || [],
-      status: 'open',
-    });
-
-    await dispute.save();
-
-    // Update escrow status
-    escrow.status = 'disputed';
-    await escrow.save();
-
-    // Add initial message
-    dispute.messages.push({
-      sender: userId,
-      message: `Dispute created: ${reason}. ${description || 'No description provided.'}`,
-      timestamp: new Date(),
-      isAdmin: false,
-    });
-    await dispute.save();
+    const { orderId } = req.body;
+    const dispute = await orderService.raiseDispute(orderId, req.user.id, req.body, req.user.role);
 
     res.status(201).json({
       success: true,
@@ -298,6 +255,11 @@ exports.addEvidence = async (req, res, next) => {
  */
 exports.resolveDispute = async (req, res, next) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
     const { id } = req.params;
     const {
       resolution,
@@ -320,59 +282,108 @@ exports.resolveDispute = async (req, res, next) => {
     }
 
     const order = await Order.findById(dispute.order);
-    const escrow = await Escrow.findById(dispute.escrow);
+    if (!order) {
+      throw httpError('Order linked to this dispute was not found', 404);
+    }
+
+    let escrow = dispute.escrow ? await Escrow.findById(dispute.escrow) : null;
+    if (!escrow) {
+      escrow = await Escrow.findOne({ order: dispute.order });
+      if (escrow) {
+        dispute.escrow = escrow._id;
+      }
+    }
+
+    const escrowAmount = money(escrow?.amount ?? order.totalAmount);
+    const requestedResolutionAmount = resolutionAmount == null ? null : money(resolutionAmount);
+    if (resolution === 'partial_refund' && requestedResolutionAmount != null && requestedResolutionAmount > escrowAmount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Resolution amount cannot exceed escrow amount',
+        escrowAmount,
+      });
+    }
 
     // Update dispute resolution
     dispute.resolution = resolution;
- dispute.resolutionAmount = resolutionAmount;
+    dispute.resolutionAmount = requestedResolutionAmount;
     dispute.faultParty = faultParty;
     dispute.resolvedBy = req.user.id;
     dispute.resolvedAt = new Date();
+
+    const resolutionNote = !escrow
+      ? ' No escrow record was linked, so only dispute and order status were updated.'
+      : '';
 
     // Handle based on resolution type
     switch (resolution) {
       case 'refund_buyer':
         dispute.status = 'resolved_buyer';
-        dispute.refundAmount = escrow.amount;
+        dispute.refundAmount = escrowAmount;
         
         // Update escrow
-        escrow.status = 'refunded';
-        escrow.refundAmount = escrow.amount;
-        escrow.refundReason = 'Dispute resolved in buyer\'s favor';
-        await escrow.save();
+        if (escrow) {
+          escrow.status = 'REFUNDED';
+          escrow.refundAmount = escrowAmount;
+          escrow.refundedAt = new Date();
+          escrow.metadata.set('refundReason', 'Dispute resolved in buyer\'s favor');
+          await escrow.save();
+        }
+        order.status = 'REFUNDED';
+        await order.save();
         break;
 
       case 'release_to_seller':
         dispute.status = 'resolved_seller';
         
         // Update escrow
-        escrow.status = 'released';
-        escrow.releasedAt = new Date();
-        await escrow.save();
+        if (escrow) {
+          escrow.status = 'RELEASED';
+          escrow.releasedAt = new Date();
+          await escrow.save();
+        }
+        order.status = 'RELEASED';
+        order.releasedAt = new Date();
+        await order.save();
         break;
 
       case 'partial_refund':
         dispute.status = 'partial_refund';
-        dispute.refundAmount = resolutionAmount || escrow.amount * 0.5;
+        dispute.refundAmount = requestedResolutionAmount ?? money(escrowAmount * 0.5);
         
         // Update escrow
-        escrow.status = 'partial_refund';
-        escrow.refundAmount = resolutionAmount || escrow.amount * 0.5;
-        escrow.releasedAmount = escrow.amount - (resolutionAmount || escrow.amount * 0.5);
-        await escrow.save();
+        if (escrow) {
+          escrow.status = 'PARTIAL_REFUND';
+          escrow.refundAmount = dispute.refundAmount;
+          escrow.sellerPayout = money(escrowAmount - dispute.refundAmount);
+          escrow.refundedAt = new Date();
+          escrow.releasedAt = new Date();
+          await escrow.save();
+        }
+        order.status = 'PARTIAL_REFUND';
+        order.releasedAt = new Date();
+        await order.save();
         break;
 
       case 'cancelled':
         dispute.status = 'closed';
-        escrow.status = 'cancelled';
-        await escrow.save();
+        dispute.refundAmount = escrowAmount;
+        if (escrow) {
+          escrow.status = 'REFUNDED';
+          escrow.refundAmount = escrowAmount;
+          escrow.refundedAt = new Date();
+          escrow.metadata.set('refundReason', 'Dispute cancelled; order cancelled and buyer refunded');
+          await escrow.save();
+        }
+        order.status = 'cancelled';
+        await order.save();
         break;
     }
 
     // Add resolution message
     dispute.messages.push({
       sender: req.user.id,
-      message: `Dispute resolved: ${resolution}. ${notes || 'No additional notes.'}`,
+      message: `Dispute resolved: ${resolution}. ${notes || 'No additional notes.'}${resolutionNote}`,
       timestamp: new Date(),
       isAdmin: true,
     });
@@ -382,7 +393,7 @@ exports.resolveDispute = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: dispute,
-      message: 'Dispute resolved successfully',
+      message: `Dispute resolved successfully${resolutionNote}`,
     });
   } catch (error) {
     next(error);
@@ -395,6 +406,11 @@ exports.resolveDispute = async (req, res, next) => {
  */
 exports.updateStatus = async (req, res, next) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
     const { id } = req.params;
     const { status } = req.body;
 

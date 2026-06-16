@@ -106,7 +106,6 @@ const NotificationSchema = new mongoose.Schema(
     },
     expiresAt : {
       type  : Date,
-      index : true,   // TTL index defined below
     },
   },
   {

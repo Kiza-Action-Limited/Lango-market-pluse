@@ -58,7 +58,7 @@ router.post(
     body('category')
       .custom((value, { req }) => {
         if (isFarmerUser(req.user)) return true;
-        return ['electronics', 'fashion', 'home-garden', 'beauty-health', 'sports-outdoor'].includes(value);
+        return ['electronics', 'fashion', 'home-garden', 'beauty-health', 'sports-outdoor', 'grocery', 'vegetables'].includes(value);
       })
       .withMessage('Choose a valid category. Farmer products are categorized as Grocery automatically.'),
     body('unit').isIn(['kg', 'g', 'ton', 'piece', 'bunch', 'litre']).withMessage('Valid unit required'),
