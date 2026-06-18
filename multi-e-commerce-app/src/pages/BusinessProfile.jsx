@@ -1,6 +1,20 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { FaCheckCircle, FaEnvelope, FaGlobe, FaPhoneAlt, FaBox, FaCalendarAlt, FaTag } from 'react-icons/fa';
+import {
+  FaBox,
+  FaCalendarAlt,
+  FaChartLine,
+  FaCheckCircle,
+  FaClipboardCheck,
+  FaEnvelope,
+  FaGlobe,
+  FaPhoneAlt,
+  FaShieldAlt,
+  FaStar,
+  FaTag,
+  FaTruck,
+  FaUsers,
+} from 'react-icons/fa';
 import { useRealtimeManufacturers } from '../hooks/useRealtimeManufacturers';
 import Modal from '../components/Modal';
 
@@ -40,41 +54,137 @@ const BusinessProfile = () => {
   const joinedLabel = business.createdAt
     ? new Date(business.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
     : `${business.years || 1} yrs active`;
+  const hasOrderTerms = business.moqOptions?.length > 0 || business.farmerOptional;
+  const profileStats = [
+    {
+      label: 'Rating',
+      value: `${business.rating}/5`,
+      detail: `${business.reviews} reviews`,
+      icon: FaStar,
+      tone: 'text-[#B45309] bg-[#FEF3C7]',
+    },
+    {
+      label: 'Annual sales',
+      value: business.annualSales,
+      detail: 'reported volume',
+      icon: FaChartLine,
+      tone: 'text-[#047857] bg-[#D1FAE5]',
+    },
+    {
+      label: 'Team size',
+      value: business.staffRange,
+      detail: `${business.years} years active`,
+      icon: FaUsers,
+      tone: 'text-[#1D4ED8] bg-[#DBEAFE]',
+    },
+  ];
 
   return (
     <div className="bg-[#F9FAFB] min-h-screen py-8">
       <div className="container mx-auto px-4 space-y-4">
-        <section className="bg-white rounded-xl border border-gray-200 p-6">
-          <h1 className="text-3xl font-bold text-[#111827]">{business.name}</h1>
-          <p className="text-[#6B7280] mt-1">
-            {business.businessType} | Verified | {business.years} years | {business.staffRange}
-          </p>
-          <div className="flex flex-wrap items-center gap-3 mt-4 text-sm text-[#374151]">
-            <span className="inline-flex items-center gap-1">
-              <FaCheckCircle className="text-[#16A34A]" />
-              Rating {business.rating}/5 ({business.reviews} reviews)
-            </span>
-            <span>Annual sales: {business.annualSales}</span>
+        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+          <div className="border-b border-gray-200 bg-[#111827] px-6 py-6 text-white">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[#16A34A] px-3 py-1 text-xs font-semibold text-white">
+                    <FaCheckCircle size={12} />
+                    Verified
+                  </span>
+                  <span className="rounded-full border border-white/20 px-3 py-1 text-xs font-semibold text-white/90">
+                    {business.businessType}
+                  </span>
+                  <span className="rounded-full border border-white/20 px-3 py-1 text-xs font-semibold text-white/90">
+                    {business.years} years
+                  </span>
+                </div>
+                <h1 className="text-3xl font-bold leading-tight md:text-4xl">{business.name}</h1>
+                <p className="mt-2 max-w-2xl text-sm text-white/70">
+                  Verified {String(business.businessType).toLowerCase()} profile with business capability, sales, and order-term
+                  details for sourcing decisions.
+                </p>
+              </div>
+              <Link
+                to={`/contact?type=partnership&subject=${defaultSubject}`}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#EA580C]"
+              >
+                <FaEnvelope size={12} />
+                Contact Vendor
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid gap-3 p-4 md:grid-cols-3 md:p-6">
+            {profileStats.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <div key={stat.label} className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-[#6B7280]">{stat.label}</p>
+                      <p className="mt-1 text-xl font-bold text-[#111827]">{stat.value}</p>
+                      <p className="mt-1 text-xs text-[#6B7280]">{stat.detail}</p>
+                    </div>
+                    <span className={`inline-flex h-10 w-10 items-center justify-center rounded-full ${stat.tone}`}>
+                      <Icon size={16} />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
 
-        <section className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-xl font-semibold text-[#111827] mb-3">Business profile</h2>
-          <ul className="space-y-2 text-sm text-[#374151]">
-            {business.capabilities.map((capability) => (
-              <li key={capability}>- {capability}</li>
-            ))}
-          </ul>
+        <section className={`grid gap-4 ${hasOrderTerms ? 'lg:grid-cols-[1fr_360px]' : ''}`}>
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <div className="mb-4 flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#EEF2FF] text-[#4338CA]">
+                <FaShieldAlt size={16} />
+              </span>
+              <div>
+                <h2 className="text-xl font-semibold text-[#111827]">Business profile</h2>
+                <p className="text-sm text-[#6B7280]">Verified capabilities and service strengths</p>
+              </div>
+            </div>
 
-          {(business.moqOptions?.length > 0 || business.farmerOptional) && (
-            <div className="mt-4 p-4 rounded-lg border border-gray-200 bg-[#F9FAFB]">
-              <h3 className="font-semibold text-[#111827] mb-2">Order terms</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {business.capabilities.map((capability) => (
+                <div
+                  key={capability}
+                  className="flex items-start gap-3 rounded-lg border border-gray-200 bg-[#F9FAFB] p-3"
+                >
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#DCFCE7] text-[#15803D]">
+                    <FaClipboardCheck size={12} />
+                  </span>
+                  <p className="text-sm font-medium text-[#374151]">{capability}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {hasOrderTerms && (
+            <div className="rounded-xl border border-gray-200 bg-white p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#FFF7ED] text-[#EA580C]">
+                  <FaTruck size={16} />
+                </span>
+                <div>
+                  <h3 className="text-xl font-semibold text-[#111827]">Order terms</h3>
+                  <p className="text-sm text-[#6B7280]">Minimum order guidance</p>
+                </div>
+              </div>
               {business.moqOptions?.length > 0 && (
-                <div className="space-y-1">
+                <div className="space-y-3">
                   {business.moqOptions.map((option) => (
-                    <p key={`${business.id}-${option.label}`} className="text-sm text-[#374151]">
-                      <span className="font-semibold text-[#111827]">{option.label}:</span> {option.value}
-                    </p>
+                    <div
+                      key={`${business.id}-${option.label}`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-[#F9FAFB] px-4 py-3"
+                    >
+                      <span className="rounded-full bg-[#111827] px-3 py-1 text-xs font-semibold text-white">
+                        {option.label}
+                      </span>
+                      <span className="text-right text-sm font-semibold text-[#111827]">{option.value}</span>
+                    </div>
                   ))}
                 </div>
               )}
@@ -85,9 +195,11 @@ const BusinessProfile = () => {
               )}
             </div>
           )}
+        </section>
 
-          {business.premiumProfile && (
-            <div className="mt-4 p-4 rounded-lg border border-[#16A34A]/30 bg-[#16A34A]/5">
+        {business.premiumProfile && (
+          <section className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="p-4 rounded-lg border border-[#16A34A]/30 bg-[#16A34A]/5">
               <h3 className="font-semibold text-[#166534] mb-2">Premium verified information</h3>
               <p className="text-sm text-[#1F2937]">Government Name: {business.premiumProfile.governmentBusinessName}</p>
               <p className="text-sm text-[#1F2937]">Business Email: {business.premiumProfile.businessEmail}</p>
@@ -107,8 +219,8 @@ const BusinessProfile = () => {
                 </div>
               )}
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
         <section className="bg-[#E7CFB1] rounded-xl border border-[#D8B98F] p-4 md:p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

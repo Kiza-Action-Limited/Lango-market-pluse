@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FaCheckCircle, FaChevronDown, FaChevronUp, FaCrown, FaLock, FaMapMarkerAlt, FaRoute, FaSyncAlt, FaTruck } from 'react-icons/fa';
+import { FaCheckCircle, FaChevronDown, FaChevronUp, FaCrown, FaLock, FaMapMarkerAlt, FaRoute, FaTimesCircle, FaTruck } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import { FEATURE_LABELS, FEATURE_TOOLTIPS, MIZIGO_PLANS, PLAN_IDS, TRADER_PLANS } from '../config/subscriptionPlans';
 import { logisticsService } from '../services/logisticsService';
@@ -285,11 +285,12 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
 };
 
 const SubscriptionPlans = () => {
-  const { activePlan, switchPlan, resetPlanToDefault, user } = useAuth();
+  const { activePlan, switchPlan, cancelSubscription, user, isSeller } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedPlanId = searchParams.get('plan');
   const [expandedPlanId, setExpandedPlanId] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const allPlanIds = useMemo(
     () => new Set([...TRADER_PLANS, ...MIZIGO_PLANS].map((plan) => plan.id)),
@@ -335,6 +336,22 @@ const SubscriptionPlans = () => {
     navigate(`/seller/premium-payment?plan=${encodeURIComponent(plan.id)}`);
   };
 
+  const canCancelCurrentPlan = isSeller && activePlan?.id && activePlan.id !== PLAN_IDS.MIZIGO;
+
+  const handleCancelSubscription = async () => {
+    if (!canCancelCurrentPlan || cancelling) return;
+
+    const confirmed = window.confirm(`Cancel your ${activePlan.name} subscription? This seller account will have no active plan until one is activated again.`);
+    if (!confirmed) return;
+
+    setCancelling(true);
+    try {
+      await cancelSubscription(`Cancelled ${activePlan.name} from subscription page`);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
     <div className="bg-[#F9FAFB] min-h-screen py-8">
       <div className="container mx-auto px-4">
@@ -343,51 +360,76 @@ const SubscriptionPlans = () => {
             <h1 className="text-3xl font-bold text-[#111827]">Lango Subscription Matrix</h1>
             <p className="text-[#6B7280] mt-2">Basic tiers provide the tools. Paid tiers unlock the intelligence agents.</p>
           </div>
-          <button
-            type="button"
-            onClick={resetPlanToDefault}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
-          >
-            <FaSyncAlt />
-            Reset To Default
-          </button>
+          {canCancelCurrentPlan && (
+            <button
+              type="button"
+              onClick={handleCancelSubscription}
+              disabled={cancelling}
+              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+            >
+              <FaTimesCircle />
+              {cancelling ? 'Cancelling...' : 'Cancel Subscription'}
+            </button>
+          )}
         </div>
 
-        {activePlan && (
-          <div className="mb-6 bg-[#111827] text-white rounded-xl p-4">
-            <p className="text-sm">Current Active Tier</p>
+        <div className="mb-6 bg-[#111827] text-white rounded-xl p-4">
+          <p className="text-sm">Current Active Tier</p>
+          {activePlan ? (
             <p className="text-xl font-semibold">
               {activePlan.name} <span className="text-white/70 text-sm">({activePlan.track.toUpperCase()})</span>
             </p>
-          </div>
+          ) : (
+            <p className="text-xl font-semibold">No active subscription</p>
+          )}
+        </div>
+
+        {!isSeller && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-950">
+            <h2 className="text-xl font-semibold">Seller registration required</h2>
+            <p className="mt-2 text-sm">
+              Buyer accounts cannot activate seller subscription plans. Register as a seller first, then choose the plan that matches your business.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/register?role=seller')}
+              className="mt-4 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
+            >
+              Register As Seller
+            </button>
+          </section>
         )}
 
-        <section className="mb-10">
-          <h2 className="text-2xl font-semibold text-[#111827] mb-4">Trader Track</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {TRADER_PLANS.map((plan) => (
-              <PlanCard
-                key={plan.id}
-                plan={plan}
-                isActive={activePlan?.id === plan.id}
-                onActivate={() => handleActivatePlan(plan)}
-                featureLimit={6}
-                isExpanded={expandedPlanId === plan.id}
-                onToggleExpand={handleToggleExpand}
-                isHighlighted={highlightedPlanId === plan.id}
-                lockTooltip={plan.id === PLAN_IDS.SOLO ? 'Starter plan with 30 SKU cap' : FEATURE_TOOLTIPS[plan.featureKeys[0]] || 'Upgrade to unlock'}
-              />
-            ))}
-          </div>
-        </section>
+        {isSeller && (
+          <>
+            <section className="mb-10">
+              <h2 className="text-2xl font-semibold text-[#111827] mb-4">Trader Track</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                {TRADER_PLANS.map((plan) => (
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    isActive={activePlan?.id === plan.id}
+                    onActivate={() => handleActivatePlan(plan)}
+                    featureLimit={6}
+                    isExpanded={expandedPlanId === plan.id}
+                    onToggleExpand={handleToggleExpand}
+                    isHighlighted={highlightedPlanId === plan.id}
+                    lockTooltip={plan.id === PLAN_IDS.SOLO ? 'Starter plan with 30 SKU cap' : FEATURE_TOOLTIPS[plan.featureKeys[0]] || 'Upgrade to unlock'}
+                  />
+                ))}
+              </div>
+            </section>
 
-        <MizigoSellerAddon
-          user={user}
-          activePlan={activePlan}
-          highlightedPlanId={highlightedPlanId}
-          expandedPlanId={expandedPlanId}
-          onToggleExpand={handleToggleExpand}
-        />
+            <MizigoSellerAddon
+              user={user}
+              activePlan={activePlan}
+              highlightedPlanId={highlightedPlanId}
+              expandedPlanId={expandedPlanId}
+              onToggleExpand={handleToggleExpand}
+            />
+          </>
+        )}
       </div>
     </div>
   );

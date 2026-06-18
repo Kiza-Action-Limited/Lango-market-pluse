@@ -14,13 +14,14 @@ const resolveSubscriptionFromUser = (user) => {
     null;
   const expiresAt = user?.subscription?.expiresAt || user?.subscriptionExpiry || null;
   const hasKnownPlan = Boolean(planId && ALL_PLANS.some((plan) => plan.id === planId));
-  const isLegacyPaidTier = planId === 'smart' || planId === 'growth';
-  const isExplicitlyActive = user?.subscription?.active === true;
-  const hasPaidTier = hasKnownPlan || isLegacyPaidTier || isExplicitlyActive;
+  const isExplicitlyActive =
+    user?.subscription?.active === true ||
+    user?.subscription?.status === 'active' ||
+    user?.subscriptionStatus === 'active';
   const notExpired = !expiresAt || new Date(expiresAt) > new Date();
 
   return {
-    active: Boolean(hasPaidTier && notExpired),
+    active: Boolean(hasKnownPlan && isExplicitlyActive && notExpired),
     planId,
     expiresAt,
   };

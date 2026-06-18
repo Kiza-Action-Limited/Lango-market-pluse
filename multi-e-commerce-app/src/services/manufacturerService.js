@@ -1,5 +1,7 @@
 import api from '../config/axios';
 
+const MAX_PRODUCT_LIMIT = 100;
+
 const firstSuccess = async (requests = []) => {
   for (const request of requests) {
     try {
@@ -15,8 +17,8 @@ const firstSuccess = async (requests = []) => {
 export const manufacturerService = {
   getMarketplaceData: async () => {
     const productsRes = await firstSuccess([
-      () => api.get('/v1/products', { params: { limit: 120 } }),
-      () => api.get('/products', { params: { limit: 120 } }),
+      () => api.get('/v1/products', { params: { limit: MAX_PRODUCT_LIMIT } }),
+      () => api.get('/products', { params: { limit: MAX_PRODUCT_LIMIT } }),
     ]);
     const products = productsRes.data?.products || productsRes.data?.data || [];
 
@@ -70,14 +72,15 @@ export const manufacturerService = {
     return response.data;
   },
 
-  searchBusinesses: async ({ query = '', category = '', businessType = '', limit = 120 } = {}) => {
-    const params = { query, q: query, search: query, category, businessType, limit };
+  searchBusinesses: async ({ query = '', category = '', businessType = '', limit = MAX_PRODUCT_LIMIT } = {}) => {
+    const safeLimit = Math.min(Number(limit) || MAX_PRODUCT_LIMIT, MAX_PRODUCT_LIMIT);
+    const params = { query, q: query, search: query, category, businessType, limit: safeLimit };
 
     const response = await firstSuccess([
       () => api.get('/business-hub/search', { params }),
       () => api.get('/businesses/search', { params }),
       () => api.get('/suppliers/search', { params }),
-      () => api.get('/products', { params: { search: query, category, limit } }),
+      () => api.get('/products', { params: { search: query, category, limit: safeLimit } }),
     ]);
 
     return response.data;

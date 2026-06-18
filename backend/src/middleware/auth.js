@@ -137,6 +137,52 @@ const protect = async (req, res, next) => {
   }
 };
 
+const optionalProtect = async (req, res, next) => {
+  const token = extractToken(req);
+
+  if (!token || !process.env.JWT_SECRET) {
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const fallbackMode = process.env.AUTH_FALLBACK_MODE === 'true' ||
+                        mongoose.connection.readyState !== 1;
+
+    let user;
+    if (fallbackMode) {
+      user = memoryStore.getUserById(decoded.id) || {
+        _id: decoded.id,
+        id: decoded.id,
+        userId: decoded.id,
+        role: decoded.role || 'buyer',
+        businessType: decoded.businessType || null,
+        businessName: decoded.businessName || null,
+        isActive: true,
+      };
+    } else {
+      user = await User.findById(decoded.id).select('-password').lean();
+    }
+
+    if (user && user.isActive !== false) {
+      req.user = {
+        ...user,
+        id: user.id || user._id?.toString() || decoded.id,
+        _id: user._id || decoded.id,
+        userId: user.userId || user.id || user._id?.toString() || decoded.id,
+        role: user.role || decoded.role || 'buyer',
+        businessType: user.businessType || decoded.businessType || null,
+        businessName: user.businessName || decoded.businessName || null,
+      };
+      req.userId = req.user.id;
+    }
+  } catch (error) {
+    // Public routes should still work when an optional token is missing, stale, or invalid.
+  }
+
+  return next();
+};
+
 /**
  * Admin authorization middleware
  * Must be used after protect middleware
@@ -178,6 +224,7 @@ const authorize = (...roles) => {
 
 module.exports = {
   protect,
+  optionalProtect,
   admin,
   authorize,
 };

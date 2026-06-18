@@ -283,6 +283,32 @@ router.post(
 // Get current user
 router.get('/me', protect, authController.getCurrentUser);
 
+// Update current user profile
+router.put(
+  '/me',
+  protect,
+  [
+    body('fullName').optional().trim().isLength({ min: 1, max: 120 }).withMessage('Full name must be 1-120 characters'),
+    body('name').optional().trim().isLength({ min: 1, max: 120 }).withMessage('Name must be 1-120 characters'),
+    body('phone').optional().matches(/^\+?254[0-9]{9}$/).withMessage('Please enter a valid Kenyan phone number'),
+    body('businessName').optional({ nullable: true, checkFalsy: true }).trim().isLength({ min: 2, max: 120 }).withMessage('Business name must be 2-120 characters'),
+    body('businessType').optional({ nullable: true, checkFalsy: true }).isIn([
+      'brand',
+      'wholesaler',
+      'manufacturer',
+      'retailer',
+      'farmer',
+      'small_business',
+      'analytics',
+      'analystic',
+      'logistics',
+    ]).withMessage('Invalid business type'),
+    body('businessLogoUrl').optional({ nullable: true, checkFalsy: true }).isURL().withMessage('Valid business logo URL is required'),
+    body('address').optional({ nullable: true }).trim().isLength({ max: 240 }).withMessage('Address cannot exceed 240 characters'),
+  ],
+  authController.updateCurrentUser
+);
+
 // Change password
 router.post(
   '/change-password',

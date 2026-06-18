@@ -49,9 +49,11 @@ export const AuthProvider = ({ children }) => {
     try {
       const currentUser = await authService.getCurrentUser();
       setUser(currentUser);
+      return currentUser;
     } catch (error) {
       console.error('Error fetching user:', error);
       logout();
+      return null;
     } finally {
       setLoading(false);
     }
@@ -108,6 +110,11 @@ export const AuthProvider = ({ children }) => {
   const switchPlan = async (nextPlanId, paymentMeta = {}) => {
     const nextPlan = getPlanById(nextPlanId);
     if (!nextPlan || !user) return { success: false, message: 'Plan not found' };
+    if (isBuyerUser(user) || !isSellerUser(user)) {
+      const message = 'Register as a seller before activating a seller subscription plan.';
+      toast.error(message);
+      return { success: false, message };
+    }
 
     try {
       await subscriptionService.subscribe({
@@ -137,6 +144,23 @@ export const AuthProvider = ({ children }) => {
     return { success: true };
   };
 
+  const cancelSubscription = async (reason = '') => {
+    if (!user) return { success: false, message: 'Login required' };
+
+    try {
+      const result = await subscriptionService.cancel(reason);
+      const refreshedUser = await authService.getCurrentUser();
+      setUser(refreshedUser);
+      setActivePlan(resolveActivePlan(refreshedUser));
+      toast.success(result?.message || 'Subscription cancelled');
+      return { success: true, data: result };
+    } catch (error) {
+      const message = handleApiError(error)?.message || 'Failed to cancel subscription';
+      toast.error(message);
+      return { success: false, message };
+    }
+  };
+
   const hasFeature = (featureKey) => hasFeatureAccess(activePlan, featureKey);
   const value = {
     user,
@@ -146,10 +170,12 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     updateUser,
+    refreshUser: fetchUser,
     activePlan,
     availablePlans: getPlansByTrack(activePlan?.track),
     hasFeature,
     switchPlan,
+    cancelSubscription,
     resetPlanToDefault,
     isAuthenticated: !!user,
     isAdmin: user?.role === 'admin',

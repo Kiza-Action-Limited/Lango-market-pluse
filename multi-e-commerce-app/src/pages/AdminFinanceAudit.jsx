@@ -21,6 +21,143 @@ const Card = ({ title, value, hint, icon: Icon }) => (
   </div>
 );
 
+const humanize = (value) => {
+  if (!value) return 'Not available';
+  return String(value)
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const readFirst = (source, keys, fallback = null) => {
+  if (!source || typeof source !== 'object') return fallback;
+  for (const key of keys) {
+    if (source[key] !== undefined && source[key] !== null && source[key] !== '') return source[key];
+  }
+  return fallback;
+};
+
+const getStatusTone = (value) => {
+  const normalized = String(value || '').toLowerCase();
+  if (['success', 'completed', 'paid', 'processed', '0'].some((part) => normalized.includes(part))) {
+    return 'bg-[#16A34A]/10 text-[#15803D] border-[#16A34A]/20';
+  }
+  if (['pending', 'processing', 'queued', 'stk'].some((part) => normalized.includes(part))) {
+    return 'bg-[#F97316]/10 text-[#C2410C] border-[#F97316]/20';
+  }
+  if (['fail', 'cancel', 'error', 'timeout'].some((part) => normalized.includes(part))) {
+    return 'bg-red-50 text-red-700 border-red-200';
+  }
+  return 'bg-gray-100 text-gray-700 border-gray-200';
+};
+
+const StatusBadge = ({ value }) => (
+  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(value)}`}>
+    {humanize(value || 'Not available')}
+  </span>
+);
+
+const DetailItem = ({ label, value, mono = false }) => (
+  <div className="rounded-xl border border-gray-200 bg-[#F9FAFB] p-3">
+    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</p>
+    <p className={`mt-1 break-words text-sm font-semibold text-[#111827] ${mono ? 'font-mono' : ''}`}>
+      {value || 'Not available'}
+    </p>
+  </div>
+);
+
+const PaymentResultPanel = ({ title, description, result, emptyText }) => {
+  const status = readFirst(result, ['status', 'paymentStatus', 'ResultDesc', 'resultDesc', 'ResponseDescription', 'responseDescription', 'message']);
+  const checkoutId = readFirst(result, ['checkoutRequestId', 'CheckoutRequestID', 'checkoutRequestID']);
+  const merchantId = readFirst(result, ['merchantRequestId', 'MerchantRequestID', 'merchantRequestID']);
+  const code = readFirst(result, ['responseCode', 'ResponseCode', 'resultCode', 'ResultCode']);
+  const amount = readFirst(result, ['amount', 'Amount', 'totalAmount']);
+  const receipt = readFirst(result, ['mpesaReceiptNumber', 'MpesaReceiptNumber', 'receipt', 'reference', 'transactionId']);
+  const phone = readFirst(result, ['phoneNumber', 'phone', 'PhoneNumber']);
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[#111827]">{title}</p>
+          <p className="mt-1 text-xs text-gray-500">{description}</p>
+        </div>
+        {result ? <StatusBadge value={status || code} /> : null}
+      </div>
+
+      {!result ? (
+        <div className="rounded-xl border border-dashed border-gray-300 bg-[#F9FAFB] p-5 text-center text-sm text-gray-500">
+          {emptyText}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <DetailItem label="Checkout Request" value={checkoutId} mono />
+          <DetailItem label="Merchant Request" value={merchantId} mono />
+          <DetailItem label="Result Code" value={code} />
+          <DetailItem label="Amount" value={amount !== null ? formatCurrency(amount) : null} />
+          <DetailItem label="Receipt" value={receipt} mono />
+          <DetailItem label="Phone" value={phone} mono />
+          {status ? (
+            <div className="rounded-xl border border-gray-200 bg-[#F9FAFB] p-3 md:col-span-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Message</p>
+              <p className="mt-1 text-sm font-semibold text-[#111827]">{status}</p>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const TransactionStatsPanel = ({ summary }) => {
+  const byType = summary?.byType || {};
+  const rows = Object.entries(byType);
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[#111827]">Transaction Stats</p>
+          <p className="mt-1 text-xs text-gray-500">Grouped totals from /v1/transactions/summary.</p>
+        </div>
+        <StatusBadge value={summary ? 'Loaded' : 'No data'} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <DetailItem label="Total Credit" value={formatCurrency(summary?.totalCredit || 0)} />
+        <DetailItem label="Total Debit" value={formatCurrency(summary?.totalDebit || 0)} />
+        <DetailItem label="Net Change" value={formatCurrency(summary?.netChange || 0)} />
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-xl border border-gray-200">
+        <table className="w-full text-sm">
+          <thead className="bg-[#F9FAFB]">
+            <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+              <th className="px-4 py-3">Type</th>
+              <th className="px-4 py-3">Count</th>
+              <th className="px-4 py-3">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([type, data]) => (
+              <tr key={type} className="border-t border-gray-200">
+                <td className="px-4 py-3 font-semibold text-[#111827]">{humanize(type)}</td>
+                <td className="px-4 py-3 text-gray-600">{data?.count || 0}</td>
+                <td className="px-4 py-3 font-semibold text-[#16A34A]">{formatCurrency(data?.total || 0)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-500">No transaction breakdown returned.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 const AdminFinanceAudit = () => {
   const [loading, setLoading] = useState(true);
   const [payments, setPayments] = useState([]);
@@ -205,18 +342,18 @@ const AdminFinanceAudit = () => {
             </form>
 
             <div className="mt-5 grid grid-cols-1 gap-3">
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">STK Result</p>
-                <pre className="max-h-48 overflow-auto rounded-xl bg-[#111827] p-4 text-xs leading-5 text-green-100">
-                  {JSON.stringify(stkResult, null, 2)}
-                </pre>
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Status Result</p>
-                <pre className="max-h-48 overflow-auto rounded-xl bg-[#111827] p-4 text-xs leading-5 text-green-100">
-                  {JSON.stringify(stkStatusResult, null, 2)}
-                </pre>
-              </div>
+              <PaymentResultPanel
+                title="STK Push Result"
+                description="Prompt response returned after sending the customer payment request."
+                result={stkResult}
+                emptyText="Send an STK push to see checkout request details here."
+              />
+              <PaymentResultPanel
+                title="Payment Status Result"
+                description="Status response for the checkout request ID."
+                result={stkStatusResult}
+                emptyText="Enter a checkout request ID to check the live payment status."
+              />
             </div>
           </section>
 
@@ -231,10 +368,7 @@ const AdminFinanceAudit = () => {
               <Card title="Escrow Summary" value={escrowSummary?.total || escrowSummary?.count || 0} hint="From /v1/escrow/summary" icon={FaMoneyBillWave} />
             </div>
             <div className="mt-4">
-              <p className="mb-2 text-sm font-semibold text-[#111827]">Transaction Stats</p>
-              <pre className="max-h-64 overflow-auto rounded-xl bg-[#111827] p-4 text-xs leading-5 text-green-100">
-                {JSON.stringify(transactionSummary, null, 2)}
-              </pre>
+              <TransactionStatsPanel summary={transactionSummary} />
             </div>
           </section>
         </div>

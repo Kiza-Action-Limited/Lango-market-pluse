@@ -4,6 +4,28 @@ import { useAuth } from '../context/AuthContext';
 import { paymentService } from '../services/paymentService';
 import { formatCurrency } from '../utils/formatters';
 
+const DetailTile = ({ label, value, mono = false, tone = 'default' }) => {
+  const toneClasses = {
+    default: 'bg-gray-50 border-gray-200',
+    orange: 'bg-[#FFF7ED] border-[#FED7AA]',
+    green: 'bg-[#F0FDF4] border-[#BBF7D0]',
+  };
+
+  return (
+    <div className={`rounded-lg border p-3 ${toneClasses[tone]}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</p>
+      <p className={`mt-1 break-words text-sm font-semibold text-[#111827] ${mono ? 'font-mono' : ''}`}>
+        {value || 'Not available'}
+      </p>
+    </div>
+  );
+};
+
+const formatWalletDate = (date) => {
+  if (!date) return 'Not available';
+  return new Date(date).toLocaleString();
+};
+
 const SellerWalletConsole = ({ className = '' }) => {
   const { isSeller } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -55,6 +77,10 @@ const SellerWalletConsole = ({ className = '' }) => {
   const refreshWallet = async () => {
     await loadWallet();
   };
+
+  const walletDetails = walletState.details || {};
+  const walletStatement = walletState.statement || {};
+  const statementRows = walletStatement.transactions || walletStatement.entries || walletStatement.items || [];
 
   const updateForm = (field, value) => {
     setForms((prev) => ({ ...prev, [field]: value }));
@@ -275,9 +301,36 @@ const SellerWalletConsole = ({ className = '' }) => {
 
         <div className="rounded-xl border border-gray-200 p-4">
           <h4 className="font-semibold text-[#111827]">Wallet Details</h4>
-          <pre className="mt-3 max-h-72 overflow-auto rounded-lg bg-[#111827] p-4 text-xs leading-5 text-green-100">
-            {JSON.stringify(walletState.details || walletState.statement, null, 2)}
-          </pre>
+          {walletState.details || walletState.statement ? (
+            <div className="mt-3 space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <DetailTile label="Available Balance" value={formatCurrency(walletDetails.balance || walletState.balance || 0)} tone="green" />
+                <DetailTile label="Locked Balance" value={formatCurrency(walletDetails.lockedBalance || 0)} tone="orange" />
+                <DetailTile label="Currency" value={walletDetails.currency || 'KES'} />
+                <DetailTile label="Wallet ID" value={walletDetails._id} mono />
+                <DetailTile label="Owner User ID" value={walletDetails.user} mono />
+                <DetailTile label="Created" value={formatWalletDate(walletDetails.createdAt)} />
+                <DetailTile label="Last Updated" value={formatWalletDate(walletDetails.updatedAt)} />
+                <DetailTile label="Statement Rows" value={statementRows.length || 0} />
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-[#111827]">Wallet Status</p>
+                    <p className="mt-1 text-xs text-gray-500">Live response from the backend wallet endpoints.</p>
+                  </div>
+                  <span className="rounded-full border border-[#16A34A]/20 bg-[#16A34A]/10 px-3 py-1 text-xs font-semibold text-[#15803D]">
+                    Loaded
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-5 text-center text-sm text-gray-500">
+              No wallet details loaded yet. Use Refresh Wallet to fetch the latest balance and metadata.
+            </div>
+          )}
         </div>
       </div>
     </section>

@@ -61,9 +61,19 @@ const getUserById = (id) => {
   return user ? toPublicUser(user) : null;
 };
 
+const updateUserById = (id, updates) => {
+  const key = String(id);
+  const user = users.get(key);
+  if (!user) return null;
+  Object.assign(user, updates, { updatedAt: new Date() });
+  users.set(key, user);
+  return toPublicUser(user);
+};
+
 module.exports = {
   findByPhoneOrEmail,
   createUser,
   validateLogin,
   getUserById,
+  updateUserById,
 };

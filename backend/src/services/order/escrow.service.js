@@ -75,6 +75,10 @@ class EscrowService {
     const order = await Order.findById(escrow.order);
     if (!order) return null;
 
+    if (escrow.status === 'HELD' && order.paidAt) {
+      return escrow;
+    }
+
     const oldEscrowStatus = escrow.status;
     escrow.status = 'HELD';
     escrow.amount = Number(amount || escrow.amount);

@@ -13,6 +13,16 @@ export const paymentService = {
     return unwrap(response);
   },
 
+  initiateSubscriptionMpesaPayment: async ({ planId, phoneNumber }) => {
+    const response = await api.post('/v1/payments/mpesa/subscription/stkpush', { planId, phoneNumber });
+    return unwrap(response);
+  },
+
+  checkSubscriptionMpesaStatus: async (checkoutRequestId) => {
+    const response = await api.get(`/v1/payments/mpesa/subscription/status/${encodeURIComponent(checkoutRequestId)}`);
+    return unwrap(response);
+  },
+
   getWalletBalance: async () => {
     const response = await api.get('/v1/wallet/balance');
     return unwrap(response);

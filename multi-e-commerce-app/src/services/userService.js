@@ -3,13 +3,13 @@ import api from '../config/axios';
 
 export const userService = {
   getProfile: async () => {
-    const response = await api.get('/profile');
-    return response.data;
+    const response = await api.get('/v1/auth/me');
+    return response.data?.data?.user || response.data?.user || null;
   },
 
   updateProfile: async (profileData) => {
-    const response = await api.put('/profile', profileData);
-    return response.data;
+    const response = await api.put('/v1/auth/me', profileData);
+    return response.data?.data?.user || response.data?.user || null;
   },
 
   updateAvatar: async (avatarFile) => {

@@ -1,11 +1,16 @@
 import {
   MIZIGO_PLANS,
-  PLAN_IDS,
   SUBSCRIPTION_TRACKS,
   TRADER_PLANS,
   getPlanById as getPlanByIdFromConfig,
   normalizePlanId,
 } from '../config/subscriptionPlans';
+import { getEffectiveUserCategory, isSellerUser } from './userCategory';
+
+const canUseSubscriptionPlans = (user) => {
+  const category = getEffectiveUserCategory(user);
+  return isSellerUser(user) || category === 'logistics';
+};
 
 export const getPlanById = (planId) => getPlanByIdFromConfig(planId);
 
@@ -26,16 +31,28 @@ export const getDefaultTrackForUser = (user) => {
 };
 
 export const getDefaultPlanIdForUser = (user) => {
+  if (!canUseSubscriptionPlans(user)) return null;
+
   const rawPlanId = user?.subscription?.planId || user?.planId || user?.subscriptionTier;
   if (rawPlanId) return normalizePlanId(rawPlanId);
 
-  const track = getDefaultTrackForUser(user);
-  return track === SUBSCRIPTION_TRACKS.MIZIGO ? PLAN_IDS.MIZIGO : PLAN_IDS.SOLO;
+  return null;
 };
 
 export const resolveActivePlan = (user) => {
-  const defaultPlanId = getDefaultPlanIdForUser(user);
-  return getPlanById(defaultPlanId) || TRADER_PLANS[0];
+  if (!canUseSubscriptionPlans(user)) return null;
+
+  const subscription = user?.subscription;
+  const isExplicitlyActive =
+    subscription?.active === true ||
+    subscription?.status === 'active' ||
+    user?.subscriptionStatus === 'active';
+  const expiresAt = subscription?.expiresAt || user?.subscriptionExpiry || null;
+  const notExpired = !expiresAt || new Date(expiresAt) > new Date();
+
+  if (!isExplicitlyActive || !notExpired) return null;
+
+  return getPlanById(getDefaultPlanIdForUser(user));
 };
 
 export const hasFeatureAccess = (plan, featureKey) => {

@@ -103,8 +103,8 @@ const UserSchema = new mongoose.Schema(
     },
     subscriptionTier: {
       type: String,
-      enum: ['free', 'v3', 'v4', 'solo', 'smart', 'growth', 'mizigo'],
-      default: 'solo',
+      enum: ['free', 'v3', 'v4', 'solo', 'smart', 'growth', 'mizigo', null],
+      default: null,
       index: true,
     },
     subscriptionExpiry: {
@@ -229,6 +229,11 @@ const UserSchema = new mongoose.Schema(
         },
       ],
     },
+    address: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     location: {
       type: {
         type: String,
@@ -284,7 +289,10 @@ UserSchema.methods.comparePassword = async function (candidatePassword) {
 };
 
 // Indexes
-UserSchema.index({ location: '2dsphere' });
+UserSchema.index(
+  { location: '2dsphere' },
+  { partialFilterExpression: { 'location.type': 'Point' } }
+);
 UserSchema.index({ role: 1, subscriptionTier: 1 });
 
 module.exports = mongoose.model('User', UserSchema);

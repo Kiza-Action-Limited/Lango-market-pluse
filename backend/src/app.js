@@ -33,6 +33,8 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+app.set('etag', false);
+
 // CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {

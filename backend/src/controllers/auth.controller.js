@@ -869,6 +869,35 @@ exports.getCurrentUser = async (req, res) => {
 };
 
 /**
+ * Update current authenticated user's profile
+ */
+exports.updateCurrentUser = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array(),
+      });
+    }
+
+    const user = await authService.updateCurrentUser(req.user._id || req.user.id, req.body);
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: { user },
+    });
+  } catch (error) {
+    console.error('Update current user error:', error.message);
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
  * Verify KYC documents
  */
 exports.verifyKYC = async (req, res) => {

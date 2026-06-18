@@ -16,6 +16,7 @@ import {
   FaSignOutAlt,
   FaUser,
   FaIdBadge,
+  FaCrown,
 } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/NotificationBell';
@@ -30,6 +31,7 @@ const AdminLayout = () => {
   const navItems = [
     { path: '/admin', label: 'Dashboard', icon: FaTachometerAlt },
     { path: '/admin/users', label: 'Users', icon: FaUsers },
+    { path: '/admin/subscriptions', label: 'Subscriptions', icon: FaCrown },
     { path: '/admin/products', label: 'Products', icon: FaBox },
     { path: '/admin/orders', label: 'Orders', icon: FaShoppingCart },
     { path: '/admin/analytics', label: 'Analytics', icon: FaChartLine },

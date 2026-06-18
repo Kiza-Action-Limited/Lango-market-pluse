@@ -57,6 +57,7 @@ export const API_ENDPOINTS = {
   SELLER: {
     STATS: '/seller/stats',
     PRODUCTS: '/seller/products',
+    
     ORDERS: '/seller/orders',
   },
   
@@ -69,6 +70,8 @@ export const API_ENDPOINTS = {
     UPDATE_ORDER_STATUS: (id) => `/admin/orders/${id}/status`,
     PRODUCTS: '/admin/products',
     TOGGLE_PRODUCT: (id) => `/admin/products/${id}/toggle`,
+    SUBSCRIPTIONS: '/admin/subscriptions',
+    UPDATE_SUBSCRIPTION: (id) => `/admin/subscriptions/${id}`,
   },
   
   // Profile

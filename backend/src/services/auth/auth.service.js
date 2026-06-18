@@ -3,7 +3,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const User = require('../../models/User.model');
+const Subscription = require('../../models/Subscription.model');
 const memoryStore = require('./authMemoryStore');
+const { getEffectiveUserCategory, isSellerUser } = require('../../utils/userCategory');
 
 // Safe imports with fallbacks
 let smsQueue = null;
@@ -308,7 +310,108 @@ class AuthService {
       error.statusCode = 404;
       throw error;
     }
-    return user;
+
+    const obj = this.sanitizeUser(user);
+    const effectiveCategory = getEffectiveUserCategory(obj);
+    const canUseSubscriptionPlans = isSellerUser(obj) || effectiveCategory === 'logistics';
+    if (!canUseSubscriptionPlans) {
+      obj.subscriptionTier = null;
+      obj.subscriptionExpiry = null;
+    }
+
+    if (!this.useFallback()) {
+      const subscription = canUseSubscriptionPlans ? await Subscription.findOne({ user: userId }).lean() : null;
+      obj.subscription = subscription ? {
+        id: subscription._id,
+        planId: subscription.plan,
+        planName: subscription.planName,
+        status: subscription.status,
+        active: subscription.status === 'active' && (
+          subscription.plan === 'mizigo' ||
+          !subscription.endDate ||
+          subscription.endDate > new Date()
+        ),
+        price: subscription.price,
+        expiresAt: subscription.endDate,
+      } : {
+        active: false,
+        planId: null,
+        status: 'inactive',
+        expiresAt: null,
+      };
+    }
+    return obj;
+  }
+
+  async updateCurrentUser(userId, profileData = {}) {
+    const allowedUpdates = {};
+    const unsetUpdates = {};
+
+    if (profileData.fullName !== undefined || profileData.name !== undefined) {
+      allowedUpdates.fullName = String(profileData.fullName ?? profileData.name ?? '').trim();
+    }
+    if (profileData.phone !== undefined) {
+      allowedUpdates.phone = this.normalizePhone(profileData.phone);
+    }
+    if (profileData.businessName !== undefined) {
+      allowedUpdates.businessName = String(profileData.businessName || '').trim() || null;
+    }
+    if (profileData.businessType !== undefined) {
+      allowedUpdates.businessType = profileData.businessType || null;
+    }
+    if (profileData.businessLogoUrl !== undefined) {
+      allowedUpdates.businessLogoUrl = profileData.businessLogoUrl || null;
+    }
+    if (profileData.address !== undefined) {
+      allowedUpdates.address = String(profileData.address || '').trim();
+    }
+
+    if (Object.keys(allowedUpdates).length === 0 && Object.keys(unsetUpdates).length === 0) {
+      return this.getCurrentUser(userId);
+    }
+
+    if (this.useFallback()) {
+      const fallbackUpdates = { ...allowedUpdates };
+      delete fallbackUpdates.location;
+      const user = memoryStore.updateUserById(userId, fallbackUpdates);
+      if (!user) {
+        const error = new Error('User not found');
+        error.statusCode = 404;
+        throw error;
+      }
+      return this.getCurrentUser(userId);
+    }
+
+    const currentUser = await User.findById(userId).select('location').lean();
+    const hasValidGeoLocation =
+      currentUser?.location?.type === 'Point' &&
+      Array.isArray(currentUser.location.coordinates) &&
+      currentUser.location.coordinates.length === 2 &&
+      currentUser.location.coordinates.every((coordinate) => Number.isFinite(Number(coordinate)));
+
+    if (!hasValidGeoLocation && currentUser?.location) {
+      unsetUpdates.location = '';
+    } else if (hasValidGeoLocation && profileData.address !== undefined) {
+      allowedUpdates['location.address'] = allowedUpdates.address;
+    }
+
+    const updateOperation = {};
+    if (Object.keys(allowedUpdates).length > 0) updateOperation.$set = allowedUpdates;
+    if (Object.keys(unsetUpdates).length > 0) updateOperation.$unset = unsetUpdates;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      updateOperation,
+      { new: true, runValidators: true }
+    ).select('-password -__v');
+
+    if (!user) {
+      const error = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    return this.getCurrentUser(userId);
   }
 
   async findUserByPhone(phone) {

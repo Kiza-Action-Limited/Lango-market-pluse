@@ -74,7 +74,10 @@ const AddProduct = () => {
       if (response.planUsage) {
         setPlanUsage(response.planUsage);
         if (response.planUsage.remainingSlots === 0 && !id) {
-          toast.error(`You've reached your ${response.planUsage.currentPlan.toUpperCase()} plan limit. Upgrade to add more products.`);
+          const planLabel = response.planUsage.currentPlan
+            ? response.planUsage.currentPlan.toUpperCase()
+            : 'subscription';
+          toast.error(`You've reached your ${planLabel} product limit. Activate a subscription to add more products.`);
         }
       }
     } catch (error) {
@@ -358,7 +361,7 @@ const AddProduct = () => {
               <FaExclamationTriangle className={`${planUsage.remainingSlots <= 2 ? 'text-yellow-600' : 'text-blue-600'} text-xl mt-0.5`} />
               <div className="flex-1">
                 <p className="font-semibold text-gray-900">
-                  {planUsage.currentPlan.toUpperCase()} Plan - {planUsage.remainingSlots} of {planUsage.productLimit} slots remaining
+                  {planUsage.currentPlan ? `${planUsage.currentPlan.toUpperCase()} Plan` : 'No active subscription'} - {planUsage.remainingSlots} of {planUsage.productLimit} slots remaining
                 </p>
                 <p className="text-sm text-gray-600 mt-1">
                   You have {planUsage.totalProducts} products currently.

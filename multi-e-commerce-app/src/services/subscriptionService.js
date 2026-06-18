@@ -34,4 +34,11 @@ export const subscriptionService = {
     const response = await api.post('/v1/subscriptions/subscribe', body);
     return normalizeSubscriptionPayload(response.data);
   },
+
+  cancel: async (reason = '') => {
+    const response = await api.delete('/v1/subscriptions/me', {
+      data: reason ? { reason } : {},
+    });
+    return normalizeSubscriptionPayload(response.data);
+  },
 };

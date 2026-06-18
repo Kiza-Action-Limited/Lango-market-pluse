@@ -92,7 +92,7 @@ exports.getMyEntitlements = async (req, res, next) => {
     const entitlements = await subscriptionService.getEntitlements(req.user.id);
     
     // Add locked features information for upgrade prompts
-    const lockedFeatures = await subscriptionService.getLockedFeatures(req.user.id, entitlements.plan);
+    const lockedFeatures = await subscriptionService.getLockedFeatures(req.user.id, entitlements.planId);
     
     res.status(200).json({
       success: true,
@@ -145,7 +145,7 @@ exports.cancelSubscription = async (req, res, next) => {
     const result = await billingService.cancelSubscription(req.user.id, reason);
     res.status(200).json({
       success: true,
-      message: 'Subscription cancelled successfully. You will retain access until the end of your billing period.',
+      message: result?.message || 'Subscription cancelled successfully.',
       data: result,
     });
   } catch (error) {

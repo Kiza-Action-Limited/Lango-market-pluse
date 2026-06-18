@@ -1,4 +1,5 @@
 const Product = require('../models/Product.model');
+const User = require('../models/User.model');
 const Order = require('../models/Order.model');
 const { validationResult } = require('express-validator');
 const planService = require('../services/subscription/plan.service');
@@ -7,6 +8,7 @@ const { PLAN_IDS } = require('../config/subscriptionPlans');
 const { getEffectiveUserCategory, isFarmerUser, isSellerUser } = require('../utils/userCategory');
 
 const PLAN_PRODUCT_LIMITS = {
+  none: 0,
   free: 30,
   v3: Number.MAX_SAFE_INTEGER,
   v4: Number.MAX_SAFE_INTEGER,
@@ -28,14 +30,23 @@ const getEffectivePlan = async (userId) => {
     if (planService.isSubscriptionActive(subscription)) {
       return planService.normalizePlanId(subscription.plan);
     }
-    return PLAN_IDS.SOLO;
+    return null;
   } catch (error) {
     console.error('Error getting effective plan:', error);
-    return PLAN_IDS.SOLO;
+    return null;
   }
 };
 
-const getProductLimitForPlan = (plan) => PLAN_PRODUCT_LIMITS[plan] ?? PLAN_PRODUCT_LIMITS.free;
+const getProductLimitForPlan = (plan) => PLAN_PRODUCT_LIMITS[plan || 'none'] ?? 0;
+
+const PRODUCT_LIMIT_MAX = 100;
+
+const parsePositiveInt = (value, fallback) => {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const normalizeProductCategory = (category) => String(category || '').trim().toLowerCase();
 
 /**
  * Create a new product (farmer/seller only)
@@ -77,11 +88,12 @@ exports.createProduct = async (req, res, next) => {
 
     if (currentProductCount >= productLimit) {
       const readableLimit = Number.isFinite(productLimit) ? productLimit : 'unlimited';
+      const planLabel = plan ? plan.toUpperCase() : 'NO ACTIVE SUBSCRIPTION';
       return res.status(403).json({
         success: false,
-        message: `You have reached your ${plan.toUpperCase()} plan product limit (${readableLimit}). Upgrade your plan to add more products.`,
+        message: `You have reached your ${planLabel} product limit (${readableLimit}). Activate a subscription to add products.`,
         data: {
-          currentPlan: plan,
+          currentPlan: plan || null,
           productLimit,
           currentProductCount,
         },
@@ -166,6 +178,15 @@ exports.createProduct = async (req, res, next) => {
  */
 exports.getProducts = async (req, res, next) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array(),
+      });
+    }
+
     const {
       page = 1,
       limit = 20,
@@ -175,16 +196,35 @@ exports.getProducts = async (req, res, next) => {
       search,
       seller,
       sortBy = 'newest',
+      businessType,
     } = req.query;
 
     const filter = { isPublished: true };
 
-    if (category) filter.category = category;
+    if (category) filter.category = normalizeProductCategory(category);
     if (seller) filter.seller = seller;
+
+    if (businessType) {
+      const normalizedBusinessType = String(businessType).trim().toLowerCase();
+      const sellerQuery = {
+        $or: [
+          { businessType: normalizedBusinessType },
+          { role: normalizedBusinessType },
+        ],
+      };
+
+      if (seller) {
+        sellerQuery._id = seller;
+      }
+
+      const matchingSellers = await User.find(sellerQuery).select('_id');
+      filter.seller = { $in: matchingSellers.map((user) => user._id) };
+    }
+
     if (minPrice !== undefined || maxPrice !== undefined) {
       filter.price = {};
-      if (minPrice) filter.price.$gte = parseFloat(minPrice);
-      if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
+      if (minPrice !== undefined && minPrice !== '') filter.price.$gte = parseFloat(minPrice);
+      if (maxPrice !== undefined && maxPrice !== '') filter.price.$lte = parseFloat(maxPrice);
     }
 
     if (search) {
@@ -203,31 +243,71 @@ exports.getProducts = async (req, res, next) => {
         sort = { price: -1 };
         break;
       case 'popular':
-        sort = { scarcityScore: -1 };
+        sort = { soldCount: -1, createdAt: -1 };
+        break;
+      case 'rating':
+        sort = { rating: -1, createdAt: -1 };
         break;
       default:
         sort = { createdAt: -1 };
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const products = await Product.find(filter)
-      .sort(sort)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate('seller', 'fullName name email businessName businessType businessLogoUrl');
+    const pageNum = parsePositiveInt(page, 1);
+    const limitNum = Math.min(parsePositiveInt(limit, 20), PRODUCT_LIMIT_MAX);
+    const skip = (pageNum - 1) * limitNum;
 
-    const totalProducts = await Product.countDocuments(filter);
-    const totalPages = Math.ceil(totalProducts / parseInt(limit));
+    const [products, totalProducts] = await Promise.all([
+      Product.find(filter)
+        .sort(sort)
+        .skip(skip)
+        .limit(limitNum)
+        .populate('seller', 'fullName name email businessName businessType businessLogoUrl')
+        .lean(),
+      Product.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(totalProducts / limitNum));
 
     res.status(200).json({
       success: true,
       products,
+      data: products,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: totalProducts,
+        pages: totalPages,
+      },
       totalPages,
-      currentPage: parseInt(page),
+      currentPage: pageNum,
       totalProducts,
     });
   } catch (error) {
     console.error('Error in getProducts:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get featured products
+ * GET /api/v1/products/featured
+ */
+exports.getFeaturedProducts = async (req, res, next) => {
+  try {
+    const limit = Math.min(parsePositiveInt(req.query.limit, 8), 24);
+    const products = await Product.find({ isPublished: true })
+      .sort({ rating: -1, soldCount: -1, createdAt: -1 })
+      .limit(limit)
+      .populate('seller', 'fullName name email businessName businessType businessLogoUrl')
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      products,
+      data: products,
+    });
+  } catch (error) {
+    console.error('Error in getFeaturedProducts:', error);
     next(error);
   }
 };
@@ -238,10 +318,25 @@ exports.getProducts = async (req, res, next) => {
  */
 exports.getProductById = async (req, res, next) => {
   try {
-    const product = await Product.findById(req.params.id).populate('seller', 'fullName name email businessName businessType businessLogoUrl');
-    if (!product) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array(),
+      });
+    }
+
+    const product = await Product.findById(req.params.id)
+      .populate('seller', 'fullName name email businessName businessType businessLogoUrl')
+      .lean();
+    const isOwner = req.user && String(product?.seller?._id || product?.seller) === String(req.user.id || req.user._id);
+    const isAdmin = req.user?.role === 'admin';
+
+    if (!product || (!product.isPublished && !isOwner && !isAdmin)) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
+
     res.status(200).json({
       success: true,
       data: product,

@@ -179,7 +179,7 @@ export const FEATURE_TOOLTIPS = {
 
 export const normalizePlanId = (planId) => {
   const normalized = String(planId || '').toLowerCase().trim();
-  if (!normalized) return PLAN_IDS.SOLO;
+  if (!normalized) return null;
   return LEGACY_PLAN_ALIASES[normalized] || normalized;
 };
 

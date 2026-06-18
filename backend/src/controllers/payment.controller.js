@@ -2,7 +2,14 @@ const mpesaService = require('../services/payment/mpesa.service');
 const walletService = require('../services/payment/wallet.service');
 const ledgerService = require('../services/payment/ledger.service');
 const billingService = require('../services/subscription/billing.service');
+const Payment = require('../models/Payment.model');
 const { validationResult } = require('express-validator');
+
+const getMetadataValue = (metadata, key) => {
+  if (!metadata) return undefined;
+  if (typeof metadata.get === 'function') return metadata.get(key);
+  return metadata[key];
+};
 
 /**
  * Initiate M-Pesa STK Push for order payment
@@ -39,6 +46,108 @@ exports.checkMpesaStatus = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: status,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Initiate M-Pesa STK Push for subscription payment
+ * POST /api/v1/payments/mpesa/subscription/stkpush
+ */
+exports.initiateSubscriptionMpesaPayment = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const phoneNumber = req.body.phoneNumber || req.user.phone;
+    await billingService.assertUserCanUseSubscriptionPlan(req.user.id, req.body.planId);
+    const result = await mpesaService.initiateSubscriptionPayment(req.body.planId, phoneNumber, req.user.id);
+
+    res.status(200).json({
+      success: true,
+      message: 'M-Pesa prompt sent to your phone. Enter your PIN to complete payment.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Check subscription M-Pesa payment and activate plan after success
+ * GET /api/v1/payments/mpesa/subscription/status/:checkoutRequestId
+ */
+exports.checkSubscriptionMpesaStatus = async (req, res, next) => {
+  try {
+    const { checkoutRequestId } = req.params;
+    let payment = await Payment.findOne({ checkoutRequestId, user: req.user.id });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Subscription payment not found',
+      });
+    }
+
+    const purpose = getMetadataValue(payment.metadata, 'purpose');
+    const planId = getMetadataValue(payment.metadata, 'planId');
+    if (purpose !== 'subscription' || !planId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment is not a subscription payment',
+      });
+    }
+
+    if (payment.status === 'processing' || payment.status === 'pending') {
+      try {
+        await mpesaService.queryPaymentStatus(checkoutRequestId);
+        payment = await Payment.findOne({ checkoutRequestId, user: req.user.id });
+      } catch (error) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            status: payment.status,
+            checkoutRequestId,
+            planId,
+            message: error.message || 'Waiting for M-Pesa confirmation',
+          },
+        });
+      }
+    }
+
+    if (payment.status === 'completed') {
+      const paymentReference = payment.mpesaReceiptNumber || payment.transactionId || checkoutRequestId;
+      const subscription = await billingService.activatePaidSubscription(req.user.id, planId, {
+        paymentReference,
+        payment,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payment confirmed. Subscription activated.',
+        data: {
+          status: 'completed',
+          activated: true,
+          checkoutRequestId,
+          planId,
+          subscription,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: payment.status,
+        activated: false,
+        checkoutRequestId,
+        planId,
+        message: payment.failureReason || 'Waiting for M-Pesa confirmation',
+      },
     });
   } catch (error) {
     next(error);

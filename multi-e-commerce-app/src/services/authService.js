@@ -45,6 +45,11 @@ export const authService = {
     return response.data?.data?.user || response.data?.user || null;
   },
 
+  updateCurrentUser: async (profileData) => {
+    const response = await api.put('/v1/auth/me', profileData);
+    return response.data?.data?.user || response.data?.user || null;
+  },
+
   logout: () => {
     localStorage.removeItem('token');
   },

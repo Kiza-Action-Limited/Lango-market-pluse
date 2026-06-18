@@ -1,9 +1,23 @@
 // src/services/productService.js
 import api from '../config/axios';
 
+const MAX_PRODUCT_LIMIT = 100;
+
+const normalizeProductParams = (params = {}) => {
+  const normalized = Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  );
+
+  if (normalized.limit) {
+    normalized.limit = Math.min(Number(normalized.limit) || MAX_PRODUCT_LIMIT, MAX_PRODUCT_LIMIT);
+  }
+
+  return normalized;
+};
+
 export const productService = {
   getAll: async (params = {}) => {
-    const response = await api.get('/v1/products', { params });
+    const response = await api.get('/v1/products', { params: normalizeProductParams(params) });
     return response.data;
   },
 

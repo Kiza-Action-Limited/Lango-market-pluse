@@ -6,6 +6,7 @@ const planService = require('./plan.service');
 const { PLAN_IDS, PLANS, normalizePlanId } = require('../../config/subscriptionPlans');
 const { smsQueue } = require('../../config/redis');
 const logger = require('../../utils/logger');
+const { SELLER_BUSINESS_TYPES, normalizeBusinessType } = require('../../utils/userCategory');
 
 const httpError = (message, statusCode, details = {}) => {
   const error = new Error(message);
@@ -15,6 +16,28 @@ const httpError = (message, statusCode, details = {}) => {
 };
 
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+
+const normalizeValue = (value) => String(value || '').trim().toLowerCase();
+
+const SELLER_PLAN_ROLES = new Set(['seller', 'farmer']);
+const BLOCKED_SELLER_PLAN_ROLES = new Set(['buyer', 'consumer', 'admin', 'logistics']);
+const LOGISTICS_ACCOUNT_ROLES = new Set(['DRIVER', 'FLEET_OWNER']);
+
+const isSellerPlanEligible = (user = {}) => {
+  const role = normalizeValue(user.role);
+  if (BLOCKED_SELLER_PLAN_ROLES.has(role)) return false;
+
+  const businessType = normalizeBusinessType(user.businessType);
+  return SELLER_PLAN_ROLES.has(role) || SELLER_BUSINESS_TYPES.has(businessType);
+};
+
+const isMizigoPlanEligible = (user = {}) => {
+  const role = normalizeValue(user.role);
+  const businessType = normalizeBusinessType(user.businessType);
+  const accountRole = String(user.accountRole || '').trim().toUpperCase();
+
+  return role === 'logistics' || businessType === 'logistics' || LOGISTICS_ACCOUNT_ROLES.has(accountRole);
+};
 
 const PLAN_PRICES = {
   solo: 500,
@@ -115,6 +138,19 @@ const buildCommission = (planId) => {
   };
 };
 
+const resolvePlanPrice = (planId, overrideAmount) => {
+  if (overrideAmount === undefined || overrideAmount === null || overrideAmount === '') {
+    return PLAN_PRICES[planId] || 0;
+  }
+
+  const amount = Number(overrideAmount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw httpError('Subscription amount must be a non-negative number', 400);
+  }
+
+  return money(amount);
+};
+
 const buildFeatures = (planId) => {
   const baseFeatures = {
     autoQRSync: true,
@@ -194,6 +230,34 @@ const buildFeatures = (planId) => {
 };
 
 class BillingService {
+  assertCanUseSubscriptionPlan(user, planId) {
+    const normalizedPlanId = normalizePlanId(planId);
+
+    if (normalizedPlanId === PLAN_IDS.MIZIGO) {
+      if (!isMizigoPlanEligible(user)) {
+        throw httpError('Mizigo plan is only available for registered logistics accounts.', 403, {
+          code: 'LOGISTICS_REGISTRATION_REQUIRED'
+        });
+      }
+      return true;
+    }
+
+    if (!isSellerPlanEligible(user)) {
+      throw httpError('Buyer accounts cannot activate seller subscription plans. Register as a seller first.', 403, {
+        code: 'SELLER_REGISTRATION_REQUIRED'
+      });
+    }
+
+    return true;
+  }
+
+  async assertUserCanUseSubscriptionPlan(userId, planId) {
+    const user = await User.findById(userId);
+    if (!user) throw httpError('User not found', 404);
+    this.assertCanUseSubscriptionPlan(user, planId);
+    return user;
+  }
+
   /**
    * Subscribe to a plan
    */
@@ -208,7 +272,8 @@ class BillingService {
 
     const plan = PLANS[normalizedPlanId];
     const planName = plan.displayName || plan.name;
-    const price = PLAN_PRICES[normalizedPlanId];
+    const price = resolvePlanPrice(normalizedPlanId, paymentMeta?.amountOverride);
+    this.assertCanUseSubscriptionPlan(user, normalizedPlanId);
 
     // Validate payment for monthly plans
     if (normalizedPlanId !== 'mizigo') {
@@ -229,10 +294,6 @@ class BillingService {
       // Mizigo validation
       if (paymentMethod && paymentMethod !== 'commission') {
         throw httpError('Mizigo uses commission settlement, not monthly billing', 400);
-      }
-      // Ensure user has appropriate role for Mizigo
-      if (user.role !== 'driver' && user.role !== 'fleet_owner') {
-        throw httpError('Mizigo plan is only available for drivers and fleet owners', 403);
       }
     }
 
@@ -261,7 +322,10 @@ class BillingService {
       metadata: {
         paymentReference: paymentMeta?.paymentReference || null,
         activatedVia: paymentMeta?.source || 'web',
-        previousPlan: subscription?.plan || null
+        previousPlan: subscription?.plan || null,
+        priceOverridden: paymentMeta?.amountOverride !== undefined && paymentMeta?.amountOverride !== null,
+        managedByAdmin: Boolean(paymentMeta?.managedByAdmin),
+        managedBy: paymentMeta?.managedBy || null,
       }
     };
 
@@ -277,9 +341,6 @@ class BillingService {
     // Update user record
     user.subscriptionTier = normalizedPlanId;
     user.subscriptionExpiry = endDate;
-    if (normalizedPlanId === 'mizigo' && user.role !== 'fleet_owner') {
-      user.role = 'driver';
-    }
     await user.save();
 
     // Record transaction for monthly plans
@@ -359,15 +420,12 @@ class BillingService {
    * Subscribe to Mizigo (commission-based plan with special handling)
    */
   async subscribeToCommissionPlan(userId, planId, options = {}) {
-    const { userRole, paymentCompleted, paymentReference } = options;
+    const { paymentReference } = options;
     
     const user = await User.findById(userId);
     if (!user) throw httpError('User not found', 404);
     
-    // Verify user role is appropriate for logistics
-    if (userRole !== 'DRIVER' && userRole !== 'FLEET_OWNER') {
-      throw httpError('Mizigo plan requires DRIVER or FLEET_OWNER role', 403);
-    }
+    this.assertCanUseSubscriptionPlan(user, planId);
     
     return this.subscribe(userId, planId, 'commission', {
       paymentCompleted: true,
@@ -382,38 +440,126 @@ class BillingService {
   async cancelSubscription(userId, reason = null) {
     const subscription = await Subscription.findOne({ user: userId });
     if (!subscription) throw httpError('No active subscription found', 404);
-    
-    if (subscription.plan === 'mizigo') {
-      throw httpError('Mizigo plan has no subscription to cancel. It operates on commission basis.', 400);
+
+    if (['cancelled', 'inactive', 'expired'].includes(subscription.status)) {
+      return {
+        cancelled: false,
+        plan: subscription.plan,
+        status: subscription.status,
+        message: 'Subscription is already inactive.',
+      };
     }
-    
+
+    const cancelledAt = new Date();
+    const cancelledPlan = {
+      plan: subscription.plan,
+      planName: subscription.planName,
+      status: subscription.status,
+      startDate: subscription.startDate,
+      endDate: subscription.endDate,
+      price: subscription.price,
+      reason: reason || null,
+      cancelledAt,
+    };
+
     subscription.status = 'cancelled';
-    subscription.cancellationDate = new Date();
+    subscription.cancellationDate = cancelledAt;
     subscription.cancellationReason = reason;
     subscription.autoRenew = false;
+    subscription.nextBillingDate = null;
+    subscription.paymentMethod = null;
+    subscription.metadata = {
+      ...(subscription.metadata && typeof subscription.metadata === 'object' ? subscription.metadata : {}),
+      lastCancelledPlan: cancelledPlan,
+    };
     await subscription.save();
-    
-    // Update user but keep access until end of billing period
+
     const user = await User.findById(userId);
     if (user) {
-      user.subscriptionTier = 'solo'; // Downgrade to free tier
-      // Don't clear expiry - user keeps access until end date
+      user.subscriptionTier = null;
+      user.subscriptionExpiry = null;
       await user.save();
     }
-    
-    // Send cancellation confirmation
+
     if (user?.phone) {
       await smsQueue.add('send', {
         to: user.phone,
-        message: `Your Lango ${subscription.planName} plan has been cancelled. You'll have access until ${subscription.endDate.toLocaleDateString()}.`
+        message: `Your Lango ${cancelledPlan.planName} subscription has been cancelled. Reactivate a plan to regain seller subscription access.`
       });
     }
-    
-    return { 
-      cancelled: true, 
+
+    return {
+      cancelled: true,
+      plan: subscription.plan,
+      status: subscription.status,
+      cancelledPlan,
       endDate: subscription.endDate,
-      message: `Subscription cancelled. Access until ${subscription.endDate.toLocaleDateString()}`
+      message: 'Subscription cancelled. No plan is active on this account.'
     };
+  }
+
+  async setSubscriptionByAdmin(adminId, sellerId, options = {}) {
+    const user = await User.findById(sellerId);
+    if (!user) throw httpError('Seller not found', 404);
+    if (user.role === 'admin') throw httpError('Admin accounts cannot be assigned seller subscriptions', 400);
+
+    const normalizedPlanId = normalizePlanId(options.planId);
+    const plan = PLANS[normalizedPlanId];
+    if (!plan) throw httpError('Invalid plan', 400);
+    this.assertCanUseSubscriptionPlan(user, normalizedPlanId);
+
+    const status = options.status || 'active';
+    if (!['active', 'inactive', 'suspended', 'cancelled', 'expired', 'trial'].includes(status)) {
+      throw httpError('Invalid subscription status', 400);
+    }
+
+    const price = resolvePlanPrice(normalizedPlanId, options.amount);
+    const startDate = options.startDate ? new Date(options.startDate) : new Date();
+    const endDate = options.endDate
+      ? new Date(options.endDate)
+      : (normalizedPlanId === PLAN_IDS.MIZIGO ? null : getCycleEnd(normalizedPlanId));
+
+    let subscription = await Subscription.findOne({ user: sellerId });
+    const subscriptionData = {
+      user: sellerId,
+      plan: normalizedPlanId,
+      planName: plan.displayName || plan.name,
+      billingModel: normalizedPlanId === PLAN_IDS.MIZIGO ? 'commission' : 'monthly',
+      price,
+      currency: 'KES',
+      status,
+      startDate,
+      endDate,
+      features: buildFeatures(normalizedPlanId),
+      paymentMethod: normalizedPlanId === PLAN_IDS.MIZIGO ? 'commission' : 'mpesa',
+      lastPaymentDate: status === 'active' ? new Date() : null,
+      nextBillingDate: normalizedPlanId === PLAN_IDS.MIZIGO || status !== 'active' ? null : endDate,
+      autoRenew: Boolean(options.autoRenew),
+      smsCredits: buildSmsCredits(normalizedPlanId),
+      commission: buildCommission(normalizedPlanId),
+      metadata: {
+        ...(subscription?.metadata && typeof subscription.metadata === 'object' ? subscription.metadata : {}),
+        managedByAdmin: true,
+        managedBy: adminId,
+        adminNote: options.note || null,
+        priceOverridden: options.amount !== undefined && options.amount !== null && options.amount !== '',
+        previousPlan: subscription?.plan || null,
+        updatedVia: 'admin_subscription_console',
+      },
+    };
+
+    if (subscription) {
+      Object.assign(subscription, subscriptionData);
+      await subscription.save();
+    } else {
+      subscription = await Subscription.create(subscriptionData);
+    }
+
+    user.subscriptionTier = status === 'active' ? normalizedPlanId : null;
+    user.subscriptionExpiry = status === 'active' ? endDate : null;
+    await user.save();
+
+    return subscription;
   }
 
   /**

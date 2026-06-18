@@ -1,285 +1,558 @@
-// src/pages/Profile.jsx
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
 import toast from 'react-hot-toast';
-import { FaUser, FaEnvelope, FaPhone, FaMapMarkerAlt, FaStore, FaSave, FaBrain, FaShieldAlt, FaCrown } from 'react-icons/fa';
+import {
+  Bell,
+  CheckCircle2,
+  CreditCard,
+  Heart,
+  Home,
+  KeyRound,
+  LayoutDashboard,
+  MapPin,
+  Package,
+  Save,
+  Settings,
+  ShieldCheck,
+  Star,
+  Store,
+  User,
+  WalletCards,
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
+import { authService } from '../services/authService';
+import { orderService } from '../services/orderService';
+import { normalizeOrder } from '../utils/orderAdapter';
+import { formatCurrency } from '../utils/formatters';
+
+const PROFILE_SECTIONS = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'orders', label: 'My Orders', icon: Package },
+  { id: 'wishlist', label: 'Wishlist', icon: Heart },
+  { id: 'addresses', label: 'Addresses', icon: MapPin },
+  { id: 'payment', label: 'Payment Methods', icon: CreditCard },
+  { id: 'reviews', label: 'Reviews', icon: Star },
+  { id: 'security', label: 'Security', icon: KeyRound },
+  { id: 'settings', label: 'Settings', icon: Settings },
+];
+
+const TOP_TABS = [
+  { id: 'orders', label: 'Orders' },
+  { id: 'wishlist', label: 'Wishlist' },
+  { id: 'reviews', label: 'Reviews' },
+  { id: 'addresses', label: 'Addresses' },
+];
+
+const PENDING_STATUSES = ['pending', 'pending_payment', 'AWAITING_PAYMENT'];
+const DELIVERY_STATUSES = ['processing', 'payment_escrowed', 'FUNDS_HELD', 'dispatched', 'IN_TRANSIT'];
+const ESCROW_STATUSES = ['payment_escrowed', 'FUNDS_HELD', 'IN_TRANSIT', 'DELIVERED'];
+
+const prettify = (value, fallback = 'Not set') => {
+  if (!value) return fallback;
+  return String(value)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const getUserName = (user) => user?.fullName || user?.name || user?.businessName || 'Your Profile';
+
+const getInitials = (name) => {
+  const parts = String(name || 'User').trim().split(/\s+/).slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase()).join('') || 'U';
+};
+
+const formatDate = (date) => {
+  if (!date) return 'Not available';
+  return new Intl.DateTimeFormat('en', { month: 'short', year: 'numeric' }).format(new Date(date));
+};
 
 const Profile = () => {
-  const { user, token, activePlan, availablePlans, switchPlan, isSeller } = useAuth();
+  const {
+    user,
+    activePlan,
+    availablePlans,
+    switchPlan,
+    refreshUser,
+    updateUser,
+    isSeller,
+  } = useAuth();
+  const [activeSection, setActiveSection] = useState('dashboard');
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
+    fullName: '',
     phone: '',
-    address: ''
+    address: '',
+    businessName: '',
+    businessType: '',
   });
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      setFormData({
-        name: user.name || '',
-        email: user.email || '',
-        phone: user.phone || '',
-        address: user.address || ''
-      });
-    }
+    if (!user) return;
+    setFormData({
+      fullName: getUserName(user),
+      phone: user.phone || '',
+      address: user.address || user.location?.address || '',
+      businessName: user.businessName || '',
+      businessType: user.businessType || '',
+    });
   }, [user]);
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+  useEffect(() => {
+    let mounted = true;
+
+    const fetchOrders = async () => {
+      try {
+        const response = await orderService.getAll({ page: 1, limit: 8 });
+        const rows = (response.data || response.orders || []).map(normalizeOrder);
+        if (mounted) setOrders(rows);
+      } catch (error) {
+        if (mounted) setOrders([]);
+      } finally {
+        if (mounted) setOrdersLoading(false);
+      }
+    };
+
+    fetchOrders();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const displayName = getUserName(user);
+  const memberSince = formatDate(user?.createdAt);
+  const verificationLabel = user?.kycVerified || user?.verificationStatus === 'verified'
+    ? 'Verified Customer'
+    : prettify(user?.verificationStatus, 'Verification pending');
+  const planLabel = isSeller ? (activePlan?.name || prettify(user?.subscriptionTier, 'No active plan')) : 'Buyer account';
+  const planPrice = isSeller ? (activePlan?.priceLabel || user?.subscription?.status || 'Plan not active') : 'No seller subscription';
+
+  const orderStats = useMemo(() => ({
+    total: orders.length,
+    pending: orders.filter((order) => PENDING_STATUSES.includes(order.status)).length,
+    pendingDeliveries: orders.filter((order) => DELIVERY_STATUSES.includes(order.status)).length,
+    escrow: orders.filter((order) => ESCROW_STATUSES.includes(order.status)).length,
+    totalSpent: orders.reduce((sum, order) => sum + Number(order.total || 0), 0),
+  }), [orders]);
+
+  const wishlistCount = user?.wishlist?.length || 0;
+  const addressLabel = formData.address || user?.address || user?.location?.address || 'No saved address';
+
+  const handleInputChange = (event) => {
+    const { name, value } = event.target;
+    setFormData((previous) => ({ ...previous, [name]: value }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    
+  const handleSaveProfile = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+
     try {
-      const response = await axios.put(
-        'http://localhost:5000/api/profile',
-        formData,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const updatedUser = await authService.updateCurrentUser(formData);
+      if (updatedUser) updateUser(updatedUser);
+      await refreshUser();
       toast.success('Profile updated successfully');
     } catch (error) {
-      toast.error('Failed to update profile');
+      const message = error?.response?.data?.message || 'Failed to update profile';
+      toast.error(message);
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  // Get role badge styling
-  const getRoleBadge = () => {
-    switch (user?.role) {
-      case 'admin':
-        return { bg: 'bg-[#FB923C]/10', text: 'text-[#FB923C]', label: 'Administrator' };
-      case 'seller':
-        return { bg: 'bg-[#F97316]/10', text: 'text-[#F97316]', label: 'Seller' };
-      default:
-        return { bg: 'bg-[#16A34A]/10', text: 'text-[#16A34A]', label: 'Buyer' };
-    }
+  const handlePlanChange = async (event) => {
+    const result = await switchPlan(event.target.value);
+    if (!result?.success && result?.message) toast.error(result.message);
   };
 
-  const roleBadge = getRoleBadge();
+  const Metric = ({ label, value, tone = 'orange' }) => {
+    const toneClasses = {
+      orange: 'border-[#F97316] text-[#F97316]',
+      green: 'border-[#16A34A] text-[#16A34A]',
+      blue: 'border-[#2563EB] text-[#2563EB]',
+      slate: 'border-[#64748B] text-[#334155]',
+    };
 
-  return (
-    <div className="bg-[#F9FAFB] min-h-screen py-8">
-      <div className="container mx-auto px-4 max-w-2xl">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <FaUser className="text-[#F97316] text-3xl" />
-            <h1 className="text-3xl font-bold text-[#F97316]">My Profile</h1>
-          </div>
-          <p className="text-[#6B7280]">Lango Lako la Biashara Smart — Manage your account details</p>
+    return (
+      <div className={`rounded-lg border-l-4 bg-white p-4 shadow-sm ${toneClasses[tone]}`}>
+        <p className="text-xs font-semibold uppercase text-[#6B7280]">{label}</p>
+        <p className="mt-1 text-2xl font-bold text-[#111827]">{value}</p>
+      </div>
+    );
+  };
+
+  const SectionTitle = ({ icon: Icon, title, action }) => (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-2">
+        <Icon size={20} className="text-[#F97316]" />
+        <h2 className="text-xl font-bold text-[#111827]">{title}</h2>
+      </div>
+      {action}
+    </div>
+  );
+
+  const renderRecentOrders = () => (
+    <div className="space-y-3">
+      {ordersLoading ? (
+        <div className="h-24 animate-pulse rounded-lg bg-gray-100" />
+      ) : orders.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-5 text-sm text-[#6B7280]">
+          No orders yet. <Link to="/products" className="font-semibold text-[#F97316]">Browse products</Link>
         </div>
+      ) : (
+        orders.slice(0, 4).map((order) => (
+          <div key={order.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4">
+            <div>
+              <p className="font-semibold text-[#111827]">Order #{String(order.id).slice(-8).toUpperCase()}</p>
+              <p className="text-sm text-[#6B7280]">{prettify(order.status)} · {new Date(order.createdAt).toLocaleDateString()}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-bold text-[#16A34A]">{formatCurrency(order.total || 0)}</span>
+              <Link to={`/orders/${order.id}/track`} className="rounded-lg border border-[#F97316] px-3 py-2 text-sm font-semibold text-[#F97316] hover:bg-[#F97316] hover:text-white">
+                Track
+              </Link>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 
-        {activePlan && user?.role !== 'buyer' && (
-          <div className="mb-6 bg-white rounded-xl shadow-md p-5 border border-[#F97316]/20">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <div className="flex items-center gap-2">
-                  <FaCrown className="text-[#F97316]" />
-                  <h3 className="font-semibold text-[#111827]">Current Plan: {activePlan.name}</h3>
-                </div>
-                <p className="text-sm text-[#6B7280] mt-1">
-                  {activePlan.differentiator} • {activePlan.priceLabel}
-                </p>
+  const renderDashboard = () => (
+    <div>
+      <SectionTitle icon={LayoutDashboard} title="Account Dashboard" />
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Orders" value={orderStats.total} />
+        <Metric label="Pending Deliveries" value={orderStats.pendingDeliveries} tone="blue" />
+        <Metric label="Escrow Transactions" value={orderStats.escrow} tone="green" />
+        <Metric label="Wishlist" value={wishlistCount} tone="slate" />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+        <section>
+          <SectionTitle
+            icon={Package}
+            title="Recent Orders"
+            action={<Link to="/orders" className="text-sm font-semibold text-[#F97316]">View all</Link>}
+          />
+          {renderRecentOrders()}
+        </section>
+
+        <section className="space-y-4">
+          <div className="rounded-lg border border-gray-200 bg-white p-5">
+            <SectionTitle icon={WalletCards} title="Plan & Role" />
+            <dl className="space-y-3 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-[#6B7280]">Role</dt>
+                <dd className="font-semibold text-[#111827]">{prettify(user?.role)}</dd>
               </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-[#6B7280]">Business Type</dt>
+                <dd className="font-semibold text-[#111827]">{prettify(user?.businessType)}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-[#6B7280]">Plan</dt>
+                <dd className="font-semibold text-[#111827]">{planLabel}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-[#6B7280]">Plan Status</dt>
+                <dd className="font-semibold text-[#16A34A]">
+                  {isSeller ? prettify(user?.subscription?.status, activePlan ? 'Active' : 'Inactive') : 'Not eligible'}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-white p-5">
+            <SectionTitle icon={Bell} title="Notifications" />
+            <p className="text-sm text-[#6B7280]">Order, escrow, and account notifications are managed from your preferences.</p>
+            <button
+              type="button"
+              onClick={() => setActiveSection('settings')}
+              className="mt-4 rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white hover:bg-[#374151]"
+            >
+              Open preferences
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+
+  const renderOrders = () => (
+    <div>
+      <SectionTitle icon={Package} title="My Orders" action={<Link to="/orders" className="text-sm font-semibold text-[#F97316]">Open orders page</Link>} />
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Metric label="Total Orders" value={orderStats.total} />
+        <Metric label="Pending" value={orderStats.pending} tone="blue" />
+        <Metric label="Deliveries" value={orderStats.pendingDeliveries} tone="green" />
+        <Metric label="Total Spent" value={formatCurrency(orderStats.totalSpent)} tone="slate" />
+      </div>
+      {renderRecentOrders()}
+    </div>
+  );
+
+  const renderWishlist = () => (
+    <div>
+      <SectionTitle icon={Heart} title="Wishlist" action={<Link to="/wishlist" className="text-sm font-semibold text-[#F97316]">Open wishlist</Link>} />
+      <div className="rounded-lg border border-gray-200 bg-white p-5">
+        <p className="text-3xl font-bold text-[#111827]">{wishlistCount}</p>
+        <p className="mt-1 text-sm text-[#6B7280]">Saved products in your wishlist.</p>
+      </div>
+    </div>
+  );
+
+  const renderAddresses = () => (
+    <div>
+      <SectionTitle icon={MapPin} title="Addresses" />
+      <form onSubmit={handleSaveProfile} className="rounded-lg border border-gray-200 bg-white p-5">
+        <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-address">Primary Address</label>
+        <textarea
+          id="profile-address"
+          name="address"
+          rows="4"
+          value={formData.address}
+          onChange={handleInputChange}
+          className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+          placeholder="County, town, street, or delivery landmark"
+        />
+        <p className="mt-2 text-sm text-[#6B7280]">Current saved address: {addressLabel}</p>
+        <button type="submit" disabled={saving} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 font-semibold text-white hover:bg-[#EA580C] disabled:opacity-60">
+          <Save size={16} />
+          {saving ? 'Saving...' : 'Save Address'}
+        </button>
+      </form>
+    </div>
+  );
+
+  const renderPayment = () => (
+    <div>
+      <SectionTitle icon={CreditCard} title="Payment Methods" />
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-gray-200 bg-white p-5">
+          <p className="font-semibold text-[#111827]">Wallet Balance</p>
+          <p className="mt-2 text-2xl font-bold text-[#16A34A]">{formatCurrency(user?.walletBalance || 0)}</p>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-5">
+          <p className="font-semibold text-[#111827]">Escrow Balance</p>
+          <p className="mt-2 text-2xl font-bold text-[#2563EB]">{formatCurrency(user?.escrowBalance || 0)}</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderReviews = () => (
+    <div>
+      <SectionTitle icon={Star} title="Reviews" />
+      <div className="rounded-lg border border-gray-200 bg-white p-5">
+        <p className="font-semibold text-[#111827]">Trust Score</p>
+        <p className="mt-2 text-2xl font-bold text-[#F97316]">{Number(user?.trustScore || 0).toFixed(1)} / 5</p>
+        <p className="mt-2 text-sm text-[#6B7280]">Reviews and trust indicators help buyers and sellers transact with confidence.</p>
+      </div>
+    </div>
+  );
+
+  const renderSecurity = () => (
+    <div>
+      <SectionTitle icon={ShieldCheck} title="Security" />
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-gray-200 bg-white p-5">
+          <p className="font-semibold text-[#111827]">Phone Verification</p>
+          <p className="mt-2 text-sm text-[#6B7280]">{user?.isPhoneVerified ? 'Verified' : 'Not verified'}</p>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-5">
+          <p className="font-semibold text-[#111827]">KYC Status</p>
+          <p className="mt-2 text-sm text-[#6B7280]">{verificationLabel}</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderSettings = () => (
+    <div>
+      <SectionTitle icon={Settings} title="Settings" />
+      <div className="space-y-5">
+        <form onSubmit={handleSaveProfile} className="rounded-lg border border-gray-200 bg-white p-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-name">Full Name</label>
+              <input
+                id="profile-name"
+                name="fullName"
+                value={formData.fullName}
+                onChange={handleInputChange}
+                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-phone">Phone</label>
+              <input
+                id="profile-phone"
+                name="phone"
+                value={formData.phone}
+                onChange={handleInputChange}
+                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-business-name">Business Name</label>
+              <input
+                id="profile-business-name"
+                name="businessName"
+                value={formData.businessName}
+                onChange={handleInputChange}
+                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-business-type">Business Type</label>
               <select
-                value={activePlan.id}
-                onChange={(e) => switchPlan(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-[#111827] bg-white"
+                id="profile-business-type"
+                name="businessType"
+                value={formData.businessType}
+                onChange={handleInputChange}
+                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
               >
-                {(availablePlans || []).map((plan) => (
-                  <option key={plan.id} value={plan.id}>
-                    {plan.name}
-                  </option>
+                <option value="">Not set</option>
+                {['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business', 'analytics', 'logistics'].map((type) => (
+                  <option key={type} value={type}>{prettify(type)}</option>
                 ))}
               </select>
             </div>
           </div>
-        )}
+          <button type="submit" disabled={saving} className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 font-semibold text-white hover:bg-[#EA580C] disabled:opacity-60">
+            <Save size={16} />
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </form>
 
-        {isSeller && (
-          <div className="mb-6 bg-white rounded-xl shadow-md p-5 border border-[#16A34A]/20">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <h3 className="font-semibold text-[#111827]">Seller Quick Access</h3>
-                <p className="text-sm text-[#6B7280] mt-1">
-                  Go to your dashboard to manage products, orders, and subscription.
-                </p>
-              </div>
-              <Link
-                to="/seller"
-                className="px-4 py-2 rounded-lg bg-[#16A34A] text-white font-medium hover:bg-[#15803D] transition"
-              >
-                Open Seller Dashboard
-              </Link>
+        <NotificationPreferencesCard
+          title="Notification Preferences"
+          description="Control how you receive order updates, scarcity alerts, and account activity."
+        />
+      </div>
+    </div>
+  );
+
+  const renderMainContent = () => {
+    switch (activeSection) {
+      case 'orders':
+        return renderOrders();
+      case 'wishlist':
+        return renderWishlist();
+      case 'addresses':
+        return renderAddresses();
+      case 'payment':
+        return renderPayment();
+      case 'reviews':
+        return renderReviews();
+      case 'security':
+        return renderSecurity();
+      case 'settings':
+        return renderSettings();
+      default:
+        return renderDashboard();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] py-6">
+      <div className="container mx-auto max-w-7xl px-4">
+        <header className="mb-6 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="grid gap-5 border-b border-gray-200 p-5 lg:grid-cols-[auto_1fr_auto] lg:items-center">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[#F97316] text-2xl font-bold text-white shadow-sm">
+              {getInitials(displayName)}
             </div>
-          </div>
-        )}
 
-        <div className="mb-6">
-          <NotificationPreferencesCard
-            title="Notification Preferences"
-            description="Control how you receive order updates, scarcity alerts, and account activity right from your profile dashboard."
-          />
-        </div>
-
-        {/* Profile Card */}
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
-          {/* Profile Header */}
-          <div className="bg-linear-to-r from-[#F97316] to-[#FB923C] px-6 py-4">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg">
-                <span className="text-2xl font-bold text-[#F97316]">
-                  {user?.name?.charAt(0).toUpperCase() || 'U'}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-2xl font-bold text-[#111827]">{displayName}</h1>
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#16A34A]/10 px-3 py-1 text-xs font-semibold text-[#15803D]">
+                  <CheckCircle2 size={14} />
+                  {verificationLabel}
                 </span>
               </div>
-              <div className="text-white">
-                <h2 className="text-xl font-semibold">{user?.name}</h2>
-                <p className="text-white/80 text-sm">{user?.email}</p>
-                <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium ${roleBadge.bg} ${roleBadge.text} bg-white/20`}>
-                  {roleBadge.label}
-                </span>
-              </div>
+              <p className="mt-1 text-sm text-[#6B7280]">{user?.email || 'No email saved'}</p>
+              <p className="mt-1 text-sm text-[#6B7280]">Member Since: {memberSince}</p>
             </div>
-          </div>
-          
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="p-6">
-            <div className="space-y-5">
-              {/* Full Name */}
-              <div>
-                <label className="text-sm font-medium mb-2 text-[#111827] flex items-center gap-2">
-                  <FaUser className="text-[#F97316] text-sm" />
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827]"
-                  placeholder="Your full name"
-                />
+
+            <div className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 lg:min-w-72">
+              <div className="flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                {isSeller ? <Store size={16} className="text-[#F97316]" /> : <User size={16} className="text-[#F97316]" />}
+                {prettify(user?.role)}
               </div>
-              
-              {/* Email (disabled) */}
-              <div>
-                <label className="text-sm font-medium mb-2 text-[#111827] flex items-center gap-2">
-                  <FaEnvelope className="text-[#FB923C] text-sm" />
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  disabled
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-[#6B7280] cursor-not-allowed"
-                />
-                <p className="text-xs text-[#6B7280] mt-1">Email address cannot be changed</p>
-              </div>
-              
-              {/* Phone Number */}
-              <div>
-                <label className="text-sm font-medium mb-2 text-[#111827] flex items-center gap-2">
-                  <FaPhone className="text-[#16A34A] text-sm" />
-                  Phone Number
-                </label>
-                <input
-                  type="tel"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:border-transparent text-[#111827]"
-                  placeholder="+254 700 000000"
-                />
-              </div>
-              
-              {/* Address */}
-              <div>
-                <label className="text-sm font-medium mb-2 text-[#111827] flex items-center gap-2">
-                  <FaMapMarkerAlt className="text-[#F97316] text-sm" />
-                  Address
-                </label>
-                <textarea
-                  name="address"
-                  value={formData.address}
-                  onChange={handleChange}
-                  rows="3"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent text-[#111827]"
-                  placeholder="Your shipping address"
-                />
-              </div>
-              
-              {/* Business Type (for sellers) */}
-              {(user?.role === 'seller' || user?.role === 'farmer') && (
-                <div className="bg-[#F97316]/5 rounded-lg p-4 border border-[#F97316]/20">
-                  <label className="text-sm font-medium mb-2 text-[#111827] flex items-center gap-2">
-                    <FaStore className="text-[#F97316] text-sm" />
-                    Business Type
-                  </label>
-                  <input
-                    type="text"
-                    value={user.businessType ? user.businessType.charAt(0).toUpperCase() + user.businessType.slice(1) : ''}
-                    disabled
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-[#111827] font-medium cursor-not-allowed"
-                  />
-                  <p className="text-xs text-[#6B7280] mt-2">
-                    Your business category helps customers find your products
-                  </p>
-                </div>
-              )}
-              
-              {/* Save Button */}
-              <div className="pt-4 border-t border-gray-200">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#F97316] text-white rounded-lg font-semibold hover:bg-[#F97316]/90 transition-colors disabled:opacity-50 shadow-md"
+              <p className="mt-2 text-sm text-[#6B7280]">{planLabel} · {planPrice}</p>
+              {activePlan && availablePlans?.length > 0 && (
+                <select
+                  value={activePlan.id}
+                  onChange={handlePlanChange}
+                  className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-[#111827] outline-none focus:border-[#F97316]"
                 >
-                  {loading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <FaSave size={16} />
-                      Save Changes
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-        
-        {/* AI Intelligence Tip */}
-        <div className="mt-6 bg-linear-to-r from-[#FB923C]/10 to-[#F97316]/10 rounded-xl p-4 border border-[#FB923C]/20">
-          <div className="flex items-start gap-3">
-            <FaBrain className="text-[#FB923C] text-xl mt-0.5" />
-            <div>
-              <h4 className="font-semibold text-[#111827] mb-1">AI Intelligence Tip</h4>
-              <p className="text-sm text-[#6B7280]">
-                Keeping your profile updated helps us provide better recommendations and faster checkout experiences.
-                {user?.role === 'seller' && ' Complete your store details to increase visibility by up to 40%.'}
-              </p>
+                  {availablePlans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>{plan.name}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
+
+          <nav className="flex gap-2 overflow-x-auto px-5 py-3">
+            {TOP_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveSection(tab.id)}
+                className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                  activeSection === tab.id
+                    ? 'bg-[#F97316] text-white'
+                    : 'text-[#6B7280] hover:bg-gray-100 hover:text-[#111827]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </header>
+
+        <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+          <aside className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+            <nav className="space-y-1">
+              {PROFILE_SECTIONS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setActiveSection(id)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-semibold transition ${
+                    activeSection === id
+                      ? 'bg-[#F97316]/10 text-[#F97316]'
+                      : 'text-[#4B5563] hover:bg-gray-100 hover:text-[#111827]'
+                  }`}
+                >
+                  <Icon size={18} />
+                  <span className="min-w-0 truncate">{label}</span>
+                </button>
+              ))}
+            </nav>
+          </aside>
+
+          <main className="min-w-0 rounded-lg border border-gray-200 bg-[#FFFFFF] p-5 shadow-sm">
+            {renderMainContent()}
+          </main>
         </div>
-        
-        {/* Security Note */}
-        <div className="mt-4 text-center text-xs text-[#6B7280] flex items-center justify-center gap-2">
-          <FaShieldAlt className="text-[#16A34A]" />
-          <span>Your information is secure and never shared with third parties</span>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4 text-sm text-[#6B7280]">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={16} className="text-[#16A34A]" />
+            <span>Your account details are protected and only visible to authorized users.</span>
+          </div>
+          {isSeller && (
+            <Link to="/seller" className="inline-flex items-center gap-2 font-semibold text-[#F97316]">
+              <Home size={16} />
+              Seller dashboard
+            </Link>
+          )}
         </div>
       </div>
     </div>

@@ -3,11 +3,12 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   FaCheckCircle, FaTruck, FaBox, FaHourglassHalf, FaMapMarkerAlt, 
-  FaClock, FaUser, FaPhone, FaEnvelope, FaBrain, FaArrowLeft 
+  FaClock, FaPhone, FaBrain, FaArrowLeft, FaCreditCard, FaMobileAlt, FaSyncAlt
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import { orderService } from '../services/orderService';
+import { paymentService } from '../services/paymentService';
 import { normalizeOrder, normalizeTracking } from '../utils/orderAdapter';
 
 const OrderTracking = () => {
@@ -15,6 +16,11 @@ const OrderTracking = () => {
   const [order, setOrder] = useState(null);
   const [tracking, setTracking] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [mpesaPhone, setMpesaPhone] = useState('');
+  const [checkoutRequestId, setCheckoutRequestId] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState('');
+  const [sendingPayment, setSendingPayment] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
 
   useEffect(() => {
     fetchOrderDetails();
@@ -26,6 +32,7 @@ const OrderTracking = () => {
       const normalizedOrder = normalizeOrder(response.data || response.order || response);
       setOrder(normalizedOrder);
       setTracking(normalizeTracking(normalizedOrder));
+      setMpesaPhone((previous) => previous || normalizedOrder.shippingAddress?.phone || '');
     } catch (error) {
       console.error('Error fetching order details:', error);
       toast.error('Failed to load order details');
@@ -66,6 +73,82 @@ const OrderTracking = () => {
     return 0;
   };
 
+  const isAwaitingPayment = (status) => ['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(status);
+
+  const refreshOrderAfterPayment = async () => {
+    const response = await orderService.getById(id);
+    const normalizedOrder = normalizeOrder(response.data || response.order || response);
+    setOrder(normalizedOrder);
+    setTracking(normalizeTracking(normalizedOrder));
+    return normalizedOrder;
+  };
+
+  const sendMpesaPrompt = async () => {
+    if (!mpesaPhone.trim()) {
+      toast.error('Enter the M-Pesa phone number that will receive the STK prompt');
+      return;
+    }
+
+    setSendingPayment(true);
+    setPaymentStatus('');
+
+    try {
+      const result = await paymentService.initiateMpesaPayment({
+        orderId: order.id,
+        phoneNumber: mpesaPhone.trim(),
+      });
+      const requestId = result?.checkoutRequestId || result?.CheckoutRequestID;
+
+      if (requestId) {
+        setCheckoutRequestId(requestId);
+        setPaymentStatus('STK Push sent. Enter your M-Pesa PIN on your phone to complete payment.');
+        toast.success('M-Pesa STK Push sent');
+      } else {
+        setPaymentStatus(result?.message || 'Payment request sent. Check your phone.');
+        toast.success('Payment request sent');
+      }
+    } catch (error) {
+      const message = error?.response?.data?.message || error?.message || 'Failed to send M-Pesa prompt';
+      setPaymentStatus(message);
+      toast.error(message);
+    } finally {
+      setSendingPayment(false);
+    }
+  };
+
+  const checkPaymentStatus = async () => {
+    if (!checkoutRequestId) {
+      toast.error('Send an STK Push first');
+      return;
+    }
+
+    setCheckingPayment(true);
+
+    try {
+      const result = await paymentService.checkMpesaStatus(checkoutRequestId);
+      const status = result?.status || '';
+      const message = result?.message || 'Payment status checked';
+
+      setPaymentStatus(message);
+
+      if (status === 'completed') {
+        const refreshedOrder = await refreshOrderAfterPayment();
+        if (isAwaitingPayment(refreshedOrder.status)) {
+          setOrder((previous) => ({ ...previous, status: 'FUNDS_HELD', paidAt: new Date().toISOString() }));
+        }
+        toast.success('Payment confirmed. Tracking is now available.');
+      } else if (status === 'failed') {
+        toast.error(message || 'Payment was not completed');
+      }
+    } catch (error) {
+      const message = error?.response?.data?.message || error?.message || 'Unable to confirm payment yet';
+      setPaymentStatus(message);
+      toast.error(message);
+    } finally {
+      setCheckingPayment(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -92,6 +175,7 @@ const OrderTracking = () => {
   }
 
   const currentStep = getStatusStep(order.status);
+  const awaitingPayment = isAwaitingPayment(order.status);
   const steps = [
     { label: 'Order Placed', icon: FaBox, status: 'pending', description: 'Your order has been received' },
     { label: 'Processing', icon: FaHourglassHalf, status: 'processing', description: 'Seller is preparing your order' },
@@ -105,6 +189,83 @@ const OrderTracking = () => {
     if (['processing', 'payment_escrowed', 'FUNDS_HELD'].includes(order.status)) return 'Estimated: 3-7 business days';
     return 'Processing will begin shortly';
   };
+
+  const PaymentRequiredCard = () => (
+    <div className="rounded-xl border border-[#16A34A]/30 bg-white p-6 shadow-md">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-[#16A34A]">
+            <FaCreditCard />
+            <h2 className="text-xl font-bold text-[#111827]">Complete M-Pesa Payment</h2>
+          </div>
+          <p className="mt-2 text-sm text-[#6B7280]">
+            Pay {formatCurrency(order.total)} before tracking, seller processing, and delivery updates are shown.
+          </p>
+        </div>
+        <span className="rounded-full border border-[#F97316]/30 bg-[#F97316]/10 px-3 py-1 text-xs font-semibold text-[#9A3412]">
+          PAYMENT REQUIRED
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+        <label className="block text-sm font-semibold text-[#111827]" htmlFor="trackingMpesaPhone">
+          M-Pesa phone number
+          <div className="relative mt-2">
+            <FaMobileAlt className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              id="trackingMpesaPhone"
+              type="tel"
+              value={mpesaPhone}
+              onChange={(event) => setMpesaPhone(event.target.value)}
+              placeholder="07XXXXXXXX or 2547XXXXXXXX"
+              className="h-11 w-full rounded-lg border border-gray-300 pl-10 pr-3 text-sm outline-none focus:border-[#16A34A] focus:ring-2 focus:ring-[#16A34A]/20"
+            />
+          </div>
+        </label>
+
+        <button
+          type="button"
+          onClick={sendMpesaPrompt}
+          disabled={sendingPayment || checkingPayment}
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#16A34A] px-5 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-60"
+        >
+          <FaCreditCard />
+          {sendingPayment ? 'Sending...' : checkoutRequestId ? 'Resend STK Push' : 'Send STK Push'}
+        </button>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <p className="text-sm font-semibold text-[#111827]">M-Pesa PIN</p>
+        <p className="mt-1 text-sm text-[#6B7280]">
+          Enter your M-Pesa PIN on the secure prompt that appears on your phone. Do not type your PIN into this website.
+        </p>
+      </div>
+
+      {checkoutRequestId && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#16A34A]/20 bg-[#16A34A]/5 p-4">
+          <div>
+            <p className="text-xs font-semibold uppercase text-[#15803D]">Checkout Request ID</p>
+            <p className="mt-1 break-all text-sm text-[#111827]">{checkoutRequestId}</p>
+          </div>
+          <button
+            type="button"
+            onClick={checkPaymentStatus}
+            disabled={checkingPayment || sendingPayment}
+            className="inline-flex items-center gap-2 rounded-lg border border-[#16A34A] bg-white px-4 py-2 text-sm font-semibold text-[#15803D] hover:bg-[#F0FDF4] disabled:opacity-60"
+          >
+            <FaSyncAlt className={checkingPayment ? 'animate-spin' : ''} />
+            {checkingPayment ? 'Checking...' : 'I Have Paid'}
+          </button>
+        </div>
+      )}
+
+      {paymentStatus && (
+        <div className="mt-4 rounded-lg border border-[#FDBA74] bg-[#FFF7ED] p-4 text-sm text-[#9A3412]">
+          {paymentStatus}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="bg-[#F9FAFB] min-h-screen py-8">
@@ -121,9 +282,33 @@ const OrderTracking = () => {
           </div>
           <p className="text-[#6B7280]">Order #{String(order.id).slice(-8)} • Placed on {new Date(order.createdAt).toLocaleDateString()}</p>
         </div>
+
+        {awaitingPayment && (
+          <>
+            <PaymentRequiredCard />
+            <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-md">
+              <h2 className="text-xl font-semibold text-[#111827]">Order Summary</h2>
+              <div className="mt-4 space-y-3">
+                {order.items.map((item) => (
+                  <div key={item.id} className="flex justify-between gap-3 border-b border-gray-100 pb-3 last:border-0">
+                    <div>
+                      <p className="font-medium text-[#111827]">{item.name}</p>
+                      <p className="text-sm text-[#6B7280]">Qty: {item.quantity}</p>
+                    </div>
+                    <span className="font-semibold text-[#F97316]">{formatCurrency(item.price * item.quantity)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-between border-t border-gray-200 pt-4 text-lg font-bold">
+                <span>Total</span>
+                <span className="text-[#16A34A]">{formatCurrency(order.total)}</span>
+              </div>
+            </div>
+          </>
+        )}
         
         {/* Order Status Timeline */}
-        <div className="bg-white rounded-xl shadow-md p-6 mb-6 border-l-4 border-[#F97316]">
+        {!awaitingPayment && <div className="bg-white rounded-xl shadow-md p-6 mb-6 border-l-4 border-[#F97316]">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-semibold text-[#111827]">Order Status</h2>
             <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(order.status)}`}>
@@ -177,10 +362,10 @@ const OrderTracking = () => {
               {estimatedDelivery()}
             </p>
           </div>
-        </div>
+        </div>}
         
         {/* Tracking Updates */}
-        {tracking && tracking.updates && tracking.updates.length > 0 && (
+        {!awaitingPayment && tracking && tracking.updates && tracking.updates.length > 0 && (
           <div className="bg-white rounded-xl shadow-md p-6 mb-6 border-l-4 border-[#FB923C]">
             <h2 className="text-xl font-semibold mb-4 text-[#111827] flex items-center gap-2">
               <FaTruck className="text-[#FB923C]" />
@@ -212,7 +397,7 @@ const OrderTracking = () => {
         )}
         
         {/* Order Summary */}
-        <div className="bg-white rounded-xl shadow-md overflow-hidden">
+        {!awaitingPayment && <div className="bg-white rounded-xl shadow-md overflow-hidden">
           <div className="bg-linear-to-r from-gray-50 to-white px-6 py-4 border-b">
             <h2 className="text-xl font-semibold text-[#111827]">Order Summary</h2>
           </div>
@@ -275,10 +460,10 @@ const OrderTracking = () => {
               </div>
             </div>
           </div>
-        </div>
+        </div>}
         
         {/* AI Intelligence Tip */}
-        <div className="mt-6 bg-linear-to-r from-[#FB923C]/10 to-[#F97316]/10 rounded-xl p-4 border border-[#FB923C]/20">
+        {!awaitingPayment && <div className="mt-6 bg-linear-to-r from-[#FB923C]/10 to-[#F97316]/10 rounded-xl p-4 border border-[#FB923C]/20">
           <div className="flex items-start gap-3">
             <FaBrain className="text-[#FB923C] text-xl mt-0.5" />
             <div>
@@ -291,7 +476,7 @@ const OrderTracking = () => {
               </p>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );

@@ -7,7 +7,6 @@ const subscriptionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      index: true
     },
     plan: {
       type: String,
@@ -211,10 +210,17 @@ subscriptionSchema.pre('save', function() {
     return;
   }
 
+  const hasAdminPriceOverride = Boolean(this.metadata?.priceOverridden);
+  const shouldUseDefaultPrice = !hasAdminPriceOverride && (
+    this.price === undefined ||
+    this.price === null ||
+    Number(this.price) <= 0
+  );
+
   // Set plan-specific features
   switch(this.plan) {
     case 'solo':
-      this.price = 500;
+      if (shouldUseDefaultPrice) this.price = 500;
       this.features.maxProducts = 30;
       this.features.smsCreditsAllocated = 0;
       this.features.hasRegionalGuardian = false;
@@ -225,7 +231,7 @@ subscriptionSchema.pre('save', function() {
       break;
       
     case 'smart':
-      this.price = 2500;
+      if (shouldUseDefaultPrice) this.price = 2500;
       this.features.maxProducts = 999999; // Unlimited
       this.features.smsCreditsAllocated = 500;
       this.features.hasRegionalGuardian = true;
@@ -236,7 +242,7 @@ subscriptionSchema.pre('save', function() {
       break;
       
     case 'growth':
-      this.price = 6500;
+      if (shouldUseDefaultPrice) this.price = 6500;
       this.features.maxProducts = 999999; // Unlimited
       this.features.smsCreditsAllocated = 2000;
       this.features.hasRegionalGuardian = true;
@@ -247,7 +253,7 @@ subscriptionSchema.pre('save', function() {
       break;
       
     case 'mizigo':
-      this.price = 0;
+      if (this.price === undefined || this.price === null) this.price = 0;
       this.features.maxProducts = 0;
       this.features.smsCreditsAllocated = 0;
       this.features.commissionRate = 5; // Default 5%, can go up to 10%
@@ -389,7 +395,7 @@ subscriptionSchema.statics.findDueForRenewal = async function() {
 };
 
 // Indexes
-subscriptionSchema.index({ user: 1, status: 1 });
+subscriptionSchema.index({ user: 1 }, { unique: true });
 subscriptionSchema.index({ plan: 1, status: 1 });
 subscriptionSchema.index({ nextBillingDate: 1 });
 subscriptionSchema.index({ 'vehicleInfo.mileage': 1 });

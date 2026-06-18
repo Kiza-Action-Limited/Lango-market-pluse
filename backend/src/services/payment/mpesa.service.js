@@ -23,6 +23,8 @@ const getMetadataValue = (metadata, key) => {
   return metadata[key];
 };
 
+const isSubscriptionPayment = (payment) => getMetadataValue(payment?.metadata, 'purpose') === 'subscription';
+
 class MpesaService {
   /**
    * Initiate M-Pesa STK Push
@@ -243,6 +245,8 @@ class MpesaService {
 
         const payment = await Payment.findOne({ checkoutRequestId });
         if (payment) {
+          const wasCompleted = payment.status === 'completed';
+
           if (response.data.ResultCode === '0') {
             payment.status = 'completed';
             payment.paidAt = new Date();
@@ -251,6 +255,15 @@ class MpesaService {
             payment.failureReason = response.data.ResultDesc;
           }
           await payment.save();
+
+          if (response.data.ResultCode === '0' && !wasCompleted && !isSubscriptionPayment(payment)) {
+            await this.handleSuccessCallback({
+              checkoutRequestId,
+              amount: payment.amount,
+              transactionId: payment.mpesaReceiptNumber || payment.transactionId || checkoutRequestId,
+              transactionDate: payment.paidAt,
+            });
+          }
         }
 
         return {
@@ -365,6 +378,10 @@ class MpesaService {
       payment.amount = Number(amount);
     }
     await payment.save();
+
+    if (isSubscriptionPayment(payment)) {
+      return { payment, escrow: null };
+    }
 
     const order = await Order.findById(payment.order);
     if (order) {

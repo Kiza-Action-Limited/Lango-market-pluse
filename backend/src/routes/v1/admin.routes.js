@@ -17,6 +17,20 @@ router.get('/users', adminController.getAllUsers);
 router.get('/users/:userId', param('userId').isMongoId(), adminController.getUserDetails);
 router.put('/users/:userId', param('userId').isMongoId(), adminController.updateUser);
 
+// Subscription Management
+router.get('/subscriptions', adminController.getSubscriptions);
+router.put('/subscriptions/:userId', param('userId').isMongoId(), [
+  body('planId').isIn(['solo', 'smart', 'growth', 'mizigo']),
+  body('amount').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }),
+  body('status').optional().isIn(['active', 'inactive', 'suspended', 'cancelled', 'expired', 'trial']),
+  body('endDate').optional({ nullable: true, checkFalsy: true }).isISO8601(),
+  body('autoRenew').optional().isBoolean(),
+  body('note').optional().isString().trim(),
+], adminController.setSubscription);
+router.delete('/subscriptions/:userId', param('userId').isMongoId(), [
+  body('reason').optional().isString().trim(),
+], adminController.cancelSellerSubscription);
+
 // Order Management
 router.get('/orders', adminController.getAllOrders);
 router.put('/orders/:orderId/status', param('orderId').isMongoId(), [

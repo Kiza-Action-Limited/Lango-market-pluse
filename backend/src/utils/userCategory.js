@@ -27,12 +27,12 @@ const getEffectiveUserCategory = (user = {}) => {
   const businessType = normalizeBusinessType(user.businessType);
 
   if (role === 'admin') return 'admin';
+  if (role === 'buyer' || role === 'consumer') return 'consumer';
   if (role === 'logistics' || businessType === 'logistics') return 'logistics';
   if (role === 'farmer' || businessType === 'farmer') return 'farmer';
   if (SELLER_BUSINESS_TYPES.has(role)) return role;
   if (SELLER_BUSINESS_TYPES.has(businessType)) return businessType;
   if (role === 'seller') return businessType || 'retailer';
-  if (role === 'buyer' || role === 'consumer') return 'consumer';
   return businessType || role || 'unknown';
 };
 

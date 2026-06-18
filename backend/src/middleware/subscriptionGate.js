@@ -26,15 +26,15 @@ const subscriptionGate = (requiredTier = 'solo', feature = null) => {
       }
 
       const subscription = await planService.getUserSubscription(user.id || user._id);
-      const currentTier = normalizePlanId(subscription.plan || user.subscriptionTier || 'solo');
+      const currentTier = normalizePlanId(subscription.plan || user.subscriptionTier);
       const normalizedRequiredTier = normalizePlanId(requiredTier);
 
       if (!subscription.isActive || !meetsTier(currentTier, normalizedRequiredTier)) {
         return res.status(403).json({
           success: false,
-          message: `This feature requires the ${normalizedRequiredTier.toUpperCase()} plan or higher. Please upgrade.`,
+          message: `This feature requires the ${String(normalizedRequiredTier || requiredTier).toUpperCase()} plan or higher. Please activate a subscription.`,
           requiredTier: normalizedRequiredTier,
-          currentTier,
+          currentTier: currentTier || null,
           upgradePrompt: `Upgrade to ${normalizedRequiredTier} to unlock this feature.`,
         });
       }

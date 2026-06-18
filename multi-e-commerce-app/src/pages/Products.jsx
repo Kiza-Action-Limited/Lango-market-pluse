@@ -2,7 +2,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
-import { FaFilter, FaTimes } from 'react-icons/fa';
+import {
+  FaDollarSign,
+  FaFilter,
+  FaSearch,
+  FaSlidersH,
+  FaSortAmountDown,
+  FaStore,
+  FaTags,
+  FaTimes,
+  FaUndo,
+} from 'react-icons/fa';
 import { productService } from '../services/productService';
 
 const CATEGORY_LABELS = {
@@ -12,7 +22,25 @@ const CATEGORY_LABELS = {
   'beauty-health': 'Beauty and Health',
   'sports-outdoor': 'Sports and Outdoor',
   grocery: 'Grocery',
+  vegetables: 'Vegetables',
 };
+
+const PRODUCT_CATEGORIES = Object.entries(CATEGORY_LABELS).map(([id, name]) => ({ id, name }));
+const SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest First' },
+  { value: 'price_asc', label: 'Price: Low to High' },
+  { value: 'price_desc', label: 'Price: High to Low' },
+  { value: 'popular', label: 'Most Popular' },
+  { value: 'rating', label: 'Highest Rated' },
+];
+const BUSINESS_TYPE_OPTIONS = [
+  { value: '', label: 'Any business type' },
+  { value: 'manufacturer', label: 'Manufacturer' },
+  { value: 'wholesaler', label: 'Wholesaler' },
+  { value: 'retailer', label: 'Retailer' },
+  { value: 'farmer', label: 'Farmer' },
+  { value: 'distributor', label: 'Distributor' },
+];
 
 const toTitleCase = (value) =>
   String(value)
@@ -52,7 +80,6 @@ const Products = ({ seller = false }) => {
     ...initialFilters,
   });
   const [debouncedSearch, setDebouncedSearch] = useState(initialFilters.search);
-  const [categories, setCategories] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -78,26 +105,12 @@ const Products = ({ seller = false }) => {
   }, [searchParams]);
 
   useEffect(() => {
-    fetchCategories();
-  }, []);
-
-  useEffect(() => {
     fetchProducts();
   }, [debouncedSearch, filters.category, filters.minPrice, filters.maxPrice, filters.sortBy, filters.businessType, pagination.page]);
 
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (debouncedSearch) params.append('search', debouncedSearch);
-      if (filters.category) params.append('category', filters.category);
-      if (filters.minPrice) params.append('minPrice', filters.minPrice);
-      if (filters.maxPrice) params.append('maxPrice', filters.maxPrice);
-      if (filters.sortBy) params.append('sortBy', filters.sortBy);
-      if (filters.businessType) params.append('businessType', filters.businessType);
-      params.append('page', pagination.page);
-      params.append('limit', 12);
-
       const payload = await productService.getAll({
         search: debouncedSearch || undefined,
         category: filters.category || undefined,
@@ -122,26 +135,6 @@ const Products = ({ seller = false }) => {
       setProducts([]);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchCategories = async () => {
-    try {
-      const payload = await productService.getAll({ page: 1, limit: 120 });
-      const liveProducts = payload?.products || payload?.data || payload?.items || [];
-      const categoriesById = new Map();
-
-      liveProducts.forEach((item) => {
-        if (!item?.category) return;
-        const id = getCategoryId(item.category);
-        if (id === 'uncategorized' || categoriesById.has(id)) return;
-        categoriesById.set(id, { id, name: getCategoryName(item.category) });
-      });
-
-      setCategories(Array.from(categoriesById.values()));
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-      setCategories([]);
     }
   };
 
@@ -176,18 +169,35 @@ const Products = ({ seller = false }) => {
   };
 
   const categoryOptions = useMemo(
-    () =>
-      categories.map((cat) => ({
-        id: getCategoryId(cat),
-        name: getCategoryName(cat),
-      })),
-    [categories]
+    () => PRODUCT_CATEGORIES,
+    []
   );
 
   const categoryNameById = useMemo(
     () => new Map(categoryOptions.map((cat) => [cat.id, cat.name])),
     [categoryOptions]
   );
+  const activeFilterChips = useMemo(() => {
+    const chips = [];
+    if (filters.search) chips.push({ key: 'search', label: `Search: ${filters.search}` });
+    if (filters.category) {
+      chips.push({ key: 'category', label: categoryNameById.get(filters.category) || toTitleCase(filters.category) });
+    }
+    if (filters.businessType) chips.push({ key: 'businessType', label: toTitleCase(filters.businessType) });
+    if (filters.minPrice) chips.push({ key: 'minPrice', label: `Min: Ksh ${filters.minPrice}` });
+    if (filters.maxPrice) chips.push({ key: 'maxPrice', label: `Max: Ksh ${filters.maxPrice}` });
+    if (filters.sortBy && filters.sortBy !== 'newest') {
+      chips.push({
+        key: 'sortBy',
+        label: SORT_OPTIONS.find((option) => option.value === filters.sortBy)?.label || toTitleCase(filters.sortBy),
+      });
+    }
+    return chips;
+  }, [filters, categoryNameById]);
+
+  const removeFilter = (key) => {
+    handleFilterChange(key, key === 'sortBy' ? 'newest' : '');
+  };
 
   const groupedProducts = useMemo(() => {
     const groupsByCategory = new Map();
@@ -218,90 +228,159 @@ const Products = ({ seller = false }) => {
         </h1>
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className="md:hidden btn-secondary flex items-center space-x-2"
+          className="lg:hidden btn-secondary flex items-center space-x-2"
         >
           <FaFilter />
           <span>Filters</span>
         </button>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-6">
+      <div className="flex flex-col lg:flex-row gap-6">
         {/* Filters Sidebar */}
-        <div className={`${showFilters ? 'block' : 'hidden'} md:block w-full md:w-64 bg-white rounded-lg shadow-md p-4`}>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Filters</h2>
-            <button onClick={clearFilters} className="text-sm text-primary hover:underline">
-              Clear All
-            </button>
-            <button className="md:hidden" onClick={() => setShowFilters(false)}>
-              <FaTimes />
-            </button>
-          </div>
+        <aside className={`${showFilters ? 'block' : 'hidden'} lg:block w-full lg:w-80`}>
+          <div className="sticky top-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-start justify-between gap-3 border-b border-gray-200 pb-4">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFF7ED] text-[#F97316]">
+                  <FaSlidersH />
+                </span>
+                <div>
+                  <h2 className="text-lg font-semibold text-[#111827]">Filters</h2>
+                  <p className="text-xs text-[#6B7280]">{activeFilterChips.length} active</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex items-center gap-1 rounded-full border border-gray-200 px-3 py-1.5 text-xs font-semibold text-[#374151] hover:border-[#F97316] hover:text-[#F97316]"
+                >
+                  <FaUndo size={10} />
+                  Clear All
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-[#374151] lg:hidden"
+                  onClick={() => setShowFilters(false)}
+                  aria-label="Close filters"
+                >
+                  <FaTimes />
+                </button>
+              </div>
+            </div>
 
-          {/* Search */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Search</label>
-            <input
-              type="text"
-              value={filters.search}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
-              placeholder="Product name..."
-              className="w-full px-3 py-2 border rounded-lg"
-            />
-          </div>
+            {activeFilterChips.length > 0 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {activeFilterChips.map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    onClick={() => removeFilter(chip.key)}
+                    className="inline-flex max-w-full items-center gap-1 rounded-full bg-[#F3F4F6] px-3 py-1.5 text-xs font-medium text-[#374151] hover:bg-[#FFE7D3] hover:text-[#C2410C]"
+                    title={`Remove ${chip.label}`}
+                  >
+                    <span className="truncate">{chip.label}</span>
+                    <FaTimes size={10} />
+                  </button>
+                ))}
+              </div>
+            )}
 
-          {/* Category */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Category</label>
-            <select
-              value={filters.category}
-              onChange={(e) => handleFilterChange('category', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg"
-            >
-              <option value="">All Categories</option>
-              {categoryOptions.map(cat => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
-            </select>
-          </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+              {/* Search */}
+              <div className="sm:col-span-2 lg:col-span-1">
+                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                  <FaSearch className="text-[#F97316]" size={12} />
+                  Search
+                </label>
+                <input
+                  type="text"
+                  value={filters.search}
+                  onChange={(e) => handleFilterChange('search', e.target.value)}
+                  placeholder="Product name..."
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                />
+              </div>
 
-          {/* Price Range */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Price Range</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                value={filters.minPrice}
-                onChange={(e) => handleFilterChange('minPrice', e.target.value)}
-                placeholder="Min"
-                className="w-1/2 px-3 py-2 border rounded-lg"
-              />
-              <input
-                type="number"
-                value={filters.maxPrice}
-                onChange={(e) => handleFilterChange('maxPrice', e.target.value)}
-                placeholder="Max"
-                className="w-1/2 px-3 py-2 border rounded-lg"
-              />
+              {/* Category */}
+              <div>
+                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                  <FaTags className="text-[#F97316]" size={12} />
+                  Category
+                </label>
+                <select
+                  value={filters.category}
+                  onChange={(e) => handleFilterChange('category', e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                >
+                  <option value="">All Categories</option>
+                  {categoryOptions.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                  <FaStore className="text-[#F97316]" size={12} />
+                  Business Type
+                </label>
+                <select
+                  value={filters.businessType}
+                  onChange={(e) => handleFilterChange('businessType', e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                >
+                  {BUSINESS_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value || 'all'} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Price Range */}
+              <div className="sm:col-span-2 lg:col-span-1">
+                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                  <FaDollarSign className="text-[#F97316]" size={12} />
+                  Price Range
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={filters.minPrice}
+                    onChange={(e) => handleFilterChange('minPrice', e.target.value)}
+                    placeholder="Min"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={filters.maxPrice}
+                    onChange={(e) => handleFilterChange('maxPrice', e.target.value)}
+                    placeholder="Max"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                  />
+                </div>
+              </div>
+
+              {/* Sort By */}
+              <div className="sm:col-span-2 lg:col-span-1">
+                <label className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#111827]">
+                  <FaSortAmountDown className="text-[#F97316]" size={12} />
+                  Sort By
+                </label>
+                <select
+                  value={filters.sortBy}
+                  onChange={(e) => handleFilterChange('sortBy', e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
-
-          {/* Sort By */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Sort By</label>
-            <select
-              value={filters.sortBy}
-              onChange={(e) => handleFilterChange('sortBy', e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg"
-            >
-              <option value="newest">Newest First</option>
-              <option value="price_asc">Price: Low to High</option>
-              <option value="price_desc">Price: High to Low</option>
-              <option value="popular">Most Popular</option>
-              <option value="rating">Highest Rated</option>
-            </select>
-          </div>
-        </div>
+        </aside>
 
         {/* Products Grid */}
         <div className="flex-1">

@@ -60,6 +60,7 @@ const AdminUsers = lazy(() => import('./pages/AdminUsers'));
 const AdminCategories = lazy(() => import('./pages/AdminCategories'));
 const AdminOrders = lazy(() => import('./pages/AdminOrders'));
 const AdminProducts = lazy(() => import('./pages/AdminProducts'));
+const AdminSubscriptions = lazy(() => import('./pages/AdminSubscriptions'));
 const AdminContactQueue = lazy(() => import('./pages/AdminContactQueue'));
 const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
 const AdminProfile = lazy(() => import('./pages/AdminProfile'));
@@ -119,6 +120,7 @@ function App() {
                       </Route>
 
                       <Route element={<SellerRoute />}>
+                        <Route path="seller/profile" element={<Profile />} />
                         <Route path="seller" element={<SellerLayout />}>
                           <Route index element={<SellerDashboard />} />
                           <Route path="home" element={<Home />} />
@@ -126,7 +128,6 @@ function App() {
                           <Route path="edit-product/:id" element={<EditProduct />} />
                           <Route path="products" element={<SellerProducts />} />
                           <Route path="orders" element={<SellerOrders />} />
-                          <Route path="profile" element={<Profile />} />
                           <Route path="scarcity-board" element={<RegionalScarcityBoard />} />
                           <Route path="subscription-plans" element={<SubscriptionPlans />} />
                           <Route path="premium-payment" element={<SellerPremiumPayment />} />
@@ -137,18 +138,19 @@ function App() {
                       <Route path="admin" element={<AdminLogin />} />
 
                       <Route element={<AdminRoute />}>
+                        <Route path="admin/profile" element={<AdminProfile />} />
                         <Route path="admin" element={<AdminLayout />}>
                           <Route path="dashboard" element={<AdminDashboard />} />
                           <Route path="users" element={<AdminUsers />} />
                           <Route path="categories" element={<AdminCategories />} />
                           <Route path="orders" element={<AdminOrders />} />
                           <Route path="products" element={<AdminProducts />} />
+                          <Route path="subscriptions" element={<AdminSubscriptions />} />
                           <Route path="analytics" element={<AdminAnalytics />} />
                           <Route path="logistics" element={<AdminLogistics />} />
                           <Route path="logistics-tools" element={<LogisticsOperations />} />
                           <Route path="finance-audit" element={<AdminFinanceAudit />} />
                           <Route path="contact-queue" element={<AdminContactQueue />} />
-                          <Route path="profile" element={<AdminProfile />} />
                         </Route>
                       </Route>
 

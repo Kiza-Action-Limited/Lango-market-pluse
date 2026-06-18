@@ -136,6 +136,27 @@ const getSmsCreditBalanceFromSubscription = (subscription) => {
   return Math.max(0, allocated - used);
 };
 
+const buildInactiveSubscription = (userId) => ({
+  user: userId,
+  plan: null,
+  planName: 'No Active Subscription',
+  billingModel: null,
+  price: 0,
+  currency: 'KES',
+  status: 'inactive',
+  startDate: null,
+  endDate: null,
+  features: {},
+  smsCredits: {
+    balance: 0,
+    includedPerCycle: 0,
+    usedThisCycle: 0,
+    purchasedThisCycle: 0,
+  },
+  autoRenew: false,
+  isActive: false,
+});
+
 class PlanService {
   getPlans() {
     return Object.values(PLANS).map((plan) => ({
@@ -172,33 +193,8 @@ class PlanService {
   }
 
   async getUserSubscription(userId) {
-    let subscription = await Subscription.findOne({ user: userId });
-
-    if (!subscription) {
-      // Create default Solo plan subscription
-      const plan = PLANS[PLAN_IDS.SOLO];
-      subscription = await Subscription.create({
-        user: userId,
-        plan: plan.id,
-        planName: plan.displayName || plan.name,
-        billingModel: plan.billingModel,
-        price: plan.price,
-        currency: plan.currency,
-        status: 'active',
-        startDate: new Date(),
-        endDate: monthFromNow(),
-        features: PLAN_FEATURES.solo,
-        smsCredits: {
-          balance: 0,
-          includedPerCycle: 0,
-          usedThisCycle: 0,
-          purchasedThisCycle: 0,
-        },
-        autoRenew: false
-      });
-    }
-
-    return subscription;
+    const subscription = await Subscription.findOne({ user: userId });
+    return subscription || buildInactiveSubscription(userId);
   }
 
   async getEntitlements(userId) {
@@ -206,7 +202,7 @@ class PlanService {
     const planId = normalizePlanId(subscription.plan);
     const isActive = this.isSubscriptionActive(subscription);
     
-    const features = PLAN_FEATURES[planId] || PLAN_FEATURES.solo;
+    const features = PLAN_FEATURES[planId] || {};
     const lockedFeatures = isActive ? (LOCKED_FEATURES[planId] || {}) : LOCKED_FEATURES.solo;
     
     return {
@@ -326,14 +322,21 @@ class PlanService {
     const planOrder = ['solo', 'smart', 'growth'];
     const currentIndex = planOrder.indexOf(currentPlanId);
     
-    if (currentIndex === -1) return paths;
+    if (currentIndex === -1) {
+      return planOrder.map((planId) => ({
+        id: planId,
+        name: PLANS[planId]?.displayName || PLANS[planId]?.name || planId,
+        price: PLANS[planId]?.price || 0,
+        features: this.getNewFeatures(null, planId)
+      }));
+    }
     
     for (let i = currentIndex + 1; i < planOrder.length; i++) {
       const planId = planOrder[i];
       paths.push({
         id: planId,
-        name: PLANS[planId.toUpperCase()]?.name || planId,
-        price: PLANS[planId.toUpperCase()]?.price || 0,
+        name: PLANS[planId]?.displayName || PLANS[planId]?.name || planId,
+        price: PLANS[planId]?.price || 0,
         features: this.getNewFeatures(currentPlanId, planId)
       });
     }
@@ -357,6 +360,7 @@ class PlanService {
   }
 
   isSubscriptionActive(subscription) {
+    if (!subscription || !subscription.plan) return false;
     if (subscription.plan === 'mizigo') {
       return subscription.status === 'active';
     }

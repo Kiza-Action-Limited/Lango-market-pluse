@@ -4,16 +4,13 @@ import { prefetchData } from '../hooks/useFetchData';
 export const HOME_DATA_KEY = 'home:critical';
 
 export const fetchHomePayload = async () => {
-  const [productsRes, sellersRes] = await Promise.all([
-    productService.getAll({ page: 1, limit: 8, sortBy: 'newest' }),
-    productService.getAll({ page: 1, limit: 120, sortBy: 'newest' }),
-  ]);
+  const productsRes = await productService.getAll({ page: 1, limit: 100, sortBy: 'newest' });
+  const sellerProducts = productsRes?.products || productsRes?.data || [];
+  const featuredProducts = sellerProducts.slice(0, 8);
 
-  const featuredProducts = productsRes?.products || [];
   const categorySet = Array.from(new Set(featuredProducts.map((item) => item?.category).filter(Boolean)));
   const categories = categorySet.map((name) => ({ id: name, name }));
 
-  const sellerProducts = sellersRes?.products || [];
   const bySeller = new Map();
 
   sellerProducts.forEach((product) => {

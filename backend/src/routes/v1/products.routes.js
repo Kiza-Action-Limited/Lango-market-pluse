@@ -3,9 +3,19 @@ const express = require('express');
 const router = express.Router();
 const { body, param, query } = require('express-validator');
 const productController = require('../../controllers/product.controller');
-const { protect: authMiddleware } = require('../../middleware/auth');
+const { protect: authMiddleware, optionalProtect } = require('../../middleware/auth');
 const { upload, handleUploadError } = require('../../middleware/upload');
 const { isFarmerUser } = require('../../utils/userCategory');
+
+router.use((req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    'Surrogate-Control': 'no-store',
+  });
+  next();
+});
 
 // ---------- Public routes ----------
 router.get(
@@ -15,6 +25,8 @@ router.get(
     query('limit').optional().isInt({ min: 1, max: 100 }),
     query('category').optional().isString(),
     query('search').optional().isString(),
+    query('seller').optional().isMongoId(),
+    query('businessType').optional().isString(),
     query('minPrice').optional().isFloat({ min: 0 }),
     query('maxPrice').optional().isFloat({ min: 0 }),
     query('sortBy').optional().isIn(['newest', 'price_asc', 'price_desc', 'popular', 'rating']),
@@ -22,10 +34,19 @@ router.get(
   productController.getProducts
 );
 
+router.get('/featured', productController.getFeaturedProducts);
+
 router.get(
   '/:id/reviews',
   param('id').isMongoId(),
   productController.getProductReviews
+);
+
+router.get(
+  '/:id',
+  optionalProtect,
+  param('id').isMongoId(),
+  productController.getProductById
 );
 
 // ---------- Protected routes (authentication required) ----------
@@ -35,7 +56,6 @@ router.use(authMiddleware);
 router.get('/low-stock', productController.getLowStockProducts);
 router.get('/my-products', productController.getMyProducts);
 router.get('/:id/reviews/eligibility', param('id').isMongoId(), productController.getReviewEligibility);
-router.get('/:id', param('id').isMongoId(), productController.getProductById);
 router.post(
   '/:id/reviews',
   [

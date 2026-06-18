@@ -16,6 +16,18 @@ router.post('/mpesa/stkpush', requireVerified, [
 
 router.get('/mpesa/status/:checkoutRequestId', paymentController.checkMpesaStatus);
 
+router.post('/mpesa/subscription/stkpush', [
+  body('planId').isIn(['solo', 'smart', 'growth']).withMessage('Choose a paid seller plan'),
+  body('phoneNumber').optional().matches(/^(\+?254|0)?[71][0-9]{8}$/).withMessage('Invalid M-Pesa phone number'),
+], subscriptionGate.checkRole('OWNER'), paymentController.initiateSubscriptionMpesaPayment);
+
+router.get(
+  '/mpesa/subscription/status/:checkoutRequestId',
+  param('checkoutRequestId').isString().isLength({ min: 5 }),
+  subscriptionGate.checkRole('OWNER'),
+  paymentController.checkSubscriptionMpesaStatus
+);
+
 // Wallet
 router.get('/wallet/balance', subscriptionGate.checkRole('OWNER', 'FLEET_OWNER'), paymentController.getWalletBalance);
 router.post('/wallet/transfer', [

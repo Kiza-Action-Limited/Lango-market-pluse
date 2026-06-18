@@ -5,6 +5,9 @@ const Category = require('../models/Category.model');
 const Transaction = require('../models/Transaction.model');
 const Logistics = require('../models/Logistics.model');
 const Analytics = require('../models/Analytics.model');
+const Subscription = require('../models/Subscription.model');
+const billingService = require('../services/subscription/billing.service');
+const { PLANS } = require('../config/subscriptionPlans');
 const { validationResult } = require('express-validator');
 
 /**
@@ -36,17 +39,17 @@ exports.getStats = async (req, res, next) => {
     
     // Revenue statistics
     const revenueResult = await Order.aggregate([
-      { $match: { status: { $ne: 'cancelled' }, paymentStatus: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$total' } } }
+      { $match: { status: { $nin: ['cancelled', 'REFUNDED', 'EXPIRED'] } } },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
     ]);
     const totalRevenue = revenueResult[0]?.total || 0;
     
     // Payment statistics
     const paymentStats = await Order.aggregate([
       { $group: { 
-        _id: '$paymentStatus', 
+        _id: '$status',
         count: { $sum: 1 },
-        amount: { $sum: '$total' }
+        amount: { $sum: '$totalAmount' }
       }}
     ]);
     
@@ -58,7 +61,14 @@ exports.getStats = async (req, res, next) => {
     const recentOrders = await Order.find()
       .sort('-createdAt')
       .limit(5)
-      .populate('customer', 'name');
+      .populate('buyer', 'fullName name email phone userType role businessType')
+      .lean();
+
+    const recentActivity = recentOrders.map((order) => ({
+      ...order,
+      customer: order.buyer,
+      total: order.totalAmount,
+    }));
 
     res.status(200).json({
       success: true,
@@ -69,7 +79,7 @@ exports.getStats = async (req, res, next) => {
         revenue: { total: totalRevenue, averageOrderValue: totalOrders > 0 ? totalRevenue / totalOrders : 0 },
         payments: paymentStats,
         logistics: { activeDeliveries, completedDeliveries },
-        recentActivity: recentOrders
+        recentActivity
       }
     });
   } catch (error) {
@@ -138,7 +148,7 @@ exports.getUserDetails = async (req, res, next) => {
     }
     const userId = user._id;
     
-    const orderMatch = { $or: [{ buyer: userId }, { customer: userId }, { seller: userId }] };
+    const orderMatch = { $or: [{ buyer: userId }, { seller: userId }] };
     const [orderStats, recentOrders, sellerProducts, buyerOrderCount, sellerOrderCount] = await Promise.all([
       Order.aggregate([
       { $match: orderMatch },
@@ -178,7 +188,7 @@ exports.getUserDetails = async (req, res, next) => {
         .sort('-createdAt')
         .limit(10)
         .lean(),
-      Order.countDocuments({ $or: [{ buyer: userId }, { customer: userId }] }),
+      Order.countDocuments({ buyer: userId }),
       Order.countDocuments({ seller: userId }),
     ]);
 
@@ -252,6 +262,156 @@ exports.updateUser = async (req, res, next) => {
       success: true,
       message: 'User updated successfully',
       user
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get seller subscriptions for super-admin management
+ * GET /api/v1/admin/subscriptions
+ */
+exports.getSubscriptions = async (req, res, next) => {
+  try {
+    const { status, plan, search, page = 1, limit = 50 } = req.query;
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
+
+    const sellerQuery = {
+      role: { $ne: 'admin' },
+      $or: [
+        { role: { $in: ['seller', 'farmer', 'logistics'] } },
+        { businessType: { $in: ['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business', 'logistics'] } },
+      ],
+    };
+
+    if (search) {
+      const searchFilter = [
+        { fullName: { $regex: search, $options: 'i' } },
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { businessName: { $regex: search, $options: 'i' } },
+      ];
+      sellerQuery.$and = [{ $or: sellerQuery.$or }, { $or: searchFilter }];
+      delete sellerQuery.$or;
+    }
+
+    const sellers = await User.find(sellerQuery)
+      .select('fullName name email phone role businessType businessName subscriptionTier subscriptionExpiry createdAt')
+      .sort('-createdAt')
+      .skip((pageNumber - 1) * pageSize)
+      .limit(pageSize)
+      .lean();
+
+    const sellerIds = sellers.map((seller) => seller._id);
+    const subscriptions = await Subscription.find({ user: { $in: sellerIds } }).lean();
+    const subscriptionByUser = new Map(subscriptions.map((subscription) => [String(subscription.user), subscription]));
+
+    const rows = sellers
+      .map((seller) => {
+        const subscription = subscriptionByUser.get(String(seller._id)) || null;
+        return {
+          seller,
+          subscription,
+          active: Boolean(subscription?.status === 'active' && (subscription.plan === 'mizigo' || !subscription.endDate || new Date(subscription.endDate) > new Date())),
+        };
+      })
+      .filter((row) => {
+        if (status && status !== 'all') {
+          const rowStatus = row.subscription?.status || 'inactive';
+          return rowStatus === status;
+        }
+        if (plan && plan !== 'all') return row.subscription?.plan === plan;
+        return true;
+      });
+
+    const [totalSellers, subscriptionStats] = await Promise.all([
+      User.countDocuments(sellerQuery),
+      Subscription.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            amount: { $sum: '$price' },
+          },
+        },
+      ]),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: rows,
+      plans: Object.values(PLANS).map((planData) => ({
+        id: planData.id,
+        name: planData.displayName || planData.name,
+        price: planData.price,
+        billingModel: planData.billingModel,
+      })),
+      stats: subscriptionStats,
+      pagination: {
+        page: pageNumber,
+        limit: pageSize,
+        total: totalSellers,
+        pages: Math.ceil(totalSellers / pageSize),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Create or update a seller subscription as super admin
+ * PUT /api/v1/admin/subscriptions/:userId
+ */
+exports.setSubscription = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const subscription = await billingService.setSubscriptionByAdmin(req.user.id, req.params.userId, {
+      planId: req.body.planId,
+      amount: req.body.amount,
+      status: req.body.status || 'active',
+      endDate: req.body.endDate,
+      autoRenew: req.body.autoRenew,
+      note: req.body.note,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Seller subscription updated successfully',
+      data: subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Cancel a seller subscription as super admin
+ * DELETE /api/v1/admin/subscriptions/:userId
+ */
+exports.cancelSellerSubscription = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const result = await billingService.cancelSubscription(
+      req.params.userId,
+      req.body?.reason || `Cancelled by admin ${req.user.id}`
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Seller subscription cancelled successfully',
+      data: result,
     });
   } catch (error) {
     next(error);
@@ -364,31 +524,44 @@ exports.getAllOrders = async (req, res, next) => {
     }
     
     let orders = await Order.find(query)
-      .populate('customer', 'name email phone userType')
-      .populate('seller', 'name businessName')
-      .populate('items.product', 'name images')
-      .populate('logistics', 'trackingNumber status carrier')
+      .populate('buyer', 'fullName name email phone userType role businessType')
+      .populate('seller', 'fullName name businessName email phone role businessType')
+      .populate('product', 'name images price category')
       .sort('-createdAt')
       .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
     
     // Filter by user type if specified
     if (userType && userType !== 'all') {
-      orders = orders.filter(order => order.customer?.userType === userType);
+      orders = orders.filter(order => order.buyer?.userType === userType);
     }
+
+    const logisticsRecords = await Logistics.find({ order: { $in: orders.map((order) => order._id) } })
+      .select('order trackingNumber status carrier estimatedDelivery')
+      .lean();
+    const logisticsByOrder = new Map(logisticsRecords.map((record) => [String(record.order), record]));
     
     const total = await Order.countDocuments(query);
     
     // Enhanced order data with analytics
     const enhancedOrders = orders.map(order => ({
-      ...order.toObject(),
+      ...order,
+      customer: order.buyer,
+      items: [{
+        product: order.product,
+        quantity: order.quantity,
+        price: order.unitPrice,
+      }],
+      total: order.totalAmount,
+      logistics: logisticsByOrder.get(String(order._id)) || null,
       timeline: getOrderTimeline(order),
       estimatedDelivery: calculateEstimatedDelivery(order.createdAt),
       paymentBreakdown: {
-        subtotal: order.subtotal,
-        tax: order.tax,
-        shipping: order.shipping,
-        total: order.total
+        subtotal: order.totalAmount,
+        tax: 0,
+        shipping: 0,
+        total: order.totalAmount
       }
     }));
     
@@ -479,12 +652,11 @@ exports.getAllProducts = async (req, res, next) => {
     // Enhanced product analytics
     const enhancedProducts = await Promise.all(products.map(async (product) => {
       const salesData = await Order.aggregate([
-        { $unwind: '$items' },
-        { $match: { 'items.product': product._id, status: 'delivered' } },
+        { $match: { product: product._id, status: 'delivered' } },
         { $group: {
           _id: null,
-          totalSold: { $sum: '$items.quantity' },
-          totalRevenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
+          totalSold: { $sum: '$quantity' },
+          totalRevenue: { $sum: '$totalAmount' }
         }}
       ]);
       
@@ -617,7 +789,11 @@ exports.getLogistics = async (req, res, next) => {
     if (carrier && carrier !== 'all') query.carrier = carrier;
     
     const logistics = await Logistics.find(query)
-      .populate('order', 'orderNumber customer total')
+      .populate({
+        path: 'order',
+        select: 'orderNumber buyer totalAmount',
+        populate: { path: 'buyer', select: 'fullName name email phone userType' },
+      })
       .populate('driver', 'name phone')
       .sort('-createdAt')
       .skip((page - 1) * limit)
@@ -701,27 +877,26 @@ exports.getAnalytics = async (req, res, next) => {
       { $match: { ...dateFilter, status: 'delivered' } },
       { $lookup: {
         from: 'users',
-        localField: 'customer',
+        localField: 'buyer',
         foreignField: '_id',
         as: 'customerData'
       }},
       { $unwind: '$customerData' },
       { $group: {
         _id: '$customerData.userType',
-        totalSales: { $sum: '$total' },
+        totalSales: { $sum: '$totalAmount' },
         orderCount: { $sum: 1 },
-        averageOrderValue: { $avg: '$total' }
+        averageOrderValue: { $avg: '$totalAmount' }
       }}
     ]);
     
     // Top selling products
     const topProducts = await Order.aggregate([
       { $match: { ...dateFilter, status: 'delivered' } },
-      { $unwind: '$items' },
       { $group: {
-        _id: '$items.product',
-        totalSold: { $sum: '$items.quantity' },
-        revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } }
+        _id: '$product',
+        totalSold: { $sum: '$quantity' },
+        revenue: { $sum: '$totalAmount' }
       }},
       { $sort: { totalSold: -1 } },
       { $limit: 10 },
@@ -743,7 +918,7 @@ exports.getAnalytics = async (req, res, next) => {
           month: { $month: '$createdAt' },
           week: { $week: '$createdAt' }
         },
-        totalRevenue: { $sum: '$total' },
+        totalRevenue: { $sum: '$totalAmount' },
         orderCount: { $sum: 1 }
       }},
       { $sort: { '_id.year': 1, '_id.month': 1, '_id.week': 1 } }
@@ -752,11 +927,10 @@ exports.getAnalytics = async (req, res, next) => {
     // Farmer performance
     const farmerPerformance = await Order.aggregate([
       { $match: { ...dateFilter, status: 'delivered' } },
-      { $unwind: '$items' },
       { $group: {
-        _id: '$items.farmer',
-        totalSold: { $sum: '$items.quantity' },
-        revenue: { $sum: { $multiply: ['$items.quantity', '$items.price'] } },
+        _id: '$seller',
+        totalSold: { $sum: '$quantity' },
+        revenue: { $sum: '$totalAmount' },
         orders: { $addToSet: '$_id' }
       }},
       { $project: {

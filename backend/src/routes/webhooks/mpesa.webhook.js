@@ -1,8 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const mpesaService = require('../../services/payment/mpesa.service');
+const billingService = require('../../services/subscription/billing.service');
 const darajaIpWhitelist = require('../../middleware/darajaIpWhitelist');
 const { extractStkMetadata } = require('../../config/mpesa');
+
+const getMetadataValue = (metadata, key) => {
+  if (!metadata) return undefined;
+  if (typeof metadata.get === 'function') return metadata.get(key);
+  return metadata[key];
+};
 
 router.use(darajaIpWhitelist);
 
@@ -17,12 +24,22 @@ const stkCallbackHandler = async (req, res) => {
 
     if (stkCallback.ResultCode === 0) {
       const metadata = extractStkMetadata(stkCallback);
-      await mpesaService.handleSuccessCallback({
+      const result = await mpesaService.handleSuccessCallback({
         checkoutRequestId: stkCallback.CheckoutRequestID,
         amount: metadata.amount,
         transactionId: metadata.mpesaReceiptNumber,
         transactionDate: metadata.transactionDate,
       });
+
+      const payment = result?.payment;
+      const planId = getMetadataValue(payment?.metadata, 'planId');
+      const purpose = getMetadataValue(payment?.metadata, 'purpose');
+      if (payment && purpose === 'subscription' && planId) {
+        await billingService.activatePaidSubscription(payment.user, planId, {
+          paymentReference: payment.mpesaReceiptNumber || payment.transactionId || stkCallback.CheckoutRequestID,
+          payment,
+        });
+      }
     } else {
       await mpesaService.handleFailureCallback({
         checkoutRequestId: stkCallback.CheckoutRequestID,

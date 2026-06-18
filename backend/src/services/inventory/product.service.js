@@ -3,6 +3,8 @@ const User = require('../../models/User.model');
 const { scarcityQueue } = require('../../config/redis');
 const logger = require('../../utils/logger');
 
+const PRODUCT_LIMIT_MAX = 100;
+
 class ProductService {
   async createProduct(data) {
     const product = await Product.create(data);
@@ -31,7 +33,12 @@ class ProductService {
 
     if (businessType) {
       const normalizedBusinessType = String(businessType).trim().toLowerCase();
-      const matchingSellers = await User.find({ businessType: normalizedBusinessType }).select('_id');
+      const matchingSellers = await User.find({
+        $or: [
+          { businessType: normalizedBusinessType },
+          { role: normalizedBusinessType },
+        ],
+      }).select('_id');
       const sellerIds = matchingSellers.map((u) => u._id);
       query.seller = { $in: sellerIds };
     }
@@ -51,7 +58,7 @@ class ProductService {
     }
 
     const pageNum = Number(page) > 0 ? Number(page) : 1;
-    const limitNum = Number(limit) > 0 ? Number(limit) : 20;
+    const limitNum = Math.min(Number(limit) > 0 ? Number(limit) : 20, PRODUCT_LIMIT_MAX);
     const skip = (pageNum - 1) * limitNum;
 
     const sortMap = {
