@@ -1,7 +1,7 @@
 // src/pages/Orders.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FaEye, FaTruck, FaBox, FaClock, FaCheckCircle, FaBan, FaBrain } from 'react-icons/fa';
+import { FaEye, FaTruck, FaBox, FaClock, FaCheckCircle, FaBan, FaBrain, FaShieldAlt } from 'react-icons/fa';
 import { formatCurrency } from '../utils/formatters';
 import { orderService } from '../services/orderService';
 import { normalizeOrder } from '../utils/orderAdapter';
@@ -102,6 +102,17 @@ const Orders = () => {
     shipped: orders.filter(o => ['shipped', 'dispatched', 'IN_TRANSIT'].includes(o.status)).length,
     delivered: orders.filter(o => ['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(o.status)).length,
     totalSpent: orders.reduce((sum, o) => sum + o.total, 0),
+  };
+
+  const getEscrowLabel = (order) => {
+    const status = order.escrow?.status || order.escrow?.escrowStatus;
+    if (status) return String(status).replace(/_/g, ' ');
+    if (['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(order.status)) return 'awaiting payment';
+    if (['FUNDS_HELD', 'payment_escrowed', 'processing'].includes(order.status)) return 'funds held';
+    if (['IN_TRANSIT', 'dispatched'].includes(order.status)) return 'in transit';
+    if (['DELIVERED', 'delivered'].includes(order.status)) return 'delivery window';
+    if (['RELEASED', 'completed'].includes(order.status)) return 'released';
+    return 'not started';
   };
 
   if (loading) {
@@ -268,13 +279,19 @@ const Orders = () => {
                 </div>
                 
                 <div className="mt-4 pt-4 border-t flex flex-wrap justify-between items-center gap-3">
-                  <Link
-                    to={`/orders/${order.id}/track`}
-                    className="flex items-center gap-1 text-[#F97316] hover:text-[#FB923C] transition-colors font-medium"
-                  >
-                    <FaTruck size={14} />
-                    Track Order
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Link
+                      to={`/buyer/orders/${order.id}/track`}
+                      className="flex items-center gap-1 text-[#F97316] hover:text-[#FB923C] transition-colors font-medium"
+                    >
+                      <FaTruck size={14} />
+                      Track Order
+                    </Link>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-semibold text-green-800">
+                      <FaShieldAlt />
+                      Escrow: {getEscrowLabel(order)}
+                    </span>
+                  </div>
                   
                   <div className="flex gap-3">
                     {['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(order.status) && (
@@ -286,7 +303,7 @@ const Orders = () => {
                       </button>
                     )}
                     <Link
-                      to={`/orders/${order.id}`}
+                      to={`/buyer/orders/${order.id}/track`}
                       className="flex items-center gap-1 text-[#6B7280] hover:text-[#F97316] transition-colors font-medium"
                     >
                       <FaEye size={14} />

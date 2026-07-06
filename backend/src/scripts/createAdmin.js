@@ -1,62 +1,96 @@
-const { MongoClient } = require('mongodb');
-const bcrypt = require('bcryptjs');
 const path = require('path');
+const dns = require('dns').promises;
+const mongoose = require('mongoose');
+const User = require('../models/User.model');
+
 require('dotenv').config({
-  path: path.resolve(__dirname, '../../.env')
+  path: path.resolve(__dirname, '../../.env'),
 });
 
-const uri = process.env.MONGODB_URI;
+const DEFAULT_LOCAL_URI = 'mongodb://127.0.0.1:27017/Marketpluse';
 
-async function insertAdmin() {
-  console.log("ENV CHECK:", uri); // DEBUG (IMPORTANT)
+const redactMongoUri = (uri) => String(uri || 'missing')
+  .replace(/\/\/([^:/@]+):([^@]+)@/, '//***:***@');
 
-  if (!uri) {
-    console.log("❌ MONGODB_URI is missing. Check your .env file");
+const withTimeout = (promise, timeoutMs, message) => Promise.race([
+  promise,
+  new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), timeoutMs);
+  }),
+]);
+
+const preflightMongoUri = async (uri) => {
+  if (!uri.startsWith('mongodb+srv://')) return;
+  const host = new URL(uri.replace('mongodb+srv://', 'https://')).hostname;
+  const dnsTimeoutMs = Number(process.env.MONGODB_DNS_TIMEOUT_MS || 3000);
+  await withTimeout(
+    dns.resolveSrv(`_mongodb._tcp.${host}`),
+    dnsTimeoutMs,
+    `DNS lookup timed out for ${host} after ${dnsTimeoutMs}ms`
+  );
+};
+
+const connect = async () => {
+  const uris = [
+    process.env.MONGODB_URI,
+    process.env.LOCAL_MONGODB_URI || DEFAULT_LOCAL_URI,
+  ].filter(Boolean);
+
+  let lastError = null;
+  for (const uri of uris) {
+    try {
+      await preflightMongoUri(uri);
+      await mongoose.connect(uri, {
+        serverSelectionTimeoutMS: Number(process.env.MONGODB_TIMEOUT_MS || 8000),
+      });
+      console.log(`Connected to MongoDB: ${redactMongoUri(uri)}`);
+      console.log(`DB: ${mongoose.connection.name}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.warn(`MongoDB unavailable: ${redactMongoUri(uri)} - ${error.message}`);
+    }
+  }
+
+  throw lastError || new Error('No MongoDB URI configured');
+};
+
+const createAdmin = async () => {
+  const email = String(process.env.SEED_ADMIN_EMAIL || 'admin@langomarket.com').toLowerCase();
+  const password = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
+  const phone = process.env.SEED_ADMIN_PHONE || '254700000000';
+
+  const existing = await User.findOne({ email });
+  if (existing) {
+    console.log(`Admin already exists: ${email}`);
     return;
   }
 
-  const client = new MongoClient(uri);
+  await User.create({
+    fullName: 'System Admin',
+    email,
+    phone,
+    password,
+    role: 'admin',
+    isEmailVerified: true,
+    isPhoneVerified: true,
+    isActive: true,
+    verificationStatus: 'verified',
+  });
 
+  console.log('Admin created successfully');
+  console.log(`Email: ${email}`);
+  console.log(`Password: ${password}`);
+};
+
+(async () => {
   try {
-    console.log("🔄 Connecting to MongoDB Atlas...");
-    await client.connect();
-    console.log("✅ Connected!");
-
-    const db = client.db("Marketpluse");
-    const users = db.collection("users");
-
-    const existing = await users.findOne({
-      email: "admin@langomarket.com"
-    });
-
-    if (existing) {
-      console.log("⚠️ Admin already exists");
-      return;
-    }
-
-    const hashedPassword = await bcrypt.hash("Admin123!", 12);
-
-    const result = await users.insertOne({
-      firstName: "System",
-      lastName: "Admin",
-      email: "admin@langomarket.com",
-      phone: "+254700000000",
-      password: hashedPassword,
-      role: "admin",
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
-
-    console.log("🎉 Admin created successfully!");
-    console.log("ID:", result.insertedId);
-
-  } catch (err) {
-    console.error("❌ Error:", err.message);
+    await connect();
+    await createAdmin();
+  } catch (error) {
+    console.error('Create admin failed:', error.message);
+    process.exitCode = 1;
   } finally {
-    await client.close();
-    console.log("🔌 Disconnected");
+    await mongoose.disconnect();
   }
-}
-
-insertAdmin();
+})();

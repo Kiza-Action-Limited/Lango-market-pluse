@@ -9,9 +9,53 @@ import { DonutGauge, KpiCard, Panel, ProgressRow, StatusPill } from '../componen
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { productService } from '../services/productService';
 import { formatCurrency } from '../utils/formatters';
+import { formatProductCategory, getEffectiveLowStockThreshold } from '../utils/inventorySensitivity';
 
 const getProductId = (product) => product?._id || product?.id;
 const getStock = (product) => Number(product?.quantityAvailable ?? product?.stock ?? product?.quantity ?? product?.inventory ?? 0);
+const getSku = (product) => product?.sku || product?.trackingSku || product?.SKU || product?.stockKeepingUnit || 'SKU pending';
+const warehouseStatusLabels = {
+  seller_storage: 'Seller storage',
+  warehouse_pending: 'Warehouse pending',
+  warehouse_received: 'Warehouse received',
+  dispatch_ready: 'Dispatch ready',
+  restricted: 'Restricted hold',
+};
+const getWarehouseStatus = (product) => warehouseStatusLabels[product?.warehouseStatus] || 'Seller storage';
+const getTierPricing = (product) => (
+  Array.isArray(product?.priceTiers)
+    ? product.priceTiers
+    : Array.isArray(product?.wholesale?.priceTiers)
+      ? product.wholesale.priceTiers
+      : []
+);
+const getInventoryGraph = (product) => {
+  const graph = Array.isArray(product?.inventoryGraph)
+    ? product.inventoryGraph
+    : Array.isArray(product?.inventoryHistory)
+      ? product.inventoryHistory
+      : [];
+
+  if (graph.length > 0) {
+    return graph
+      .map((point) => ({
+        onHand: Number(point.onHand ?? point.quantityAvailable ?? point.quantity ?? 0),
+        reserved: Number(point.reserved ?? point.reservedQuantity ?? 0),
+        available: Number(point.available ?? point.availableQuantity ?? point.onHand ?? 0),
+        recordedAt: point.recordedAt || point.createdAt,
+      }))
+      .slice(-12);
+  }
+
+  const stock = getStock(product);
+  return [{ onHand: stock, reserved: Number(product?.reservedQuantity || 0), available: stock }];
+};
+const formatMovementDate = (value) => {
+  if (!value) return 'Now';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Now';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
 const getImage = (product) => {
   const image = product?.images?.[0];
   return typeof image === 'string' ? image : image?.url || '';
@@ -22,7 +66,67 @@ const isActiveProduct = (product) => {
   if (typeof product?.status === 'string') return product.status.toLowerCase() === 'active';
   return true;
 };
-const categoryLabel = (product) => product?.category?.name || product?.category || 'Other';
+const categoryLabel = (product) => formatProductCategory(product?.category);
+
+const InventoryMovementHistory = ({ product }) => {
+  const rows = getInventoryGraph(product).slice(-4).reverse();
+
+  return (
+    <div className="rounded-md border border-gray-100 bg-white p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Movement history</p>
+        <span className="text-[11px] text-gray-500">{rows.length} event{rows.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="space-y-2">
+        {rows.map((point, index) => (
+          <div key={`${point.recordedAt || 'movement'}-${index}`} className="grid grid-cols-[1fr_auto] gap-2 text-xs">
+            <div className="min-w-0">
+              <p className="truncate font-medium text-[#111827]">{String(point.event || 'inventory_adjusted').replace(/_/g, ' ')}</p>
+              <p className="text-gray-500">{formatMovementDate(point.recordedAt)}</p>
+            </div>
+            <div className="text-right">
+              <p className="font-semibold text-[#111827]">{point.onHand} on hand</p>
+              <p className="text-gray-500">{point.available} available</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const InventoryQuantityGraph = ({ product }) => {
+  const points = getInventoryGraph(product);
+  const maxValue = Math.max(...points.map((point) => point.onHand), 1);
+
+  return (
+    <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inventory graph</p>
+        <p className="text-xs font-medium text-[#111827]">{getStock(product)} {product?.unit || 'units'}</p>
+      </div>
+      <div className="flex h-20 items-end gap-1">
+        {points.map((point, index) => {
+          const height = Math.max(8, (point.onHand / maxValue) * 100);
+          return (
+            <div key={`${point.recordedAt || 'point'}-${index}`} className="flex min-w-0 flex-1 flex-col items-center justify-end">
+              <div
+                title={`${point.onHand} on hand, ${point.available} available, ${point.reserved} reserved`}
+                className="w-full rounded-t bg-[#F97316]"
+                style={{ height: `${height}%` }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
+        <span>Oldest</span>
+        <span>Quantity, not percentage</span>
+        <span>Latest</span>
+      </div>
+    </div>
+  );
+};
 
 const SellerProducts = () => {
   const { hasFeature } = useAuth();
@@ -75,12 +179,13 @@ const SellerProducts = () => {
       const active = isActiveProduct(product);
       const matchesSearch =
         String(product?.name || '').toLowerCase().includes(query) ||
-        String(categoryLabel(product)).toLowerCase().includes(query);
+        String(categoryLabel(product)).toLowerCase().includes(query) ||
+        String(getSku(product)).toLowerCase().includes(query);
       const matchesFilter =
         filter === 'all' ||
         (filter === 'active' && active) ||
         (filter === 'inactive' && !active) ||
-        (filter === 'low-stock' && stock > 0 && stock <= Number(product?.minThreshold ?? 10)) ||
+        (filter === 'low-stock' && stock > 0 && stock <= getEffectiveLowStockThreshold(product)) ||
         (filter === 'out-of-stock' && stock <= 0);
       return matchesSearch && matchesFilter;
     });
@@ -99,7 +204,7 @@ const SellerProducts = () => {
   const activeCount = products.filter(isActiveProduct).length;
   const lowStockItems = products.filter((product) => {
     const stock = getStock(product);
-    return stock > 0 && stock <= Number(product?.minThreshold ?? 10);
+    return stock > 0 && stock <= getEffectiveLowStockThreshold(product);
   });
   const outOfStockItems = products.filter((product) => getStock(product) <= 0);
   const inventoryValue = products.reduce((sum, product) => sum + (Number(product?.price || 0) * getStock(product)), 0);
@@ -212,17 +317,22 @@ const SellerProducts = () => {
 
         <Panel title="Stock Alerts" className="xl:col-span-8">
           <div className="grid gap-3 md:grid-cols-2">
-            {[...outOfStockItems, ...lowStockItems].slice(0, 6).map((product) => (
-              <div key={getProductId(product)} className="rounded-md border border-amber-100 bg-amber-50 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[#111827]">{product.name}</p>
-                    <p className="mt-1 text-xs text-amber-700">Stock {getStock(product)} in {categoryLabel(product)}</p>
+            {[...outOfStockItems, ...lowStockItems].slice(0, 6).map((product) => {
+              const stock = getStock(product);
+              const threshold = getEffectiveLowStockThreshold(product);
+              const critical = threshold > 0 && stock <= Math.max(1, Math.ceil(threshold / 2));
+              return (
+                <div key={getProductId(product)} className="rounded-md border border-amber-100 bg-amber-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#111827]">{product.name}</p>
+                      <p className="mt-1 text-xs text-amber-700">Stock {stock} in {categoryLabel(product)}. Alert threshold {threshold}.</p>
+                    </div>
+                    <StatusPill tone={stock <= 0 || critical ? 'red' : 'amber'}>{stock <= 0 ? 'out' : critical ? 'critical' : 'low'}</StatusPill>
                   </div>
-                  <StatusPill tone={getStock(product) <= 0 ? 'red' : 'amber'}>{getStock(product) <= 0 ? 'out' : 'low'}</StatusPill>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {!outOfStockItems.length && !lowStockItems.length && <p className="text-sm text-gray-500">No active stock alerts.</p>}
           </div>
         </Panel>
@@ -243,6 +353,9 @@ const SellerProducts = () => {
                 const stock = getStock(product);
                 const active = isActiveProduct(product);
                 const image = getImage(product);
+                const tiers = getTierPricing(product);
+                const moq = product.minimumOrderQuantity ?? product.wholesale?.minimumOrderQuantity ?? 1;
+                const rfqEnabled = product.rfqEnabled ?? product.wholesale?.rfqEnabled ?? true;
                 return (
                   <article key={id || product.name} className="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
                     <div className="h-44 bg-gray-100">
@@ -264,13 +377,52 @@ const SellerProducts = () => {
                       </div>
                       <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
                         <div className="rounded-md bg-gray-50 p-2">
+                          <p className="text-xs text-gray-500">Tracking SKU</p>
+                          <p className="truncate font-semibold text-[#111827]" title={getSku(product)}>{getSku(product)}</p>
+                        </div>
+                        <div className="rounded-md bg-gray-50 p-2">
                           <p className="text-xs text-gray-500">Stock</p>
                           <p className="font-semibold text-[#111827]">{stock}</p>
+                        </div>
+                        <div className="rounded-md bg-gray-50 p-2">
+                          <p className="text-xs text-gray-500">Reserved</p>
+                          <p className="font-semibold text-[#111827]">{Number(product.reservedQuantity || 0)}</p>
                         </div>
                         <div className="rounded-md bg-gray-50 p-2">
                           <p className="text-xs text-gray-500">Rating</p>
                           <p className="font-semibold text-[#111827]">{Number(product.rating || 0).toFixed(1)}</p>
                         </div>
+                        <div className="rounded-md bg-gray-50 p-2">
+                          <p className="text-xs text-gray-500">MOQ</p>
+                          <p className="font-semibold text-[#111827]">{moq}</p>
+                        </div>
+                        <div className="rounded-md bg-gray-50 p-2">
+                          <p className="text-xs text-gray-500">RFQ</p>
+                          <p className="font-semibold text-[#111827]">{rfqEnabled ? 'Open' : 'Closed'}</p>
+                        </div>
+                        <div className="col-span-2 rounded-md bg-gray-50 p-2">
+                          <p className="text-xs text-gray-500">Warehouse status</p>
+                          <p className="truncate font-semibold text-[#111827]">{getWarehouseStatus(product)}</p>
+                        </div>
+                      </div>
+                      {tiers.length > 0 && (
+                        <div className="mb-4 rounded-md border border-blue-100 bg-blue-50 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">Tier pricing</p>
+                          <div className="space-y-1">
+                            {tiers.slice(0, 3).map((tier, index) => (
+                              <div key={`${tier.minQuantity}-${tier.unitPrice}-${index}`} className="flex items-center justify-between gap-3 text-xs text-blue-900">
+                                <span>{tier.label || `${tier.minQuantity}+ ${product.unit || 'units'}`}</span>
+                                <span className="font-semibold">{formatCurrency(tier.unitPrice)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="mb-4">
+                        <InventoryQuantityGraph product={product} />
+                      </div>
+                      <div className="mb-4">
+                        <InventoryMovementHistory product={product} />
                       </div>
                       <div className="flex items-center gap-2">
                         <Link to={`/seller/edit-product/${id}`} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-gray-200 text-sm font-medium text-[#111827] hover:bg-gray-50">

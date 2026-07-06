@@ -36,6 +36,11 @@ router.get(
 
 router.get('/featured', productController.getFeaturedProducts);
 
+// Protected named routes must stay before /:id so they are not parsed as ObjectIds.
+router.get('/low-stock', authMiddleware, productController.getLowStockProducts);
+router.get('/my-products', authMiddleware, productController.getMyProducts);
+router.get('/scarcity-board', authMiddleware, productController.getScarcityBoard);
+
 router.get(
   '/:id/reviews',
   param('id').isMongoId(),
@@ -52,9 +57,6 @@ router.get(
 // ---------- Protected routes (authentication required) ----------
 router.use(authMiddleware);
 
-// Low stock must come before /:id to avoid treating "low-stock" as an ID
-router.get('/low-stock', productController.getLowStockProducts);
-router.get('/my-products', productController.getMyProducts);
 router.get('/:id/reviews/eligibility', param('id').isMongoId(), productController.getReviewEligibility);
 router.post(
   '/:id/reviews',
@@ -75,10 +77,35 @@ router.post(
     body('name').notEmpty().withMessage('Name is required'),
     body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
     body('quantityAvailable').isInt({ min: 0 }).withMessage('Quantity must be a non-negative integer'),
+    body('minThreshold').optional().isInt({ min: 0 }).withMessage('Alert threshold must be a non-negative integer'),
+    body('minimumOrderQuantity').optional().isInt({ min: 1 }).withMessage('MOQ must be at least 1'),
+    body('rfqEnabled').optional().isBoolean().withMessage('RFQ status must be true or false'),
+    body('warehouseStatus')
+      .optional()
+      .isIn(['seller_storage', 'warehouse_pending', 'warehouse_received', 'dispatch_ready', 'restricted'])
+      .withMessage('Choose a valid warehouse status'),
     body('category')
       .custom((value, { req }) => {
         if (isFarmerUser(req.user)) return true;
-        return ['electronics', 'fashion', 'home-garden', 'beauty-health', 'sports-outdoor', 'grocery', 'vegetables'].includes(value);
+        return [
+          'electronics',
+          'fashion',
+          'home-garden',
+          'beauty-health',
+          'sports-outdoor',
+          'grocery',
+          'vegetables',
+          'grains-cereals',
+          'food-staples',
+          'sugar-baking',
+          'cooking-oil',
+          'dairy-eggs',
+          'meat-fish',
+          'beverages',
+          'household',
+          'farm-inputs',
+          'other',
+        ].includes(value);
       })
       .withMessage('Choose a valid category. Farmer products are categorized as Grocery automatically.'),
     body('unit').isIn(['kg', 'g', 'ton', 'piece', 'bunch', 'litre']).withMessage('Valid unit required'),

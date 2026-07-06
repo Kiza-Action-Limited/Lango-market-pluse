@@ -3,7 +3,8 @@ const Subscription = require('../../models/Subscription.model');
 const Transaction = require('../../models/Transaction.model');
 const User = require('../../models/User.model');
 const planService = require('./plan.service');
-const { PLAN_IDS, PLANS, normalizePlanId } = require('../../config/subscriptionPlans');
+const { PLAN_IDS, PLANS, PRODUCT_LIMITS, normalizePlanId } = require('../../config/subscriptionPlans');
+const { PLATFORM_ACCOUNT, buildPlatformRevenueMetadata } = require('../../config/platformAccount');
 const { smsQueue } = require('../../config/redis');
 const logger = require('../../utils/logger');
 const { SELLER_BUSINESS_TYPES, normalizeBusinessType } = require('../../utils/userCategory');
@@ -47,11 +48,13 @@ const PLAN_PRICES = {
 };
 
 const SMS_CREDITS = {
-  solo: 0,
+  solo: 20,
   smart: 500,
   growth: 2000,
   mizigo: 0
 };
+
+const SMS_ENABLED_PLANS = new Set(['solo', 'smart', 'growth']);
 
 const getCycleEnd = (planId) => {
   // Mizigo has no end date (commission-based, no expiry)
@@ -163,22 +166,31 @@ const buildFeatures = (planId) => {
     case 'solo':
       return {
         ...baseFeatures,
-        maxProducts: 30,
-        smsCredits: 0,
+        maxProducts: PRODUCT_LIMITS[PLAN_IDS.SOLO],
+        smsCredits: SMS_CREDITS.solo,
         regionalGuardian: false,
         billGuardian: false,
         assetTracking: false,
         staffRoles: false,
         dailyBurn: false,
-        sendSms: false,
+        sendSms: true,
         restockAlert: false,
-        netProfitGauge: false
+        netProfitGauge: false,
+        productReviews: true,
+        orderNotifications: true,
+        sellerWallet: true,
+        withdrawals: true,
+        escrowOrders: true,
+        rfqInbox: false,
+        relatedProducts: false,
+        logisticsCommandCenter: false,
+        inventoryAlerts: false
       };
       
     case 'smart':
       return {
         ...baseFeatures,
-        maxProducts: Infinity,
+        maxProducts: PRODUCT_LIMITS[PLAN_IDS.SMART],
         smsCredits: 500,
         regionalGuardian: true,
         billGuardian: false,
@@ -187,13 +199,22 @@ const buildFeatures = (planId) => {
         dailyBurn: false,
         sendSms: true,
         restockAlert: true,
-        netProfitGauge: true
+        netProfitGauge: true,
+        productReviews: true,
+        orderNotifications: true,
+        sellerWallet: true,
+        withdrawals: true,
+        escrowOrders: true,
+        rfqInbox: true,
+        relatedProducts: true,
+        logisticsCommandCenter: true,
+        inventoryAlerts: true
       };
       
     case 'growth':
       return {
         ...baseFeatures,
-        maxProducts: Infinity,
+        maxProducts: PRODUCT_LIMITS[PLAN_IDS.GROWTH],
         smsCredits: 2000,
         regionalGuardian: true,
         billGuardian: true,
@@ -202,13 +223,22 @@ const buildFeatures = (planId) => {
         dailyBurn: true,
         sendSms: true,
         restockAlert: true,
-        netProfitGauge: true
+        netProfitGauge: true,
+        productReviews: true,
+        orderNotifications: true,
+        sellerWallet: true,
+        withdrawals: true,
+        escrowOrders: true,
+        rfqInbox: true,
+        relatedProducts: true,
+        logisticsCommandCenter: true,
+        inventoryAlerts: true
       };
       
     case 'mizigo':
       return {
         ...baseFeatures,
-        maxProducts: 0,
+        maxProducts: PRODUCT_LIMITS[PLAN_IDS.MIZIGO],
         smsCredits: 0,
         regionalGuardian: false,
         billGuardian: false,
@@ -326,6 +356,7 @@ class BillingService {
         priceOverridden: paymentMeta?.amountOverride !== undefined && paymentMeta?.amountOverride !== null,
         managedByAdmin: Boolean(paymentMeta?.managedByAdmin),
         managedBy: paymentMeta?.managedBy || null,
+        revenueAccount: paymentMeta?.revenueAccount || PLATFORM_ACCOUNT.name,
       }
     };
 
@@ -349,17 +380,20 @@ class BillingService {
         user: userId,
         type: 'subscription_payment',
         amount: price,
+        balanceBefore: user.walletBalance || 0,
         balanceAfter: user.walletBalance || 0,
         reference: paymentMeta.paymentReference,
         description: `M-Pesa payment for Lango ${planName} plan - ${price} KES`,
-        metadata: {
+        metadata: buildPlatformRevenueMetadata({
           planId: normalizedPlanId,
           planName,
           billingModel: 'monthly',
           includedSmsCredits: SMS_CREDITS[normalizedPlanId],
           paymentCompleted: paymentMeta.paymentCompleted,
-          paymentDate: new Date()
-        }
+          paymentDate: new Date(),
+          sellerUserId: userId,
+          paymentMethod,
+        })
       });
     }
 
@@ -401,6 +435,7 @@ class BillingService {
       paymentReference,
       serverVerified: true,
       source: 'mpesa_verified',
+      revenueAccount: PLATFORM_ACCOUNT.name,
     });
 
     if (payment) {
@@ -634,7 +669,7 @@ class BillingService {
   }
 
   /**
-   * Top up SMS credits (for Smart and Growth plans)
+   * Top up SMS credits (for Solo, Smart, and Growth plans)
    */
   async topupSmsCredits(userId, amount, paymentReference) {
     const amountNum = Number(amount);
@@ -645,8 +680,8 @@ class BillingService {
     const subscription = await Subscription.findOne({ user: userId });
     if (!subscription) throw httpError('No subscription found', 404);
     
-    if (subscription.plan !== 'smart' && subscription.plan !== 'growth') {
-      throw httpError('SMS credits are only available on Smart and Growth plans', 403);
+    if (!SMS_ENABLED_PLANS.has(subscription.plan)) {
+      throw httpError('SMS credits are only available on Solo, Smart, and Growth plans', 403);
     }
     
     if (!paymentReference) {
@@ -730,8 +765,8 @@ class BillingService {
     const subscription = await Subscription.findOne({ user: userId });
     if (!subscription) throw httpError('No subscription found', 404);
     
-    if (subscription.plan !== 'smart' && subscription.plan !== 'growth') {
-      throw httpError('SMS sending is only available on Smart and Growth plans', 403);
+    if (!SMS_ENABLED_PLANS.has(subscription.plan)) {
+      throw httpError('SMS sending is only available on Solo, Smart, and Growth plans', 403);
     }
     
     const currentCredits = getSmsCreditState(subscription);

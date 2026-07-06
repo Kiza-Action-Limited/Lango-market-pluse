@@ -17,9 +17,16 @@ router.get('/plans', subscriptionController.getPlans);
 router.use(authMiddleware);
 
 // Basic subscription info
+router.get('/overview', subscriptionController.getOverview);
 router.get('/me', subscriptionController.getMySubscription);
 router.get('/entitlements', subscriptionController.getMyEntitlements);
 router.get('/upgrade-options', subscriptionController.getUpgradeOptions);
+router.get('/seller-logistics-addon', subscriptionGate.checkRole('OWNER'), subscriptionController.getSellerLogisticsAddon);
+router.put('/seller-logistics-addon', [
+  body('active').optional().isBoolean(),
+  body('sellerHub').optional().isString().trim().isLength({ max: 120 }),
+  body('selectedProviderId').optional({ nullable: true, checkFalsy: true }).isMongoId(),
+], subscriptionGate.checkRole('OWNER'), subscriptionController.updateSellerLogisticsAddon);
 router.get('/check-feature/:feature', subscriptionController.checkFeatureAccess);
 
 // SMS credit management (Plan 2+)

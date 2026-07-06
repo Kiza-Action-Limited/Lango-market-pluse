@@ -54,6 +54,32 @@ const OrderSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    productSubtotal: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    logisticsFee: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    logisticsDistanceKm: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    logisticsPricing: {
+      estimated: { type: Boolean, default: true },
+      origin: AddressSchema,
+      destination: AddressSchema,
+      weightKg: { type: Number, min: 0, default: 0 },
+      ratePerKm: { type: Number, min: 0, default: 0 },
+      weightRate: { type: Number, min: 0, default: 0 },
+      baseFee: { type: Number, min: 0, default: 0 },
+      minimumFee: { type: Number, min: 0, default: 0 },
+      calculationSource: { type: String, trim: true },
+    },
     totalAmount: {
       type: Number,
       required: true,
@@ -87,6 +113,9 @@ const OrderSchema = new mongoose.Schema(
     paidAt: Date,
     deliveredAt: Date,
     releasedAt: Date,
+    inventoryReservedAt: Date,
+    inventoryCommittedAt: Date,
+    inventoryRestockedAt: Date,
     paymentIntentId: String,
     deliveryAddress: AddressSchema,
     deliveryAddressText: {
@@ -118,7 +147,8 @@ const OrderSchema = new mongoose.Schema(
 // Calculate total before validation so required totalAmount is satisfied.
 OrderSchema.pre('validate', function (next) {
   if (this.quantity != null && this.unitPrice != null) {
-    this.totalAmount = Number(this.quantity) * Number(this.unitPrice);
+    this.productSubtotal = Number(this.quantity) * Number(this.unitPrice);
+    this.totalAmount = Number(this.productSubtotal || 0) + Number(this.logisticsFee || 0);
   }
   if (!this.orderNumber && this._id) {
     this.orderNumber = `ORD-${this._id.toString().slice(-8).toUpperCase()}`;

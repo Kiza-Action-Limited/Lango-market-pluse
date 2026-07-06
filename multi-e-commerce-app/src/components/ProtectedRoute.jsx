@@ -15,7 +15,9 @@ const ProtectedRoute = () => {
     );
   }
 
-  return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace state={{ from: location }} />;
+  const loginPath = location.pathname.startsWith('/logistics') ? '/logistics/login' : '/login';
+
+  return isAuthenticated ? <Outlet /> : <Navigate to={loginPath} replace state={{ from: location }} />;
 };
 
 export default ProtectedRoute;

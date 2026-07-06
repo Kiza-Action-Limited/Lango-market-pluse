@@ -5,8 +5,9 @@ const Logistics = require('../../models/Logistics.model');
 const Transaction = require('../../models/Transaction.model');
 const User = require('../../models/User.model');
 const SinkingFund = require('../../models/SinkingFund.model');
+const walletService = require('../payment/wallet.service');
+const productService = require('../inventory/product.service');
 const { escrowQueue } = require('../../config/redis');
-const { b2cPayment, normalizeMpesaPhone } = require('../../config/mpesa');
 const auditService = require('../audit.service');
 const axios = require('axios');
 
@@ -38,6 +39,7 @@ const getId = (value) => value?._id?.toString?.() || value?.toString?.();
 
 class EscrowService {
   async createPendingEscrow(order, { checkoutRequestId, merchantRequestId }) {
+    const logistics = await Logistics.findOne({ order: order._id }).select('_id shippingCost routeInfo');
     const escrow = await Escrow.findOneAndUpdate(
       { order: order._id },
       {
@@ -48,10 +50,19 @@ class EscrowService {
           amount: order.totalAmount,
           status: 'AWAITING_PAYMENT',
           platformFeeRate: PLATFORM_FEE_RATE,
+          logistics: logistics?._id,
+          metadata: {
+            productSubtotal: Number(order.productSubtotal || (Number(order.quantity || 0) * Number(order.unitPrice || 0))),
+            logisticsFee: Number(order.logisticsFee || logistics?.shippingCost || 0),
+            logisticsDistanceKm: Number(order.logisticsDistanceKm || logistics?.routeInfo?.totalDistanceKm || 0),
+            splitMode: 'product_plus_logistics',
+          },
         },
         $set: {
           mpesaCheckoutId: checkoutRequestId,
           merchantRequestId,
+          amount: order.totalAmount,
+          ...(logistics?._id ? { logistics: logistics._id } : {}),
         },
       },
       { returnDocument: 'after', upsert: true }
@@ -75,43 +86,61 @@ class EscrowService {
     const order = await Order.findById(escrow.order);
     if (!order) return null;
 
-    if (escrow.status === 'HELD' && order.paidAt) {
+    const alreadyHeld = escrow.status === 'HELD' && order.paidAt;
+    if (alreadyHeld && order.inventoryCommittedAt) {
       return escrow;
     }
 
     const oldEscrowStatus = escrow.status;
-    escrow.status = 'HELD';
-    escrow.amount = Number(amount || escrow.amount);
-    escrow.mpesaReceiptNumber = transactionId;
-    escrow.paidAt = transactionDate ? new Date(String(transactionDate)) : new Date();
-    escrow.heldAt = new Date();
-    await escrow.save();
+    const paidAt = transactionDate ? new Date(String(transactionDate)) : new Date();
+    const logistics = await Logistics.findOne({ order: order._id }).select('_id shippingCost routeInfo');
+
+    if (!order.inventoryCommittedAt) {
+      await productService.commitReservedStock(order.product, order.quantity);
+      order.inventoryCommittedAt = new Date();
+    }
+
+    if (!alreadyHeld) {
+      escrow.status = 'HELD';
+      escrow.amount = Number(amount || escrow.amount);
+      escrow.mpesaReceiptNumber = transactionId;
+      escrow.paidAt = paidAt;
+      escrow.heldAt = new Date();
+      if (logistics?._id) escrow.logistics = logistics._id;
+      escrow.metadata.set('productSubtotal', Number(order.productSubtotal || (Number(order.quantity || 0) * Number(order.unitPrice || 0))));
+      escrow.metadata.set('logisticsFee', Number(order.logisticsFee || logistics?.shippingCost || 0));
+      escrow.metadata.set('logisticsDistanceKm', Number(order.logisticsDistanceKm || logistics?.routeInfo?.totalDistanceKm || 0));
+      escrow.metadata.set('splitMode', 'product_plus_logistics');
+      await escrow.save();
+    }
 
     const oldOrderStatus = order.status;
     order.status = 'FUNDS_HELD';
-    order.paidAt = escrow.paidAt;
+    order.paidAt = escrow.paidAt || paidAt;
     order.paymentIntentId = checkoutRequestId;
     await order.save();
 
-    await Transaction.create({
-      user: order.buyer,
-      type: 'escrow_hold',
-      amount: escrow.amount,
-      balanceAfter: 0,
-      reference: transactionId || checkoutRequestId,
-      orderId: order._id,
-      description: `M-Pesa escrow hold for order ${order._id}`,
-      metadata: { checkoutRequestId, transactionDate },
-    });
+    if (!alreadyHeld) {
+      await Transaction.create({
+        user: order.buyer,
+        type: 'escrow_hold',
+        amount: escrow.amount,
+        balanceAfter: 0,
+        reference: transactionId || checkoutRequestId,
+        orderId: order._id,
+        description: `M-Pesa escrow hold for order ${order._id}`,
+        metadata: { checkoutRequestId, transactionDate },
+      });
 
-    await auditService.record({
-      entityType: 'Escrow',
-      entityId: escrow._id,
-      action: 'FUNDS_HELD',
-      actor: order.buyer,
-      oldValue: { escrowStatus: oldEscrowStatus, orderStatus: oldOrderStatus },
-      newValue: { escrowStatus: escrow.status, orderStatus: order.status, amount: escrow.amount },
-    });
+      await auditService.record({
+        entityType: 'Escrow',
+        entityId: escrow._id,
+        action: 'FUNDS_HELD',
+        actor: order.buyer,
+        oldValue: { escrowStatus: oldEscrowStatus, orderStatus: oldOrderStatus },
+        newValue: { escrowStatus: escrow.status, orderStatus: order.status, amount: escrow.amount },
+      });
+    }
 
     return escrow;
   }
@@ -255,11 +284,11 @@ class EscrowService {
     const driver = logistics?.driver?._id ? logistics.driver : null;
     const fleetOwner = logistics?.fleetOwner?._id ? logistics.fleetOwner : null;
     const payoutRouting = await this.getDriverPayoutRecipient(driver, fleetOwner);
-    const split = this.calculateSplit(escrow.amount, refundAmount, payoutRouting.driverType);
+    const split = this.calculateSplit(escrow.amount, refundAmount, payoutRouting.driverType, { order, logistics });
 
     const payouts = [];
 
-    if (split.refundAmount > 0 && buyer?.phone) {
+    if (split.refundAmount > 0 && buyer?._id) {
       payouts.push(await this.sendPayout({
         escrow,
         recipient: buyer,
@@ -269,7 +298,7 @@ class EscrowService {
       }));
     }
 
-    if (split.sellerPayout > 0 && seller?.phone) {
+    if (split.sellerPayout > 0 && seller?._id) {
       payouts.push(await this.sendPayout({
         escrow,
         recipient: seller,
@@ -279,7 +308,7 @@ class EscrowService {
       }));
     }
 
-    if (split.driverB2cAmount > 0 && payoutRouting.recipient?.phone) {
+    if (split.driverB2cAmount > 0 && payoutRouting.recipient?._id) {
       payouts.push(await this.sendPayout({
         escrow,
         recipient: payoutRouting.recipient,
@@ -352,17 +381,7 @@ class EscrowService {
       await logistics.save();
     }
 
-    await Transaction.insertMany([
-      {
-        user: order.seller,
-        type: 'escrow_release',
-        amount: split.sellerPayout,
-        balanceAfter: 0,
-        reference: orderId,
-        orderId: order._id,
-        description: `Seller escrow payout for order ${orderId}`,
-        status: split.sellerPayout > 0 ? 'pending' : 'completed',
-      },
+    await Transaction.create(
       {
         user: order.seller,
         type: 'commission',
@@ -372,7 +391,7 @@ class EscrowService {
         orderId: order._id,
         description: `Platform commission retained for order ${orderId}`,
       },
-    ]);
+    );
 
     await auditService.record({
       entityType: 'Escrow',
@@ -385,14 +404,35 @@ class EscrowService {
     return { released: true, escrow, split, payouts };
   }
 
-  calculateSplit(totalAmount, refundAmount = 0, driverType = 'solo') {
+  calculateSplit(totalAmount, refundAmount = 0, driverType = 'solo', context = {}) {
     const total = money(totalAmount);
     const refund = money(Math.min(Number(refundAmount || 0), total));
     const releaseBase = money(total - refund);
-    const platformFee = money(releaseBase * PLATFORM_FEE_RATE);
-    const net = money(releaseBase - platformFee);
-    const sellerPayout = money(net * 0.85);
-    const driverShare = money(net * 0.15);
+    const order = context.order || {};
+    const logistics = context.logistics || {};
+    const productSubtotal = money(order.productSubtotal || (Number(order.quantity || 0) * Number(order.unitPrice || 0)));
+    const logisticsFee = money(order.logisticsFee || logistics.shippingCost || 0);
+    const knownBreakdownTotal = money(productSubtotal + logisticsFee);
+    const useExplicitBreakdown = knownBreakdownTotal > 0 && Math.abs(knownBreakdownTotal - total) <= Math.max(5, total * 0.03);
+    const releaseRatio = total > 0 ? releaseBase / total : 0;
+
+    let platformFee;
+    let sellerPayout;
+    let driverShare;
+
+    if (useExplicitBreakdown) {
+      const releasableProduct = money(productSubtotal * releaseRatio);
+      const releasableLogistics = money(logisticsFee * releaseRatio);
+      platformFee = money(releasableProduct * PLATFORM_FEE_RATE);
+      sellerPayout = money(Math.max(releasableProduct - platformFee, 0));
+      driverShare = releasableLogistics;
+    } else {
+      platformFee = money(releaseBase * PLATFORM_FEE_RATE);
+      const net = money(releaseBase - platformFee);
+      sellerPayout = money(net * 0.85);
+      driverShare = money(net * 0.15);
+    }
+
     const sinkingFundAmount = driverType === 'solo' ? money(driverShare * SINKING_FUND_RATE) : 0;
     const driverB2cAmount = money(driverShare - sinkingFundAmount);
 
@@ -400,6 +440,9 @@ class EscrowService {
       total,
       refundAmount: refund,
       releaseBase,
+      productSubtotal: useExplicitBreakdown ? productSubtotal : null,
+      logisticsFee: useExplicitBreakdown ? logisticsFee : null,
+      splitMode: useExplicitBreakdown ? 'product_plus_logistics' : 'legacy_percentage',
       platformFee,
       sellerPayout,
       driverShare,
@@ -428,31 +471,58 @@ class EscrowService {
   }
 
   async sendPayout({ escrow, recipient, role, amount, remarks }) {
-    const originatorConversationId = `LMP-${role}-${escrow.order}-${Date.now()}`;
+    if (!recipient?._id) {
+      throw httpError(`Cannot release ${role} payout because recipient account is missing`, 409);
+    }
+
+    const value = money(amount);
+    if (value <= 0) {
+      return {
+        recipient: recipient._id,
+        role,
+        amount: 0,
+        status: 'completed',
+        skipped: true,
+      };
+    }
+
+    const reference = `ESCROW_${String(role).toUpperCase()}_${escrow.order}_${Date.now()}`;
+    const walletCredit = await walletService.creditWallet(
+      recipient._id,
+      value,
+      reference,
+      remarks,
+      {
+        type: role === 'buyer_refund' ? 'refund' : 'escrow_release',
+        orderId: escrow.order,
+        metadata: {
+          escrowId: escrow._id,
+          payoutRole: role,
+          payoutChannel: 'wallet',
+        },
+      }
+    );
+
     const payout = {
       recipient: recipient._id,
       role,
-      amount: money(amount),
-      status: 'queued',
+      amount: value,
+      status: 'completed',
       requestedAt: new Date(),
+      completedAt: new Date(),
+      mpesaTransactionId: walletCredit.transaction?._id?.toString(),
     };
-
-    const response = await b2cPayment({
-      phoneNumber: normalizeMpesaPhone(recipient.phone),
-      amount,
-      remarks,
-      occasion: 'Escrow release',
-      originatorConversationId,
-    });
-
-    payout.status = response.ResponseCode === '0' ? 'sent' : 'failed';
-    payout.mpesaConversationId = response.ConversationID;
-    payout.failureReason = response.ResponseDescription;
 
     escrow.payouts.push(payout);
     await escrow.save();
 
-    return { ...payout, mpesaResponse: response };
+    return {
+      ...payout,
+      wallet: {
+        balance: walletCredit.wallet.balance,
+        currency: walletCredit.wallet.currency,
+      },
+    };
   }
 
   async holdEscrow(orderId, reason, adminId) {
@@ -900,20 +970,50 @@ class EscrowService {
   }
 
   async getEscrowStatus(orderId, userId, userRole) {
-    const order = await Order.findById(orderId).select('status escrowReleaseDate totalAmount buyer seller');
+    const order = await Order.findById(orderId).select('status escrowReleaseDate totalAmount productSubtotal logisticsFee logisticsDistanceKm quantity unitPrice buyer seller paidAt deliveredAt releasedAt paymentIntentId');
     if (!order) throw new Error('Order not found');
     if (!isAdminRole(userRole) && order.buyer.toString() !== userId && order.seller.toString() !== userId) {
       throw new Error('Unauthorized');
     }
 
     const escrow = await Escrow.findOne({ order: orderId });
+    const logistics = await Logistics.findOne({ order: orderId }).select('status shippingCost settlement escrowReleaseDue driver fleetOwner');
+    const payoutRouting = logistics
+      ? await this.getDriverPayoutRecipient(logistics.driver, logistics.fleetOwner)
+      : { driverType: 'none', recipient: null };
+    const split = this.calculateSplit(escrow?.amount || order.totalAmount, escrow?.refundAmount || 0, payoutRouting.driverType, { order, logistics });
+
     return {
       orderId,
       escrowAmount: escrow?.amount || order.totalAmount,
+      productSubtotal: order.productSubtotal,
+      logisticsFee: order.logisticsFee || logistics?.shippingCost || 0,
+      logisticsDistanceKm: order.logisticsDistanceKm,
       orderStatus: order.status,
       escrowStatus: escrow?.status || 'AWAITING_PAYMENT',
       expectedReleaseDate: escrow?.autoReleaseAt || order.escrowReleaseDate,
+      paidAt: escrow?.paidAt || order.paidAt,
+      heldAt: escrow?.heldAt,
+      deliveredAt: escrow?.deliveredAt || order.deliveredAt,
+      releasedAt: escrow?.releasedAt || order.releasedAt,
+      paymentIntentId: order.paymentIntentId,
+      sellerPayout: escrow?.sellerPayout || split.sellerPayout,
+      driverPayout: escrow?.driverPayout || split.driverB2cAmount,
+      platformFee: escrow?.platformFee || split.platformFee,
+      sinkingFundAmount: escrow?.sinkingFundAmount || split.sinkingFundAmount,
+      refundAmount: escrow?.refundAmount || split.refundAmount,
+      split,
+      logistics: logistics ? {
+        id: logistics._id,
+        status: logistics.status,
+        shippingCost: logistics.shippingCost,
+        escrowReleaseDue: logistics.escrowReleaseDue,
+        settlement: logistics.settlement,
+      } : null,
       payouts: escrow?.payouts || [],
+      externalProvider: escrow?.externalProvider,
+      externalStatus: escrow?.externalStatus,
+      externalTransactionId: escrow?.externalTransactionId,
     };
   }
 

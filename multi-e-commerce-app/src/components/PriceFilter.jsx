@@ -5,7 +5,7 @@ import { useDebounce } from '../hooks/useDebounce';
 const PriceFilter = ({ minPrice, maxPrice, onPriceChange }) => {
   const [min, setMin] = useState(minPrice || '');
   const [max, setMax] = useState(maxPrice || '');
-  
+
   const debouncedMin = useDebounce(min, 500);
   const debouncedMax = useDebounce(max, 500);
 

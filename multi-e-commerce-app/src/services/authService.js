@@ -14,6 +14,7 @@ const normalizeAuthResponse = (payload) => {
     token: data.accessToken || data.token || null,
     accessToken: data.accessToken || data.token || null,
     refreshToken: data.refreshToken || null,
+    redirectTo: data.redirectTo || data.user?.redirectTo || null,
   };
 };
 
@@ -38,6 +39,20 @@ export const authService = {
   register: async (userData) => {
     const response = await api.post('/v1/auth/register', userData);
     return normalizeAuthResponse(response.data);
+  },
+
+  uploadBusinessLogo: async (file) => {
+    const formData = new FormData();
+    formData.append('businessLogo', file);
+    const response = await api.post('/v1/auth/register/business-logo', formData);
+    return response.data?.data || response.data;
+  },
+
+  uploadProfileImage: async (file) => {
+    const formData = new FormData();
+    formData.append('profileImage', file);
+    const response = await api.post('/v1/auth/me/profile-image', formData);
+    return response.data?.data || response.data;
   },
 
   getCurrentUser: async () => {
@@ -92,7 +107,7 @@ export const authService = {
   },
 
   changePassword: async (currentPassword, newPassword) => {
-    const response = await api.put('/v1/auth/change-password', { currentPassword, newPassword });
+    const response = await api.post('/v1/auth/change-password', { currentPassword, newPassword });
     return response.data;
   },
 

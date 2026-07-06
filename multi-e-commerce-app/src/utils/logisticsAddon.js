@@ -110,7 +110,9 @@ export const normalizeProvider = (provider) => {
     provider.campus ||
     '';
   const coordinates =
+    provider.currentLocation ||
     profile.coordinates ||
+    profile.currentLocation ||
     profile.baseCoordinates ||
     provider.coordinates ||
     provider.location ||
@@ -118,7 +120,7 @@ export const normalizeProvider = (provider) => {
 
   return {
     id,
-    name: provider.fullName || provider.name || provider.businessName || provider.companyName || 'Registered logistics provider',
+    name: provider.businessName || provider.companyName || provider.fullName || provider.name || 'Registered logistics provider',
     phone: provider.phone || profile.phone || '',
     email: provider.email || '',
     hub,
@@ -126,7 +128,12 @@ export const normalizeProvider = (provider) => {
     driverMode: profile.driverMode || provider.driverMode || '',
     vehiclePlate: profile.vehiclePlate || provider.vehiclePlate || '',
     cargoCapacityKg: profile.cargoCapacityKg || provider.cargoCapacityKg || '',
+    vehicleType: profile.vehicleType || provider.vehicleType || '',
+    fleetSize: profile.fleetSize || provider.fleetSize || 1,
+    operatingAddress: profile.operatingAddress || provider.operatingAddress || '',
+    serviceAreas: profile.serviceAreas || provider.serviceAreas || [],
     verificationStatus: profile.verificationStatus || provider.verificationStatus || provider.status || 'verified',
+    distanceKm: provider.distanceKm ?? null,
     raw: provider,
   };
 };
@@ -135,7 +142,7 @@ export const rankProvidersByDistance = (providers = [], sellerHub = '') =>
   providers
     .map((provider) => {
       const normalized = normalizeProvider(provider);
-      const distanceKm = calculateDistanceKm(sellerHub, normalized.coordinates || normalized.hub);
+      const distanceKm = normalized.distanceKm ?? calculateDistanceKm(sellerHub, normalized.coordinates || normalized.hub);
       return { ...normalized, distanceKm };
     })
     .filter((provider) => provider.id && String(provider.verificationStatus).toLowerCase() === 'verified')

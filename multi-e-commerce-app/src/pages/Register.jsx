@@ -30,6 +30,10 @@ const DEFAULT_REGISTRATION_DATA = {
   verificationValue: '',
   verificationCode: '',
   isVerified: false,
+  emailVerified: false,
+  phoneVerified: false,
+  emailVerifiedValue: '',
+  phoneVerifiedValue: '',
   name: '',
   phone: '',
   email: '',
@@ -41,6 +45,26 @@ const DEFAULT_REGISTRATION_DATA = {
   businessLogoUrl: '',
 };
 
+const normalizeRegistrationEmail = (value) => String(value || '').trim().toLowerCase();
+
+const normalizeRegistrationPhone = (value) => {
+  const cleaned = String(value || '').replace(/[^\d+]/g, '').trim();
+  if (cleaned.startsWith('+254')) return cleaned.slice(1);
+  if (cleaned.startsWith('0') && cleaned.length === 10) return `254${cleaned.slice(1)}`;
+  return cleaned;
+};
+
+const stripInlineBusinessLogo = (data = {}) => {
+  if (typeof data.businessLogoUrl === 'string' && data.businessLogoUrl.startsWith('data:')) {
+    return {
+      ...data,
+      businessLogoUrl: '',
+    };
+  }
+
+  return data;
+};
+
 const Register = () => {
   const dispatch = useDispatch();
   const registrationProgress = useSelector((state) => state?.ui?.registrationProgress);
@@ -48,21 +72,25 @@ const Register = () => {
   const persistedData = registrationProgress?.data;
   const [formData, setFormData] = useState({
     ...DEFAULT_REGISTRATION_DATA,
-    ...(persistedData || {}),
+    ...stripInlineBusinessLogo(persistedData || {}),
   });
   const [businessLogoName, setBusinessLogoName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [logoUploading, setLogoUploading] = useState(false);
   const [showPasswordStrength, setShowPasswordStrength] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [verificationLoading, setVerificationLoading] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [devOtpCode, setDevOtpCode] = useState('');
   const { register } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState(Number(persistedStep) || 1);
+  const verificationChannel = step === 1 ? 'email' : step === 2 ? 'phone' : formData.verificationMethod;
 
   const businessTypes = ['Wholesaler', 'Manufacturer', 'Retailer', 'Farmer', 'Other Business'];
 
@@ -119,6 +147,8 @@ const Register = () => {
       }));
       setOtpSent(false);
       setCooldownSeconds(0);
+      setDevOtpCode('');
+      setNotice('');
       return;
     }
 
@@ -129,33 +159,50 @@ const Register = () => {
   };
 
   const handleSendVerificationCode = async () => {
-    const method = formData.verificationMethod;
+    const method = verificationChannel;
     const value = formData.verificationValue.trim();
+    const normalizedValue = method === 'email'
+      ? normalizeRegistrationEmail(value)
+      : normalizeRegistrationPhone(value);
     const kenyaPhoneRegex = /^\+?254[0-9]{9}$/;
 
     if (method === 'email') {
-      if (!/^\S+@\S+\.\S+$/.test(value)) {
+      if (!/^\S+@\S+\.\S+$/.test(normalizedValue)) {
         setError('Enter a valid email for verification');
         return;
       }
-      setFormData((prev) => ({ ...prev, email: value.toLowerCase() }));
+      setFormData((prev) => ({
+        ...prev,
+        email: normalizedValue,
+        verificationMethod: 'email',
+        verificationValue: normalizedValue,
+      }));
     } else {
-      if (!kenyaPhoneRegex.test(value)) {
+      if (!kenyaPhoneRegex.test(normalizedValue)) {
         setError('Phone verification needs format 2547XXXXXXXX or +2547XXXXXXXX');
         return;
       }
-      setFormData((prev) => ({ ...prev, phone: value }));
+      setFormData((prev) => ({
+        ...prev,
+        phone: normalizedValue,
+        verificationMethod: 'phone',
+        verificationValue: normalizedValue,
+      }));
     }
     setVerificationLoading(true);
     try {
-      await authService.sendOtp({ channel: method, value });
-      const cooldown = await authService.getOtpCooldown({ channel: method, value });
+      const sendResult = await authService.sendOtp({ channel: method, value: normalizedValue });
+      const cooldown = await authService.getOtpCooldown({ channel: method, value: normalizedValue });
       setCooldownSeconds(Number(cooldown?.cooldownSeconds) || 0);
       setOtpSent(true);
+      setDevOtpCode(sendResult?.devTestCode || sendResult?.devCode || '');
       setFormData((prev) => ({ ...prev, verificationCode: '', isVerified: false }));
+      setNotice(sendResult?.message || 'Verification code sent successfully');
       setError('');
     } catch (sendError) {
       const message = sendError?.response?.data?.message || 'Failed to send verification code';
+      setNotice('');
+      setDevOtpCode('');
       setError(message);
     } finally {
       setVerificationLoading(false);
@@ -174,16 +221,47 @@ const Register = () => {
     }
     setVerificationLoading(true);
     try {
+      const channel = verificationChannel;
+      const normalizedValue = channel === 'email'
+        ? normalizeRegistrationEmail(formData.verificationValue)
+        : normalizeRegistrationPhone(formData.verificationValue);
       await authService.verifyOtp({
-        channel: formData.verificationMethod,
-        value: formData.verificationValue.trim(),
+        channel,
+        value: normalizedValue,
         code: enteredCode,
       });
-      setFormData((prev) => ({ ...prev, isVerified: true }));
-      setStep((prev) => Math.min(4, prev + 1));
+      setDevOtpCode('');
+      setOtpSent(false);
+      setCooldownSeconds(0);
+      if (channel === 'email') {
+        setFormData((prev) => ({
+          ...prev,
+          email: normalizedValue,
+          emailVerified: true,
+          emailVerifiedValue: normalizedValue,
+          verificationMethod: 'phone',
+          verificationValue: prev.phone || '',
+          verificationCode: '',
+          isVerified: false,
+        }));
+        setStep(2);
+        setNotice('Email verified. Now verify your phone number.');
+      } else {
+        setFormData((prev) => ({
+          ...prev,
+          phone: normalizedValue,
+          phoneVerified: true,
+          phoneVerifiedValue: normalizedValue,
+          verificationCode: '',
+          isVerified: true,
+        }));
+        setStep(3);
+        setNotice('Phone verified. Continue with your account details.');
+      }
       setError('');
     } catch (verifyError) {
       const message = verifyError?.response?.data?.message || 'Verification failed';
+      setNotice('');
       setError(message);
     } finally {
       setVerificationLoading(false);
@@ -191,24 +269,30 @@ const Register = () => {
   };
 
   const handleResendCode = async () => {
-    const channel = formData.verificationMethod;
-    const value = formData.verificationValue.trim();
+    const channel = verificationChannel;
+    const value = channel === 'email'
+      ? normalizeRegistrationEmail(formData.verificationValue)
+      : normalizeRegistrationPhone(formData.verificationValue);
     if (!value) return;
     setVerificationLoading(true);
     try {
-      await authService.resendOtp({ channel, value });
+      const resendResult = await authService.resendOtp({ channel, value });
       const cooldown = await authService.getOtpCooldown({ channel, value });
       setCooldownSeconds(Number(cooldown?.cooldownSeconds) || 0);
+      setDevOtpCode(resendResult?.devTestCode || resendResult?.devCode || '');
+      setNotice(resendResult?.message || 'Verification code resent successfully');
       setError('');
     } catch (resendError) {
       const message = resendError?.response?.data?.message || 'Failed to resend verification code';
+      setNotice('');
+      setDevOtpCode('');
       setError(message);
     } finally {
       setVerificationLoading(false);
     }
   };
 
-  const handleBusinessLogoChange = (e) => {
+  const handleBusinessLogoChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) {
       setBusinessLogoName('');
@@ -229,13 +313,29 @@ const Register = () => {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setFormData((prev) => ({ ...prev, businessLogoUrl: String(reader.result || '') }));
+    setLogoUploading(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const result = await authService.uploadBusinessLogo(file);
+      const logoUrl = result?.businessLogoUrl || result?.url;
+
+      if (!logoUrl) {
+        throw new Error('Logo upload did not return a URL');
+      }
+
+      setFormData((prev) => ({ ...prev, businessLogoUrl: logoUrl }));
       setBusinessLogoName(file.name);
-      setError('');
-    };
-    reader.readAsDataURL(file);
+      setNotice('Business logo uploaded successfully');
+    } catch (uploadError) {
+      e.target.value = '';
+      setBusinessLogoName('');
+      setFormData((prev) => ({ ...prev, businessLogoUrl: '' }));
+      setError(uploadError?.response?.data?.message || uploadError.message || 'Failed to upload business logo');
+    } finally {
+      setLogoUploading(false);
+    }
   };
 
   const getPasswordStrength = (password) => {
@@ -256,13 +356,20 @@ const Register = () => {
 
   const validateStep = (targetStep) => {
     if (targetStep === 2) {
-      if (!formData.isVerified) {
-        setError('Verify your email or phone number first');
+      if (!formData.emailVerified) {
+        setError('Verify your email first');
         return false;
       }
     }
 
     if (targetStep === 3) {
+      if (!formData.emailVerified || !formData.phoneVerified) {
+        setError('Verify your email and phone number first');
+        return false;
+      }
+    }
+
+    if (targetStep === 4) {
       if (!formData.role) {
         setError('Please choose Buyer, Seller, or Logistics');
         return false;
@@ -273,7 +380,7 @@ const Register = () => {
       }
     }
 
-    if (targetStep === 4 && formData.role === 'seller') {
+    if (targetStep === 5 && formData.role === 'seller') {
       if (!formData.businessName.trim()) {
         setError('Please enter your business name');
         return false;
@@ -282,31 +389,50 @@ const Register = () => {
         setError('Please select your business type');
         return false;
       }
-      if (!formData.businessLogoUrl) {
-        setError('Please upload your business logo');
-        return false;
-      }
     }
     setError('');
     return true;
   };
 
   const nextStep = () => {
-    const target = Math.min(4, step + 1);
+    const target = Math.min(5, step + 1);
     if (validateStep(target)) setStep(target);
   };
 
   const prevStep = () => {
     setError('');
-    setStep((prev) => Math.max(1, prev - 1));
+    setNotice('');
+    setOtpSent(false);
+    setCooldownSeconds(0);
+    setDevOtpCode('');
+    setStep((prev) => {
+      const next = Math.max(1, prev - 1);
+      if (next === 1) {
+        setFormData((current) => ({
+          ...current,
+          verificationMethod: 'email',
+          verificationValue: current.email || current.emailVerifiedValue || '',
+          verificationCode: '',
+        }));
+      } else if (next === 2) {
+        setFormData((current) => ({
+          ...current,
+          verificationMethod: 'phone',
+          verificationValue: current.phone || current.phoneVerifiedValue || '',
+          verificationCode: '',
+        }));
+      }
+      return next;
+    });
   };
 
   const steps = useMemo(
     () => [
       { id: 1, label: 'Verify' },
-      { id: 2, label: 'Account' },
-      { id: 3, label: 'Business' },
-      { id: 4, label: 'Security' },
+      { id: 2, label: 'Phone' },
+      { id: 3, label: 'Account' },
+      { id: 4, label: 'Business' },
+      { id: 5, label: 'Security' },
     ],
     []
   );
@@ -314,8 +440,26 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setNotice('');
 
     const normalizedBusinessName = formData.businessName.trim().replace(/\s+/g, ' ');
+    const normalizedEmail = normalizeRegistrationEmail(formData.email);
+    const normalizedPhone = normalizeRegistrationPhone(formData.phone);
+
+    if (!formData.emailVerified || !formData.phoneVerified) {
+      setError('Verify your email first, then verify your phone number before registering');
+      return;
+    }
+
+    if (normalizedEmail !== formData.emailVerifiedValue) {
+      setError('Use the same email address that received the verification code.');
+      return;
+    }
+
+    if (normalizedPhone !== formData.phoneVerifiedValue) {
+      setError('Use the same phone number that received the verification code.');
+      return;
+    }
 
     if (formData.role === 'seller' && !formData.businessType) {
       setError('Please select your business type');
@@ -330,8 +474,15 @@ const Register = () => {
       return;
     }
 
-    if (formData.role === 'seller' && !formData.businessLogoUrl) {
-      setError('Please upload your business logo');
+    if (formData.role === 'seller' && String(formData.businessLogoUrl).startsWith('data:')) {
+      setFormData((prev) => ({ ...prev, businessLogoUrl: '' }));
+      setBusinessLogoName('');
+      setError('Please re-upload your business logo before registering.');
+      return;
+    }
+
+    if (formData.role === 'seller' && logoUploading) {
+      setError('Please wait for your business logo upload to finish');
       return;
     }
 
@@ -345,7 +496,7 @@ const Register = () => {
       return;
     }
 
-    const phoneValue = formData.phone.trim();
+    const phoneValue = normalizedPhone;
     const kenyaPhoneRegex = /^\+?254[0-9]{9}$/;
     if (!kenyaPhoneRegex.test(phoneValue)) {
       setError('Phone number must be in format 2547XXXXXXXX or +2547XXXXXXXX');
@@ -355,7 +506,7 @@ const Register = () => {
     setLoading(true);
     const registerData = {
       fullName: formData.name.trim().replace(/\s+/g, ' '),
-      email: formData.email.trim().toLowerCase(),
+      email: normalizedEmail,
       phone: phoneValue,
       password: formData.password,
       role: formData.role,
@@ -460,52 +611,33 @@ const Register = () => {
 
           <form className="space-y-5 rounded-xl border border-gray-200 bg-white p-5" onSubmit={handleSubmit}>
             {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
+            {notice && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">{notice}</div>}
 
-            {step === 1 && (
+            {(step === 1 || step === 2) && (
               <div className="space-y-4">
-                <p className="text-sm font-semibold text-[#111827]">Verify your contact first</p>
+                <p className="text-sm font-semibold text-[#111827]">
+                  {verificationChannel === 'email' ? 'First verify your Gmail or email' : 'Now verify your phone number'}
+                </p>
                 {!otpSent && (
                   <div className="rounded-lg border border-gray-200 p-3 space-y-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Contact</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleChange({ target: { name: 'verificationMethod', value: 'email' } })}
-                        className={`py-2 rounded-lg border text-sm ${
-                          formData.verificationMethod === 'email'
-                            ? 'border-[#F97316] bg-[#F97316]/10 text-[#F97316]'
-                            : 'border-gray-300 text-[#374151]'
-                        }`}
-                      >
-                        Verify with Email
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleChange({ target: { name: 'verificationMethod', value: 'phone' } })}
-                        className={`py-2 rounded-lg border text-sm ${
-                          formData.verificationMethod === 'phone'
-                            ? 'border-[#F97316] bg-[#F97316]/10 text-[#F97316]'
-                            : 'border-gray-300 text-[#374151]'
-                        }`}
-                      >
-                        Verify with Number
-                      </button>
-                    </div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+                      {verificationChannel === 'email' ? 'Email verification' : 'Phone verification'}
+                    </p>
 
                     <div className="relative">
-                      {formData.verificationMethod === 'email' ? (
+                      {verificationChannel === 'email' ? (
                         <FaEnvelope className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
                       ) : (
                         <FaPhone className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
                       )}
                       <input
-                        type={formData.verificationMethod === 'email' ? 'email' : 'tel'}
+                        type={verificationChannel === 'email' ? 'email' : 'tel'}
                         name="verificationValue"
                         required
                         value={formData.verificationValue}
                         onChange={handleChange}
                         className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] text-[#111827]"
-                        placeholder={formData.verificationMethod === 'email' ? 'Email address' : 'Phone number (2547XXXXXXXX)'}
+                        placeholder={verificationChannel === 'email' ? 'Email address' : 'Phone number (2547XXXXXXXX)'}
                       />
                     </div>
 
@@ -515,7 +647,7 @@ const Register = () => {
                       disabled={verificationLoading}
                       className="w-full py-2 rounded-lg border border-[#F97316] text-[#F97316] font-semibold hover:bg-[#F97316]/10 disabled:opacity-50"
                     >
-                      {verificationLoading ? 'Sending...' : 'Send Verification Code'}
+                      {verificationLoading ? 'Sending...' : verificationChannel === 'email' ? 'Send Email Code' : 'Send Phone Code'}
                     </button>
                   </div>
                 )}
@@ -523,6 +655,20 @@ const Register = () => {
                 {otpSent && (
                   <div className="rounded-lg border border-gray-200 p-3 space-y-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">OTP Verification</p>
+                    {devOtpCode && (
+                      <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        <span>
+                          Dev test code: <strong className="font-semibold tracking-wide">{devOtpCode}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, verificationCode: devOtpCode }))}
+                          className="shrink-0 rounded-md border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                        >
+                          Use code
+                        </button>
+                      </div>
+                    )}
                     <input
                       type="text"
                       name="verificationCode"
@@ -537,7 +683,7 @@ const Register = () => {
                       disabled={verificationLoading}
                       className="w-full py-2 rounded-lg bg-[#16A34A] text-white font-semibold hover:bg-[#15803D] disabled:opacity-50"
                     >
-                      {verificationLoading ? 'Verifying...' : 'Verify Contact'}
+                      {verificationLoading ? 'Verifying...' : verificationChannel === 'email' ? 'Verify Email' : 'Verify Phone'}
                     </button>
                     <button
                       type="button"
@@ -558,7 +704,7 @@ const Register = () => {
               </div>
             )}
 
-            {step === 2 && (
+            {step === 3 && (
               <div className="space-y-4">
                 <div className="relative">
                   <FaUser className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
@@ -599,7 +745,7 @@ const Register = () => {
               </div>
             )}
 
-            {step === 3 && (
+            {step === 4 && (
               <div className="space-y-4">
                 {formData.role === 'seller' ? (
                   <div className="space-y-3">
@@ -635,18 +781,25 @@ const Register = () => {
                       </select>
                     </div>
                     <div className="rounded-lg border border-gray-300 p-3">
-                      <label htmlFor="businessLogo" className="block text-sm font-medium text-[#111827] mb-2">
-                        Business logo <span className="text-red-500">*</span>
-                      </label>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <label htmlFor="businessLogo" className="block text-sm font-medium text-[#111827]">
+                          Business logo
+                        </label>
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold uppercase text-gray-600">
+                          Optional
+                        </span>
+                      </div>
                       <input
                         id="businessLogo"
                         type="file"
                         accept="image/*"
-                        required
+                        disabled={logoUploading}
                         onChange={handleBusinessLogoChange}
                         className="block w-full text-sm text-[#374151] file:mr-3 file:rounded-md file:border-0 file:bg-[#F97316]/10 file:px-3 file:py-2 file:text-[#F97316] file:font-semibold hover:file:bg-[#F97316]/20"
                       />
-                      <p className="mt-2 text-xs text-[#6B7280]">Upload a clear logo (max 2MB).</p>
+                      <p className="mt-2 text-xs text-[#6B7280]">
+                        {logoUploading ? 'Uploading logo...' : 'Add a clear logo now or complete it later from your profile. Max 2MB.'}
+                      </p>
                       {businessLogoName && <p className="mt-1 text-xs text-[#16A34A]">Selected: {businessLogoName}</p>}
                     </div>
                   </div>
@@ -662,7 +815,7 @@ const Register = () => {
               </div>
             )}
 
-            {step === 4 && (
+            {step === 5 && (
               <div className="space-y-4">
                 <div className="relative">
                   <FaLock className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm" />
@@ -729,13 +882,13 @@ const Register = () => {
               <button
                 type="button"
                 onClick={prevStep}
-                disabled={step === 1 || loading}
+                disabled={step === 1 || loading || logoUploading}
                 className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-[#374151] disabled:opacity-50"
               >
                 <FaArrowLeft size={12} /> Back
               </button>
 
-              {step < 4 ? (
+              {step < 5 ? (
                 <button
                   type="button"
                   onClick={nextStep}
@@ -746,10 +899,10 @@ const Register = () => {
               ) : (
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || logoUploading}
                   className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg text-white bg-[#F97316] hover:bg-[#F97316]/90 disabled:opacity-50"
                 >
-                  {loading ? 'Creating account...' : formData.role === 'seller' ? 'Sign up as Seller' : formData.role === 'logistics' ? 'Sign up as Logistics' : 'Sign up as Buyer'}
+                  {logoUploading ? 'Uploading logo...' : loading ? 'Creating account...' : formData.role === 'seller' ? 'Sign up as Seller' : formData.role === 'logistics' ? 'Sign up as Logistics' : 'Sign up as Buyer'}
                 </button>
               )}
             </div>

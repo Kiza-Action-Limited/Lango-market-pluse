@@ -28,6 +28,16 @@ const UserSchema = new mongoose.Schema(
       lowercase: true,
       match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email address'],
     },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    isPhoneVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     password: {
       type: String,
       required: [true, 'Password is required'],
@@ -78,6 +88,23 @@ const UserSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    profileImageUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    locationHub: {
+      type: String,
+      trim: true,
+      maxlength: [120, 'Location hub cannot exceed 120 characters'],
+      default: '',
+    },
+    city: {
+      type: String,
+      trim: true,
+      maxlength: [120, 'City cannot exceed 120 characters'],
+      default: '',
+    },
     kycVerified: {
       type: Boolean,
       default: false,
@@ -101,6 +128,48 @@ const UserSchema = new mongoose.Schema(
       verifiedAt: Date,
       verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     },
+    adminDocuments: [
+      {
+        documentType: {
+          type: String,
+          enum: ['national_id', 'business_permit', 'tax_certificate', 'kyc', 'contract', 'receipt', 'other'],
+          default: 'other',
+        },
+        title: {
+          type: String,
+          trim: true,
+          maxlength: 160,
+        },
+        notes: {
+          type: String,
+          trim: true,
+          maxlength: 500,
+        },
+        documentNumber: {
+          type: String,
+          trim: true,
+          maxlength: 120,
+        },
+        source: {
+          type: String,
+          trim: true,
+          default: 'admin_saved',
+        },
+        originalName: String,
+        mimeType: String,
+        size: Number,
+        url: String,
+        publicId: String,
+        uploadedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     subscriptionTier: {
       type: String,
       enum: ['free', 'v3', 'v4', 'solo', 'smart', 'growth', 'mizigo', null],
@@ -161,10 +230,46 @@ const UserSchema = new mongoose.Schema(
       },
       documentType: {
         type: String,
-        enum: ['national_id', 'business_permit'],
+        enum: ['national_id', 'business_permit', 'driver_license', 'vehicle_logbook', 'insurance_certificate', 'kra_pin_certificate', 'tax_certificate', 'other'],
         default: null,
       },
       documentNumber: String,
+      baseHub: {
+        type: String,
+        trim: true,
+        maxlength: [120, 'Base hub cannot exceed 120 characters'],
+        default: '',
+      },
+      locationHub: {
+        type: String,
+        trim: true,
+        maxlength: [120, 'Location hub cannot exceed 120 characters'],
+        default: '',
+      },
+      operatingAddress: {
+        type: String,
+        trim: true,
+        maxlength: [240, 'Operating address cannot exceed 240 characters'],
+        default: '',
+      },
+      serviceAreas: [
+        {
+          type: String,
+          trim: true,
+          maxlength: 80,
+        },
+      ],
+      vehicleType: {
+        type: String,
+        trim: true,
+        maxlength: [80, 'Vehicle type cannot exceed 80 characters'],
+        default: '',
+      },
+      fleetSize: {
+        type: Number,
+        min: 1,
+        default: 1,
+      },
       vehiclePlate: String,
       cargoCapacityKg: {
         type: Number,
@@ -208,6 +313,7 @@ const UserSchema = new mongoose.Schema(
       },
       verifiedAt: Date,
       applicationSubmittedAt: Date,
+      reviewDueAt: Date,
       reviewedAt: Date,
       reviewedBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -218,16 +324,58 @@ const UserSchema = new mongoose.Schema(
         {
           documentType: {
             type: String,
-            enum: ['national_id', 'business_permit'],
+            enum: ['national_id', 'business_permit', 'driver_license', 'vehicle_logbook', 'insurance_certificate', 'kra_pin_certificate', 'tax_certificate', 'other'],
           },
+          documentNumber: String,
+          originalName: String,
+          mimeType: String,
+          size: Number,
           url: String,
           publicId: String,
+          source: {
+            type: String,
+            default: 'logistics_application',
+          },
           uploadedAt: {
             type: Date,
             default: Date.now,
           },
         },
       ],
+    },
+    sellerLogisticsAddon: {
+      active: {
+        type: Boolean,
+        default: false,
+      },
+      planId: {
+        type: String,
+        enum: ['mizigo'],
+        default: 'mizigo',
+      },
+      sellerHub: {
+        type: String,
+        trim: true,
+        maxlength: 120,
+        default: '',
+      },
+      selectedProvider: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      selectedProviderSnapshot: {
+        name: String,
+        phone: String,
+        email: String,
+        hub: String,
+        vehiclePlate: String,
+        cargoCapacityKg: Number,
+        verificationStatus: String,
+      },
+      activatedAt: Date,
+      pausedAt: Date,
+      updatedAt: Date,
     },
     address: {
       type: String,
@@ -269,6 +417,11 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    isBlocked: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     lastLogin: Date,
   },
   {
@@ -294,5 +447,6 @@ UserSchema.index(
   { partialFilterExpression: { 'location.type': 'Point' } }
 );
 UserSchema.index({ role: 1, subscriptionTier: 1 });
+UserSchema.index({ 'sellerLogisticsAddon.active': 1, 'sellerLogisticsAddon.selectedProvider': 1 });
 
 module.exports = mongoose.model('User', UserSchema);

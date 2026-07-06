@@ -20,6 +20,12 @@ const categorySchema = new mongoose.Schema(
       trim: true
     },
 
+    icon: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+
     image: {
       type: String,
       default: ''

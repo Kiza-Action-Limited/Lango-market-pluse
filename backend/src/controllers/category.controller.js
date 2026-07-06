@@ -3,6 +3,41 @@ const Category = require('../models/Category.model');
 const Product = require('../models/Product.model');
 const { getEffectiveUserCategory, isSellerUser } = require('../utils/userCategory');
 
+const slugifyCategoryName = (value = '') => String(value)
+  .toLowerCase()
+  .trim()
+  .replace(/\s+/g, '-')
+  .replace(/[^\w-]+/g, '');
+
+const normalizeCategoryName = (value = '') => String(value).trim().toLowerCase();
+
+const countProductsForCategory = async (category) => Product.countDocuments({
+  category: { $in: [category.slug, category.name].filter(Boolean) },
+  isPublished: true,
+});
+
+const serializeCategory = async (category) => {
+  const productCount = await countProductsForCategory(category);
+  const raw = category.toObject ? category.toObject() : category;
+
+  return {
+    id: raw._id,
+    _id: raw._id,
+    name: raw.name,
+    slug: raw.slug,
+    description: raw.description,
+    icon: raw.icon || '',
+    image: raw.image,
+    categoryType: raw.categoryType,
+    productCount,
+    isActive: raw.isActive,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    createdBy: raw.createdBy,
+    createdByRole: raw.createdByRole,
+  };
+};
+
 /**
  * GET ALL CATEGORIES
  * GET /api/v1/categories
@@ -27,28 +62,7 @@ exports.getAllCategories = async (req, res, next) => {
     }
 
     const categories = await Category.find(query).sort({ createdAt: -1 });
-
-    const formattedCategories = await Promise.all(
-      categories.map(async (category) => {
-        const productCount = await Product.countDocuments({
-          category: category.slug || category.name,
-          isPublished: true
-        });
-
-        return {
-          id: category._id,
-          name: category.name,
-          slug: category.slug,
-          description: category.description,
-          image: category.image,
-          categoryType: category.categoryType,
-          productCount,
-          isActive: category.isActive,
-          createdAt: category.createdAt,
-          createdBy: category.createdBy
-        };
-      })
-    );
+    const formattedCategories = await Promise.all(categories.map(serializeCategory));
 
     res.status(200).json({
       success: true,
@@ -56,6 +70,55 @@ exports.getAllCategories = async (req, res, next) => {
       categories: formattedCategories
     });
 
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET ADMIN CATEGORY MANAGEMENT DATA
+ * GET /api/v1/categories/admin/manage
+ */
+exports.getAdminCategories = async (req, res, next) => {
+  try {
+    const { status = 'all', type = 'all', search = '' } = req.query;
+    const query = {};
+
+    if (status === 'active') query.isActive = true;
+    if (status === 'inactive') query.isActive = false;
+    if (type && type !== 'all') query.categoryType = type;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const categories = await Category.find(query)
+      .populate('createdBy', 'fullName name email role businessName')
+      .sort({ isActive: -1, updatedAt: -1, createdAt: -1 });
+    const formattedCategories = await Promise.all(categories.map(serializeCategory));
+    const totalProducts = formattedCategories.reduce((sum, category) => sum + Number(category.productCount || 0), 0);
+
+    const byType = formattedCategories.reduce((acc, category) => {
+      const key = category.categoryType || 'general';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      success: true,
+      total: formattedCategories.length,
+      categories: formattedCategories,
+      summary: {
+        total: formattedCategories.length,
+        active: formattedCategories.filter((category) => category.isActive).length,
+        inactive: formattedCategories.filter((category) => !category.isActive).length,
+        linkedProducts: totalProducts,
+        byType,
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -70,8 +133,10 @@ exports.createCategory = async (req, res, next) => {
     const {
       name,
       description,
+      icon,
       image,
-      categoryType
+      categoryType,
+      isActive
     } = req.body;
 
     // Get user from request (set by auth middleware)
@@ -95,7 +160,7 @@ exports.createCategory = async (req, res, next) => {
       });
     }
 
-    const normalizedName = name.toLowerCase().trim();
+    const normalizedName = normalizeCategoryName(name);
 
     // Check existing category
     const existingCategory = await Category.findOne({
@@ -110,16 +175,16 @@ exports.createCategory = async (req, res, next) => {
     }
 
     // Create slug
-    const slug = normalizedName
-      .replace(/\s+/g, '-')
-      .replace(/[^\w-]+/g, '');
+    const slug = slugifyCategoryName(normalizedName);
 
     const category = await Category.create({
       name: normalizedName,
       slug,
       description,
+      icon,
       image,
       categoryType: categoryType || (user.role === 'admin' ? 'general' : effectiveCategory),
+      isActive: user.role === 'admin' && isActive !== undefined ? Boolean(isActive) : true,
       createdBy: user._id,
       createdByRole: user.role
     });
@@ -168,22 +233,23 @@ exports.updateCategory = async (req, res, next) => {
     const {
       name,
       description,
+      icon,
       image,
       categoryType,
       isActive
     } = req.body;
 
     if (name) {
-      category.name = name.toLowerCase();
-
-      category.slug = name
-        .toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/[^\w-]+/g, '');
+      category.name = normalizeCategoryName(name);
+      category.slug = slugifyCategoryName(name);
     }
 
     if (description !== undefined) {
       category.description = description;
+    }
+
+    if (icon !== undefined) {
+      category.icon = icon;
     }
 
     if (image !== undefined) {
@@ -250,10 +316,7 @@ exports.deleteCategory = async (req, res, next) => {
     }
 
     // Check products
-    const productCount = await Product.countDocuments({
-      category: category.slug || category.name,
-      isPublished: true
-    });
+    const productCount = await countProductsForCategory(category);
 
     if (productCount > 0) {
       return res.status(400).json({

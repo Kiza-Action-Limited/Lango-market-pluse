@@ -1,9 +1,10 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { isLogisticsUser, isSellerUser } from '../utils/userCategory';
 
 const PublicOnlyRoute = () => {
-  const { isAuthenticated, isAdmin, isSeller, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
 
   if (loading) {
     return (
@@ -13,10 +14,14 @@ const PublicOnlyRoute = () => {
     );
   }
 
-  if (!isAuthenticated) return <Outlet />;
-  if (isAdmin) return <Navigate to="/admin" replace />;
-  if (isSeller) return <Navigate to="/seller" replace />;
-  return <Navigate to="/" replace />;
+  if (isAuthenticated) {
+    if (user?.role === 'admin') return <Navigate to="/admin/dashboard" replace />;
+    if (isLogisticsUser(user)) return <Navigate to="/logistics/dashboard" replace />;
+    if (isSellerUser(user)) return <Navigate to="/seller" replace />;
+    return <Navigate to="/buyer" replace />;
+  }
+
+  return <Outlet />;
 };
 
 export default PublicOnlyRoute;

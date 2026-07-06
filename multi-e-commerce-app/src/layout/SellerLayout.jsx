@@ -1,7 +1,7 @@
 // src/layouts/SellerLayout.jsx
-import React, { Suspense } from 'react';
+import React, { Suspense, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { FaTachometerAlt, FaPlus, FaBox, FaShoppingCart, FaCrown, FaBroadcastTower, FaUser, FaSignOutAlt, FaHome } from 'react-icons/fa';
+import { FaTachometerAlt, FaPlus, FaBox, FaShoppingCart, FaCrown, FaBroadcastTower, FaUser, FaSignOutAlt, FaAngleDoubleLeft, FaAngleDoubleRight, FaFileInvoiceDollar, FaWallet, FaEnvelopeOpenText } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/NotificationBell';
 
@@ -9,18 +9,25 @@ const SellerLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { logout } = useAuth();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   const navItems = [
-    { path: '/', label: 'Home', icon: FaHome },
     { path: '/seller', label: 'Dashboard', icon: FaTachometerAlt },
     { path: '/seller/add-product', label: 'Add Product', icon: FaPlus },
     { path: '/seller/products', label: 'My Products', icon: FaBox },
     { path: '/seller/orders', label: 'Orders', icon: FaShoppingCart },
+    { path: '/seller/rfqs', label: 'RFQs', icon: FaFileInvoiceDollar },
+    { path: '/seller/finance', label: 'Finance', icon: FaWallet },
+    { path: '/seller/support', label: 'Message Admin', icon: FaEnvelopeOpenText },
     { path: '/seller/scarcity-board', label: 'Scarcity Board', icon: FaBroadcastTower },
     { path: '/seller/subscription-plans', label: 'Subscription', icon: FaCrown },
   ];
   const currentNav = navItems.find((item) => item.path === location.pathname);
   const pageTitle = currentNav?.label || 'Seller Workspace';
+  const sidebarLabelClass = isSidebarOpen
+    ? 'ml-3 max-w-44 opacity-100'
+    : 'ml-0 max-w-0 opacity-0';
+  const sidebarItemClass = isSidebarOpen ? 'justify-start' : 'justify-center';
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -29,12 +36,25 @@ const SellerLayout = () => {
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       {/* Sidebar */}
-      <aside className="group sticky top-0 h-screen w-20 shrink-0 overflow-hidden bg-primary text-white transition-all duration-200 hover:w-64">
+      <aside className={`sticky top-0 h-screen shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
         <div className="border-b border-white/15 p-4">
-          <h2 className="flex h-8 items-center justify-center whitespace-nowrap text-xl font-bold group-hover:justify-start">
-            <span className="group-hover:hidden">SP</span>
-            <span className="hidden group-hover:inline">Seller Panel</span>
-          </h2>
+          <div className={`flex h-8 items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
+            <h2 className={`min-w-0 items-center whitespace-nowrap text-xl font-bold ${isSidebarOpen ? 'flex justify-start' : 'sr-only'}`}>
+              <span className={`overflow-hidden transition-all duration-200 ${isSidebarOpen ? 'max-w-44 opacity-100' : 'max-w-0 opacity-0'}`}>
+                Seller Panel
+              </span>
+            </h2>
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen((current) => !current)}
+              title={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+              aria-label={isSidebarOpen ? 'Collapse seller sidebar' : 'Expand seller sidebar'}
+              aria-expanded={isSidebarOpen}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white hover:bg-[#F97316] focus:outline-none focus:ring-2 focus:ring-white/70"
+            >
+              {isSidebarOpen ? <FaAngleDoubleLeft /> : <FaAngleDoubleRight />}
+            </button>
+          </div>
         </div>
         <nav className="mt-4 space-y-1 px-3">
           {navItems.map((item) => {
@@ -45,10 +65,10 @@ const SellerLayout = () => {
                 key={item.path}
                 to={item.path}
                 title={item.label}
-                className={`flex items-center justify-center rounded-lg px-3 py-2.5 hover:bg-primary-dark transition group-hover:justify-start ${isActive ? 'bg-primary-dark' : ''}`}
+                className={`flex items-center rounded-lg px-3 py-2.5 hover:bg-[#F97316] transition ${sidebarItemClass} ${isActive ? 'bg-[#F97316]' : ''}`}
               >
-                <Icon className="shrink-0 text-lg group-hover:mr-3" />
-                <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 group-hover:max-w-44 group-hover:opacity-100">
+                  <Icon className="shrink-0 text-lg text-white" />
+                  <span className={`overflow-hidden whitespace-nowrap text-white transition-all duration-200 ${sidebarLabelClass}`}>
                   {item.label}
                 </span>
               </Link>
@@ -59,10 +79,10 @@ const SellerLayout = () => {
           <Link
             to="/seller/profile"
             title="Profile"
-            className="flex items-center justify-center rounded-lg px-3 py-2.5 hover:bg-primary-dark transition group-hover:justify-start"
+              className={`flex items-center rounded-lg px-3 py-2.5 hover:bg-[#F97316] transition ${sidebarItemClass}`}
           >
-            <FaUser className="shrink-0 text-lg group-hover:mr-3" />
-            <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 group-hover:max-w-44 group-hover:opacity-100">
+              <FaUser className="shrink-0 text-lg text-white" />
+              <span className={`overflow-hidden whitespace-nowrap text-white transition-all duration-200 ${sidebarLabelClass}`}>
               Profile
             </span>
           </Link>
@@ -70,10 +90,10 @@ const SellerLayout = () => {
             type="button"
             onClick={handleLogout}
             title="Logout"
-            className="w-full flex items-center justify-center rounded-lg px-3 py-2.5 hover:bg-primary-dark transition text-left group-hover:justify-start"
+              className={`w-full flex items-center rounded-lg px-3 py-2.5 hover:bg-[#F97316] transition text-left ${sidebarItemClass}`}
           >
-            <FaSignOutAlt className="shrink-0 text-lg group-hover:mr-3" />
-            <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 group-hover:max-w-44 group-hover:opacity-100">
+              <FaSignOutAlt className="shrink-0 text-lg text-white" />
+              <span className={`overflow-hidden whitespace-nowrap text-white transition-all duration-200 ${sidebarLabelClass}`}>
               Logout
             </span>
           </button>

@@ -1,8 +1,13 @@
 const Order = require('../../models/Order.model');
 const Product = require('../../models/Product.model');
 const User = require('../../models/User.model');
+const Logistics = require('../../models/Logistics.model');
+const Escrow = require('../../models/Escrow.model');
 const productService = require('../inventory/product.service');
 const escrowService = require('./escrow.service');
+const notificationService = require('../notification/notification.service');
+const localGeocoder = require('../maps/localGeocoder.service');
+const qrChainSvc = require('./qrChain.service');
 const { smsQueue } = require('../../config/redis');
 const { v4: uuidv4 } = require('uuid');
 
@@ -38,7 +43,430 @@ const httpError = (message, statusCode, details = {}) => {
   return error;
 };
 
+const normalizeLogisticsAddress = (address, fallback = {}) => {
+  const source = address || fallback || {};
+  if (typeof source === 'string') {
+    return {
+      label: source,
+      town: fallback.town || source,
+      county: fallback.county || 'Unknown',
+      country: 'Kenya',
+    };
+  }
+
+  return {
+    label: source.label || source.address || source.street || fallback.label || fallback.address,
+    county: source.county || source.state || fallback.county || fallback.state || 'Unknown',
+    town: source.town || source.city || source.locationHub || fallback.town || fallback.city || fallback.locationHub || 'Unknown',
+    street: source.street || fallback.street,
+    country: source.country || fallback.country || 'Kenya',
+    gpsLat: source.gpsLat ?? source.lat ?? fallback.gpsLat ?? fallback.lat,
+    gpsLng: source.gpsLng ?? source.lng ?? fallback.gpsLng ?? fallback.lng,
+  };
+};
+
 const idsMatch = (left, right) => left != null && right != null && left.toString() === right.toString();
+
+const getDocId = (value) => value?._id || value?.id || value;
+
+const getOrderLabel = (order) => order?.orderNumber || `ORD-${String(order?._id || '').slice(-8).toUpperCase()}`;
+
+const readableStatus = (status) => String(status || '')
+  .replaceAll('_', ' ')
+  .toLowerCase()
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const toFiniteNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getCoordinatePair = (source = {}) => {
+  const lat = toFiniteNumber(source.lat ?? source.gpsLat);
+  const lng = toFiniteNumber(source.lng ?? source.gpsLng);
+  return lat !== null && lng !== null ? { lat, lng } : null;
+};
+
+const getUserLocationCoordinates = (user = {}) => {
+  const direct = getCoordinatePair(user.location);
+  if (direct) return direct;
+  const coordinates = user.location?.coordinates;
+  if (Array.isArray(coordinates) && coordinates.length === 2) {
+    const lng = toFiniteNumber(coordinates[0]);
+    const lat = toFiniteNumber(coordinates[1]);
+    if (lat !== null && lng !== null) return { lat, lng };
+  }
+  return getCoordinatePair(user.logisticsProfile?.currentLocation);
+};
+
+const geocodeLocal = (address) => {
+  const geocoded = localGeocoder.geocodeAddress(address);
+  if (!geocoded) return null;
+  return { lat: geocoded.lat, lng: geocoded.lng };
+};
+
+const calculateDistanceKm = (start, end) => {
+  if (!start || !end) return 0;
+  const earthRadiusKm = 6371;
+  const dLat = ((end.lat - start.lat) * Math.PI) / 180;
+  const dLng = ((end.lng - start.lng) * Math.PI) / 180;
+  const lat1 = (start.lat * Math.PI) / 180;
+  const lat2 = (end.lat * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const estimateOrderWeightKg = (product, quantity) => {
+  const unit = String(product?.unit || '').toLowerCase();
+  const explicitWeight = Number(product?.weightKg || product?.metadata?.get?.('weightKg') || product?.metadata?.weightKg || 0);
+  if (explicitWeight > 0) return Math.max(1, explicitWeight * Number(quantity || 1));
+  if (unit === 'g') return Math.max(1, Number(quantity || 1) / 1000);
+  if (unit === 'ton') return Math.max(1, Number(quantity || 1) * 1000);
+  if (unit === 'kg') return Math.max(1, Number(quantity || 1));
+  return Math.max(1, Number(quantity || 1));
+};
+
+const calculateLogisticsCharge = ({ product, seller, deliveryAddress, quantity }) => {
+  const sellerCoords = getUserLocationCoordinates(seller);
+  const productPickupAddress = product?.pickupAddress || product?.metadata?.get?.('pickupAddress') || product?.metadata?.pickupAddress;
+  const pickupAddress = normalizeLogisticsAddress(productPickupAddress, {
+    label: product?.locationHub || seller?.locationHub || seller?.city || seller?.address || 'Seller pickup hub',
+    town: product?.locationHub || seller?.locationHub || seller?.city || 'Seller hub',
+    county: seller?.city || 'Unknown',
+    gpsLat: sellerCoords?.lat,
+    gpsLng: sellerCoords?.lng,
+  });
+  const shippingAddress = normalizeLogisticsAddress(deliveryAddress, {
+    label: deliveryAddress?.label || deliveryAddress?.street || 'Buyer delivery address',
+    town: deliveryAddress?.town || deliveryAddress?.city || 'Delivery town pending',
+    county: deliveryAddress?.county || deliveryAddress?.state || 'Unknown',
+  });
+
+  const pickupCoords = getCoordinatePair(pickupAddress) || geocodeLocal(pickupAddress);
+  const deliveryCoords = getCoordinatePair(shippingAddress) || geocodeLocal(shippingAddress);
+  if (pickupCoords) {
+    pickupAddress.gpsLat = pickupCoords.lat;
+    pickupAddress.gpsLng = pickupCoords.lng;
+  }
+  if (deliveryCoords) {
+    shippingAddress.gpsLat = deliveryCoords.lat;
+    shippingAddress.gpsLng = deliveryCoords.lng;
+  }
+
+  const distanceKm = calculateDistanceKm(pickupCoords, deliveryCoords);
+  const weightKg = estimateOrderWeightKg(product, quantity);
+  const baseFee = 250;
+  const ratePerKm = 45;
+  const weightRate = 15;
+  const minimumFee = 500;
+  const calculatedFee = distanceKm > 0
+    ? baseFee + (distanceKm * ratePerKm) + (weightKg * weightRate)
+    : minimumFee;
+  const logisticsFee = Math.max(minimumFee, Math.ceil(calculatedFee));
+
+  return {
+    logisticsFee,
+    distanceKm: Math.round(distanceKm * 100) / 100,
+    weightKg,
+    pickupAddress,
+    shippingAddress,
+    estimated: !(pickupCoords && deliveryCoords),
+    ratePerKm,
+    weightRate,
+    baseFee,
+    minimumFee,
+    calculationSource: pickupCoords && deliveryCoords ? 'gps_or_local_geocode' : 'minimum_fee_missing_gps',
+  };
+};
+
+const getFirstCoordinatePair = (...sources) => {
+  for (const source of sources) {
+    const coords = getCoordinatePair(source);
+    if (coords) return coords;
+  }
+  return null;
+};
+
+const buildGoogleMapsUrl = (points = []) => {
+  const validPoints = points.filter((point) => point?.lat !== undefined && point?.lng !== undefined);
+  if (!validPoints.length) return null;
+  if (validPoints.length === 1) {
+    return `https://www.google.com/maps/search/?api=1&query=${validPoints[0].lat},${validPoints[0].lng}`;
+  }
+  const origin = validPoints[0];
+  const destination = validPoints[validPoints.length - 1];
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}`;
+};
+
+const buildGoogleMapsEmbedUrl = (points = []) => {
+  const validPoints = points.filter((point) => point?.lat !== undefined && point?.lng !== undefined);
+  if (!validPoints.length) return null;
+  const driverPoint = validPoints.find((point) => point.label === 'driver');
+  const target = driverPoint || validPoints[validPoints.length - 1];
+  return `https://maps.google.com/maps?q=${target.lat},${target.lng}&z=13&output=embed`;
+};
+
+const buildOrderNotificationData = (order, event, extra = {}) => ({
+  orderId: String(order?._id || ''),
+  orderNumber: getOrderLabel(order),
+  productId: String(getDocId(order?.product) || ''),
+  status: order?.status,
+  event,
+  href: extra.href || '/orders',
+  ...extra,
+});
+
+const createOrderNotification = async (userId, { title, body, order, event, channel = 'order_update', data = {} }) => {
+  if (!userId) return null;
+
+  try {
+    return await notificationService.create(userId, {
+      type: 'in_app',
+      channel,
+      title,
+      body,
+      status: 'pending',
+      data: buildOrderNotificationData(order, event, data),
+    });
+  } catch (error) {
+    console.warn('Order notification failed:', error.message);
+    return null;
+  }
+};
+
+const notifyOrderParties = async (order, { buyer, seller } = {}) => {
+  const tasks = [];
+  const buyerId = getDocId(order?.buyer);
+  const sellerId = getDocId(order?.seller);
+
+  if (buyerId && buyer) {
+    tasks.push(createOrderNotification(buyerId, { ...buyer, order }));
+  }
+
+  if (sellerId && seller && String(sellerId) !== String(buyerId)) {
+    tasks.push(createOrderNotification(sellerId, { ...seller, order }));
+  }
+
+  await Promise.all(tasks);
+};
+
+const getPopulatedOrder = (orderId) => Order.findById(orderId)
+  .populate('buyer', 'fullName name businessName phone email')
+  .populate('seller', 'fullName name businessName phone email')
+  .populate('product', 'name images sku trackingSku');
+
+const summarizeEscrow = (escrow) => {
+  if (!escrow) return null;
+  return {
+    id: escrow._id,
+    status: escrow.status,
+    escrowStatus: escrow.status,
+    amount: escrow.amount,
+    escrowAmount: escrow.amount,
+    currency: escrow.currency,
+    paidAt: escrow.paidAt,
+    heldAt: escrow.heldAt,
+    deliveredAt: escrow.deliveredAt,
+    autoReleaseAt: escrow.autoReleaseAt,
+    expectedReleaseDate: escrow.autoReleaseAt,
+    releasedAt: escrow.releasedAt,
+    sellerPayout: escrow.sellerPayout,
+    driverPayout: escrow.driverPayout,
+    platformFee: escrow.platformFee,
+    sinkingFundAmount: escrow.sinkingFundAmount,
+    refundAmount: escrow.refundAmount,
+    payouts: escrow.payouts || [],
+    externalProvider: escrow.externalProvider,
+    externalStatus: escrow.externalStatus,
+  };
+};
+
+const summarizeLogistics = (logistics) => {
+  if (!logistics) return null;
+  const pickupCoords = getCoordinatePair(logistics.pickupAddress);
+  const deliveryCoords = getCoordinatePair(logistics.shippingAddress);
+  const driverCoords = getFirstCoordinatePair(
+    logistics.gpsTracking?.current,
+    logistics.driver?.logisticsProfile?.currentLocation
+  );
+  const history = (Array.isArray(logistics.gpsTracking?.history) ? logistics.gpsTracking.history : [])
+    .slice(-50)
+    .map((entry) => ({
+      lat: toFiniteNumber(entry.location?.lat),
+      lng: toFiniteNumber(entry.location?.lng),
+      accuracy: entry.accuracy,
+      speed: entry.speed,
+      heading: entry.heading,
+      timestamp: entry.timestamp,
+      label: 'history',
+    }))
+    .filter((point) => point.lat !== null && point.lng !== null);
+  const routePath = [
+    pickupCoords ? { ...pickupCoords, label: 'pickup' } : null,
+    ...history,
+    driverCoords ? { ...driverCoords, label: 'driver' } : null,
+    deliveryCoords ? { ...deliveryCoords, label: 'delivery' } : null,
+  ].filter(Boolean);
+
+  return {
+    id: logistics._id,
+    status: logistics.status,
+    trackingNumber: logistics.trackingNumber,
+    tripId: logistics.tripId,
+    bookingReference: logistics.bookingReference,
+    carrier: logistics.carrier,
+    driverName: logistics.driverName,
+    driverPhone: logistics.driverPhone,
+    driver: logistics.driver,
+    currentLocation: logistics.currentLocation,
+    pickupQrConfirmed: logistics.pickupQrConfirmed,
+    deliveryQrConfirmed: logistics.deliveryQrConfirmed,
+    pickupAddress: logistics.pickupAddress,
+    shippingAddress: logistics.shippingAddress,
+    routeInfo: logistics.routeInfo,
+    estimatedDelivery: logistics.estimatedDelivery,
+    actualDelivery: logistics.actualDelivery,
+    escrowReleaseDue: logistics.escrowReleaseDue,
+    shippingCost: logistics.shippingCost,
+    settlement: logistics.settlement,
+    trackingHistory: logistics.trackingHistory || [],
+    qrScans: logistics.qrScans || [],
+    gpsTracking: logistics.gpsTracking,
+    liveTracking: {
+      pickup: pickupCoords,
+      delivery: deliveryCoords,
+      driver: driverCoords,
+      history,
+      routePath,
+      lastUpdate: logistics.gpsTracking?.current?.lastUpdate || history[history.length - 1]?.timestamp || logistics.updatedAt,
+      googleMapsUrl: buildGoogleMapsUrl(routePath.length ? routePath : [pickupCoords, deliveryCoords]),
+      embedUrl: buildGoogleMapsEmbedUrl(routePath.length ? routePath : [pickupCoords, deliveryCoords]),
+    },
+  };
+};
+
+const summarizeParty = (party) => {
+  if (!party) return null;
+  const plain = party?.toObject ? party.toObject() : party;
+  return {
+    id: plain._id || plain.id,
+    name: plain.businessName || plain.fullName || plain.name || 'Assigned partner',
+    phone: plain.phone || '',
+    email: plain.email || '',
+  };
+};
+
+const statusEvent = ({ source, status, note, timestamp, location, gpsCoords }) => ({
+  source,
+  status,
+  note,
+  timestamp,
+  location,
+  gpsCoords,
+});
+
+const buildSellerTracking = (order) => {
+  const timeline = Array.isArray(order.timeline) ? order.timeline : [];
+  const createdEvent = statusEvent({
+    source: 'seller',
+    status: 'order_placed',
+    note: 'Order placed and sent to the seller.',
+    timestamp: order.createdAt,
+  });
+
+  return [createdEvent, ...timeline.map((item) => statusEvent({
+    source: 'seller',
+    status: item.status,
+    note: item.note || `Seller/order status changed to ${readableStatus(item.status)}.`,
+    timestamp: item.timestamp,
+  }))].filter((item) => item.timestamp);
+};
+
+const buildLogisticsTracking = (logistics) => {
+  if (!logistics) return [];
+
+  const history = Array.isArray(logistics.trackingHistory) ? logistics.trackingHistory.map((item) => statusEvent({
+    source: 'logistics',
+    status: item.status,
+    note: item.notes || 'Shipment status updated.',
+    timestamp: item.timestamp,
+    location: item.location,
+    gpsCoords: item.gpsCoords,
+  })) : [];
+
+  const qrEvents = Array.isArray(logistics.qrScans) ? logistics.qrScans.map((scan) => statusEvent({
+    source: 'logistics',
+    status: `${scan.step}_qr_scanned`,
+    note: `${scan.step === 'pickup' ? 'Seller pickup' : 'Buyer delivery'} QR scan confirmed.`,
+    timestamp: scan.scannedAt,
+    gpsCoords: scan.gpsCoords,
+  })) : [];
+
+  return [...history, ...qrEvents].filter((item) => item.timestamp);
+};
+
+const buildTrackingMilestones = ({ order, logistics, escrow }) => {
+  const orderStatus = order.status;
+  const logisticsStatus = logistics?.status;
+  const sellerAccepted = !['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(orderStatus);
+  const inTransit = ['dispatched', 'IN_TRANSIT'].includes(orderStatus) ||
+    ['picked_up', 'in_transit', 'out_for_delivery'].includes(logisticsStatus);
+  const delivered = ['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(orderStatus) ||
+    logisticsStatus === 'delivered';
+
+  return [
+    {
+      key: 'payment',
+      label: 'Payment secured',
+      complete: Boolean(order.paidAt || escrow?.paidAt || escrow?.heldAt || ['FUNDS_HELD', 'payment_escrowed', 'processing', 'dispatched', 'IN_TRANSIT', 'DELIVERED', 'RELEASED', 'completed'].includes(orderStatus)),
+      source: 'escrow',
+    },
+    {
+      key: 'seller',
+      label: 'Seller processing',
+      complete: sellerAccepted,
+      source: 'seller',
+    },
+    {
+      key: 'pickup',
+      label: 'Logistics pickup',
+      complete: Boolean(logistics?.pickupQrConfirmed || logistics?.qrScans?.some((scan) => scan.step === 'pickup') || inTransit || delivered),
+      source: 'logistics',
+    },
+    {
+      key: 'delivery',
+      label: 'Delivered',
+      complete: delivered,
+      source: 'logistics',
+    },
+  ];
+};
+
+const attachOrderRelations = async (orders) => {
+  const list = Array.isArray(orders) ? orders : [orders];
+  const ids = list.map((order) => getDocId(order)).filter(Boolean);
+  if (!ids.length) return Array.isArray(orders) ? [] : null;
+
+  const [escrows, logisticsRecords] = await Promise.all([
+    Escrow.find({ order: { $in: ids } }).lean(),
+    Logistics.find({ order: { $in: ids } }).lean(),
+  ]);
+  const escrowMap = new Map(escrows.map((escrow) => [String(escrow.order), escrow]));
+  const logisticsMap = new Map(logisticsRecords.map((record) => [String(record.order), record]));
+
+  const decorated = list.map((order) => {
+    const plain = order?.toObject ? order.toObject() : order;
+    const id = String(getDocId(plain));
+    return {
+      ...plain,
+      escrow: summarizeEscrow(escrowMap.get(id)),
+      logistics: summarizeLogistics(logisticsMap.get(id)),
+    };
+  });
+
+  return Array.isArray(orders) ? decorated : decorated[0];
+};
 
 class OrderService {
   async createOrder(orderData) {
@@ -48,7 +476,7 @@ class OrderService {
     const productDoc = await Product.findById(product);
     if (!productDoc) throw httpError('Product not found', 404);
 
-    const seller = await User.findById(productDoc.seller).select('businessType phone');
+    const seller = await User.findById(productDoc.seller).select('businessType phone locationHub city address location logisticsProfile.currentLocation');
     const sellerBusinessType = String(seller?.businessType || '').toLowerCase();
     const requiresBulkMinimum = sellerBusinessType === 'wholesaler' || sellerBusinessType === 'manufacturer';
     const orderQuantity = Number(quantity);
@@ -66,6 +494,13 @@ class OrderService {
     await productService.reserveStock(product, orderQuantity);
 
     const normalizedDeliveryAddress = normalizeDeliveryAddress(deliveryAddress);
+    const productSubtotal = orderQuantity * productDoc.price;
+    const logisticsQuote = calculateLogisticsCharge({
+      product: productDoc,
+      seller,
+      deliveryAddress: normalizedDeliveryAddress,
+      quantity: orderQuantity,
+    });
 
     // Create order
     const order = await Order.create({
@@ -74,20 +509,114 @@ class OrderService {
       product,
       quantity: orderQuantity,
       unitPrice: productDoc.price,
-      totalAmount: orderQuantity * productDoc.price,
+      productSubtotal,
+      logisticsFee: logisticsQuote.logisticsFee,
+      logisticsDistanceKm: logisticsQuote.distanceKm,
+      logisticsPricing: {
+        estimated: logisticsQuote.estimated,
+        origin: logisticsQuote.pickupAddress,
+        destination: logisticsQuote.shippingAddress,
+        weightKg: logisticsQuote.weightKg,
+        ratePerKm: logisticsQuote.ratePerKm,
+        weightRate: logisticsQuote.weightRate,
+        baseFee: logisticsQuote.baseFee,
+        minimumFee: logisticsQuote.minimumFee,
+        calculationSource: logisticsQuote.calculationSource,
+      },
+      totalAmount: productSubtotal + logisticsQuote.logisticsFee,
       deliveryAddress: normalizedDeliveryAddress,
       deliveryAddressText: typeof deliveryAddress === 'string' ? deliveryAddress.trim() : normalizedDeliveryAddress?.label,
       qrChain: uuidv4(),
       status: 'pending_payment',
+      inventoryReservedAt: new Date(),
     });
+
+    try {
+      const logistics = await Logistics.create({
+        order: order._id,
+        orderNumber: getOrderLabel(order),
+        seller: productDoc.seller,
+        buyer,
+        carrier: 'solo_owner_operator',
+        pickupAddress: logisticsQuote.pickupAddress,
+        shippingAddress: logisticsQuote.shippingAddress,
+        weight: logisticsQuote.weightKg,
+        weightUnit: 'kg',
+        cargoType: productDoc.name || 'Order cargo',
+        status: 'pending',
+        shippingCost: logisticsQuote.logisticsFee,
+        routeInfo: {
+          totalDistanceKm: logisticsQuote.distanceKm,
+          estimatedDurationMin: logisticsQuote.distanceKm ? Math.ceil((logisticsQuote.distanceKm / 45) * 60) : 0,
+          waypoints: [
+            {
+              location: {
+                lat: logisticsQuote.pickupAddress.gpsLat,
+                lng: logisticsQuote.pickupAddress.gpsLng,
+              },
+              address: logisticsQuote.pickupAddress.label,
+              type: 'pickup',
+              sequence: 1,
+            },
+            {
+              location: {
+                lat: logisticsQuote.shippingAddress.gpsLat,
+                lng: logisticsQuote.shippingAddress.gpsLng,
+              },
+              address: logisticsQuote.shippingAddress.label,
+              type: 'dropoff',
+              sequence: 2,
+            },
+          ].filter((point) => point.location.lat != null && point.location.lng != null),
+        },
+        metadata: {
+          autoCreated: true,
+          source: 'order_created_with_buyer_location',
+          paymentIncludedInEscrow: true,
+          distanceKm: logisticsQuote.distanceKm,
+          calculationSource: logisticsQuote.calculationSource,
+          estimated: logisticsQuote.estimated,
+        },
+      });
+      await qrChainSvc.generateTripTokens(logistics);
+    } catch (logisticsError) {
+      console.warn('Order logistics creation failed:', logisticsError.message);
+    }
 
     // Notify seller via SMS
     if (seller?.phone) {
       await smsQueue.add('send', {
         to: seller.phone,
-        message: `New order #${order._id} for ${orderQuantity} ${productDoc.name}. Awaiting payment.`,
+        message: `New order #${order._id} for ${orderQuantity} ${productDoc.name}. Awaiting payment. Total KES ${Math.ceil(order.totalAmount).toLocaleString()} includes logistics.`,
       });
     }
+
+    await notifyOrderParties(order, {
+      buyer: {
+        event: 'order_created',
+        title: `Order ${getOrderLabel(order)} created`,
+        body: `Your order for ${orderQuantity} ${productDoc.name} is awaiting payment. Total includes logistics delivery fee.`,
+        data: {
+          href: `/orders/${order._id}/track`,
+          productName: productDoc.name,
+          productSubtotal,
+          logisticsFee: logisticsQuote.logisticsFee,
+          totalAmount: order.totalAmount,
+        },
+      },
+      seller: {
+        event: 'new_order',
+        title: `New order ${getOrderLabel(order)}`,
+        body: `New order for ${orderQuantity} ${productDoc.name}. Buyer payment will hold product and logistics money in escrow.`,
+        data: {
+          href: '/seller/orders',
+          productName: productDoc.name,
+          productSubtotal,
+          logisticsFee: logisticsQuote.logisticsFee,
+          totalAmount: order.totalAmount,
+        },
+      },
+    });
 
     return order;
   }
@@ -117,9 +646,78 @@ class OrderService {
     const total = await Order.countDocuments(query);
 
     return {
-      data: orders,
+      data: await attachOrderRelations(orders),
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     };
+  }
+
+  async getBuyerSellers(buyerId) {
+    const orders = await Order.find({ buyer: buyerId })
+      .populate('seller', 'fullName name businessName email phone businessType businessLogoUrl city locationHub')
+      .populate('product', 'name images price category rating')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const sellerMap = new Map();
+    orders.forEach((order) => {
+      const seller = order.seller;
+      const sellerId = String(seller?._id || seller || '');
+      if (!sellerId) return;
+      const current = sellerMap.get(sellerId) || {
+        id: sellerId,
+        seller,
+        orderCount: 0,
+        totalSpent: 0,
+        lastOrderAt: null,
+        activeOrders: 0,
+        deliveredOrders: 0,
+        products: [],
+      };
+
+      current.orderCount += 1;
+      current.totalSpent += Number(order.totalAmount || order.total || 0);
+      current.lastOrderAt = current.lastOrderAt && new Date(current.lastOrderAt) > new Date(order.createdAt)
+        ? current.lastOrderAt
+        : order.createdAt;
+      if (['processing', 'payment_escrowed', 'FUNDS_HELD', 'dispatched', 'IN_TRANSIT'].includes(order.status)) current.activeOrders += 1;
+      if (['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(order.status)) current.deliveredOrders += 1;
+      if (order.product && !current.products.some((product) => String(product._id || product.id) === String(order.product._id || order.product))) {
+        current.products.push(order.product);
+      }
+
+      sellerMap.set(sellerId, current);
+    });
+
+    return Array.from(sellerMap.values()).sort((left, right) => new Date(right.lastOrderAt || 0) - new Date(left.lastOrderAt || 0));
+  }
+
+  async getBuyerReviewQueue(buyerId) {
+    const reviewableStatuses = ['delivered', 'DELIVERED', 'completed', 'RELEASED'];
+    const orders = await Order.find({ buyer: buyerId, status: { $in: reviewableStatuses } })
+      .populate('seller', 'fullName name businessName businessLogoUrl')
+      .populate('product', 'name images price category rating reviews')
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    return orders.map((order) => {
+      const reviews = Array.isArray(order.product?.reviews) ? order.product.reviews : [];
+      const existingReview = reviews.find((review) => String(review.user?._id || review.user) === String(buyerId));
+      return {
+        order: {
+          id: order._id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          totalAmount: order.totalAmount,
+          deliveredAt: order.deliveredAt,
+          updatedAt: order.updatedAt,
+        },
+        product: order.product,
+        seller: order.seller,
+        canReview: Boolean(order.product),
+        reviewed: Boolean(existingReview),
+        review: existingReview || null,
+      };
+    }).filter((item) => item.product);
   }
 
   async getOrderById(orderId, userId, userRole) {
@@ -136,14 +734,62 @@ class OrderService {
     return order;
   }
 
+  async getOrderView(orderId, userId, userRole) {
+    const order = await this.getOrderById(orderId, userId, userRole);
+    return attachOrderRelations(order);
+  }
+
+  async getOrderTracking(orderId, userId, userRole) {
+    const order = await this.getOrderById(orderId, userId, userRole);
+    const [logistics, escrow] = await Promise.all([
+      Logistics.findOne({ order: orderId })
+        .populate('driver', 'fullName name phone logisticsProfile.currentLocation')
+        .lean()
+        .catch(() => null),
+      Escrow.findOne({ order: orderId }).lean().catch(() => null),
+    ]);
+    const sellerTracking = buildSellerTracking(order);
+    const logisticsTracking = buildLogisticsTracking(logistics);
+    const logisticsSummary = summarizeLogistics(logistics);
+
+    const timeline = [
+      ...sellerTracking,
+      ...logisticsTracking,
+    ].filter((item) => item.timestamp)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    return {
+      order,
+      buyer: summarizeParty(order.buyer),
+      seller: summarizeParty(order.seller),
+      logistics: logisticsSummary,
+      liveTracking: logisticsSummary?.liveTracking || null,
+      escrow: summarizeEscrow(escrow),
+      sellerTracking,
+      logisticsTracking,
+      milestones: buildTrackingMilestones({ order, logistics, escrow }),
+      timeline,
+      currentStatus: logistics?.status || order.status,
+      proofOfDelivery: {
+        deliveredAt: logistics?.actualDelivery || order.deliveredAt,
+        deliveryQrConfirmed: Boolean(logistics?.deliveryQrConfirmed || logistics?.qrScans?.some((scan) => scan.step === 'delivery')),
+        gpsCoords: logistics?.qrScans?.find((scan) => scan.step === 'delivery')?.gpsCoords || logistics?.gpsTracking?.current || null,
+      },
+    };
+  }
+
   async cancelOrder(orderId, userId, userRole, reason) {
     const order = await this.getOrderById(orderId, userId, userRole);
     if (!['pending_payment', 'AWAITING_PAYMENT', 'payment_escrowed', 'FUNDS_HELD'].includes(order.status)) {
       throw httpError('Order cannot be cancelled at this stage', 409, { currentStatus: order.status });
     }
 
-    // Release reserved stock
-    await productService.releaseReservedStock(order.product, order.quantity);
+    if (order.inventoryCommittedAt && !order.inventoryRestockedAt) {
+      await productService.restoreCommittedStock(order.product, order.quantity);
+      order.inventoryRestockedAt = new Date();
+    } else if (!order.inventoryCommittedAt) {
+      await productService.releaseReservedStock(order.product, order.quantity);
+    }
 
     // If payment was escrowed, refund
     if (['payment_escrowed', 'FUNDS_HELD'].includes(order.status)) {
@@ -154,9 +800,32 @@ class OrderService {
     await order.save();
 
     // Notify both parties
-    await smsQueue.add('send', {
-      to: order.buyer.phone,
-      message: `Order #${orderId} has been cancelled. Reason: ${reason}`,
+    if (order.buyer?.phone) {
+      await smsQueue.add('send', {
+        to: order.buyer.phone,
+        message: `Order #${orderId} has been cancelled. Reason: ${reason || 'Not provided'}`,
+      });
+    }
+
+    await notifyOrderParties(order, {
+      buyer: {
+        event: 'order_cancelled',
+        title: `Order ${getOrderLabel(order)} cancelled`,
+        body: `Your order has been cancelled${reason ? `: ${reason}` : '.'}`,
+        data: {
+          href: `/orders/${order._id}/track`,
+          reason: reason || '',
+        },
+      },
+      seller: {
+        event: 'order_cancelled',
+        title: `Order ${getOrderLabel(order)} cancelled`,
+        body: `Order was cancelled${reason ? `: ${reason}` : '.'}`,
+        data: {
+          href: '/seller/orders',
+          reason: reason || '',
+        },
+      },
     });
 
     return order;
@@ -191,7 +860,27 @@ class OrderService {
       releaseMethod: 'manual_confirm',
     });
 
-    return release.escrow ? await Order.findById(orderId) : order;
+    const finalOrder = await getPopulatedOrder(orderId);
+    await notifyOrderParties(finalOrder || order, {
+      buyer: {
+        event: 'delivery_confirmed',
+        title: `Delivery confirmed for ${getOrderLabel(finalOrder || order)}`,
+        body: 'Your delivery confirmation was received.',
+        data: {
+          href: `/orders/${orderId}/track`,
+        },
+      },
+      seller: {
+        event: 'delivery_confirmed',
+        title: `Buyer confirmed ${getOrderLabel(finalOrder || order)}`,
+        body: 'The buyer confirmed delivery. Escrow release has started.',
+        data: {
+          href: '/seller/orders',
+        },
+      },
+    });
+
+    return finalOrder || order;
   }
 
   async raiseDispute(orderId, userId, data, userRole) {
@@ -203,7 +892,33 @@ class OrderService {
       throw httpError('Not authorized to create dispute for this order', 403);
     }
 
-    return escrowService.raiseDispute(orderId, userId, data, userRole);
+    const dispute = await escrowService.raiseDispute(orderId, userId, data, userRole);
+    const disputedOrder = await getPopulatedOrder(orderId);
+
+    await notifyOrderParties(disputedOrder || order, {
+      buyer: {
+        event: 'order_dispute_opened',
+        channel: 'dispute',
+        title: `Dispute opened for ${getOrderLabel(disputedOrder || order)}`,
+        body: 'A dispute has been opened for this order.',
+        data: {
+          href: `/orders/${orderId}/track`,
+          disputeId: String(dispute?._id || ''),
+        },
+      },
+      seller: {
+        event: 'order_dispute_opened',
+        channel: 'dispute',
+        title: `Dispute opened for ${getOrderLabel(disputedOrder || order)}`,
+        body: 'A dispute has been opened for this order. Review the order details.',
+        data: {
+          href: '/seller/orders',
+          disputeId: String(dispute?._id || ''),
+        },
+      },
+    });
+
+    return dispute;
   }
 
   async updateOrderStatus(orderId, userId, userRole, nextStatus) {
@@ -247,12 +962,42 @@ class OrderService {
     }
 
     order.status = nextStatus;
+    if (['delivered', 'DELIVERED'].includes(nextStatus) && !order.deliveredAt) {
+      order.deliveredAt = new Date();
+      const releaseDate = new Date(order.deliveredAt);
+      releaseDate.setHours(releaseDate.getHours() + 72);
+      order.escrowReleaseDate = releaseDate;
+    }
+    if (['RELEASED', 'completed'].includes(nextStatus) && !order.releasedAt) {
+      order.releasedAt = new Date();
+    }
     await order.save();
 
-    return await Order.findById(orderId)
-      .populate('buyer', 'fullName phone')
-      .populate('seller', 'fullName phone')
-      .populate('product', 'name images');
+    const updatedOrder = await getPopulatedOrder(orderId);
+    const statusLabel = readableStatus(nextStatus);
+
+    await notifyOrderParties(updatedOrder || order, {
+      buyer: {
+        event: 'order_status_updated',
+        title: `Order ${getOrderLabel(updatedOrder || order)} is ${statusLabel}`,
+        body: `Your order status changed to ${statusLabel}.`,
+        data: {
+          href: `/orders/${orderId}/track`,
+          previousStatus: currentStatus,
+        },
+      },
+      seller: {
+        event: 'order_status_updated',
+        title: `Order ${getOrderLabel(updatedOrder || order)} updated`,
+        body: `Order status changed to ${statusLabel}.`,
+        data: {
+          href: '/seller/orders',
+          previousStatus: currentStatus,
+        },
+      },
+    });
+
+    return updatedOrder || order;
   }
 }
 

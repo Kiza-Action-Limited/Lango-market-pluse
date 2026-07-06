@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { FaTrash, FaPlus, FaMinus, FaShoppingCart, FaStore, FaTruck, FaBrain, FaShieldAlt } from 'react-icons/fa';
 import { formatCurrency } from '../utils/formatters';
+import { SHIPPING_COST } from '../utils/contants';
 import { getMinimumOrderQuantity, MQQ_TIERS } from '../utils/moq';
 
 const Cart = () => {
@@ -16,9 +17,9 @@ const Cart = () => {
     }
   };
 
-  // Calculate shipping cost (free over KSh 50)
+  // Calculate shipping cost
   const subtotal = getCartTotal();
-  const shippingCost = subtotal >= 50 ? 0 : 5;
+  const shippingCost = SHIPPING_COST;
   const total = subtotal + shippingCost;
 
   if (loading) {
@@ -179,22 +180,8 @@ const Cart = () => {
                 </div>
                 <div className="flex justify-between text-[#6B7280]">
                   <span>Shipping</span>
-                  <span className="flex items-center gap-1">
-                    {shippingCost === 0 ? (
-                      <>
-                        <FaTruck className="text-[#16A34A] text-xs" />
-                        <span className="text-[#16A34A]">Free</span>
-                      </>
-                    ) : (
-                      formatCurrency(shippingCost)
-                    )}
-                  </span>
+                  <span>{formatCurrency(shippingCost)}</span>
                 </div>
-                {subtotal >= 50 && (
-                  <div className="bg-[#16A34A]/10 rounded-lg p-2 text-center">
-                    <span className="text-[#16A34A] text-sm font-medium">✓ Free Shipping Applied</span>
-                  </div>
-                )}
                 <div className="border-t border-gray-200 pt-3">
                   <div className="flex justify-between font-bold text-lg">
                     <span>Total</span>
@@ -223,20 +210,6 @@ const Cart = () => {
               </div>
             </div>
             
-            {/* AI Intelligence Tip */}
-            {cartItems.length > 0 && total < 50 && (
-            <div className="mt-4 bg-linear-to-r from-[#F97316]/10 to-[#FB923C]/10 rounded-xl p-4 border border-[#F97316]/20">
-                <div className="flex items-start gap-2">
-                  <FaBrain className="text-[#F97316] text-lg mt-0.5" />
-                  <div>
-                    <h4 className="font-semibold text-[#111827] text-sm">Smart Tip</h4>
-                    <p className="text-xs text-[#6B7280]">
-                      Add <span className="font-bold text-[#16A34A]">{formatCurrency(50 - subtotal)}</span> more to qualify for <strong className="text-[#16A34A]">Free Shipping</strong>!
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

@@ -36,6 +36,8 @@ export const getEffectiveUserCategory = (user = {}) => {
 
 export const isFarmerUser = (user = {}) => getEffectiveUserCategory(user) === 'farmer';
 
+export const isLogisticsUser = (user = {}) => getEffectiveUserCategory(user) === 'logistics';
+
 export const isSellerUser = (user = {}) => {
   const category = getEffectiveUserCategory(user);
   return category === 'admin' || SELLER_CATEGORIES.has(category);

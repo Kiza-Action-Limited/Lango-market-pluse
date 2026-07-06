@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation, Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
@@ -31,6 +31,17 @@ const initialTripForm = {
 const initialJoinForm = {
   groupTripId: '',
   weightKg: 25,
+};
+
+const initialGroupTripPaymentForm = {
+  groupTripId: '',
+  participantUserId: '',
+  amount: '',
+  paymentStatus: 'paid',
+  paymentMethod: 'mpesa',
+  paymentReference: '',
+  paymentPhone: '',
+  notes: '',
 };
 
 const initialBulkForm = {
@@ -84,6 +95,35 @@ const formatJson = (value) => {
   } catch {
     return String(value);
   }
+};
+
+const formatCurrency = (value) => new Intl.NumberFormat('en-KE', {
+  style: 'currency',
+  currency: 'KES',
+  maximumFractionDigits: 0,
+}).format(Number(value || 0));
+
+const MetricCard = ({ label, value, icon: Icon, tone = 'orange' }) => {
+  const tones = {
+    orange: 'bg-[#FFF7ED] text-[#F97316]',
+    blue: 'bg-blue-50 text-blue-700',
+    green: 'bg-green-50 text-green-700',
+    slate: 'bg-slate-100 text-slate-700',
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</p>
+          <p className="mt-1 text-2xl font-bold text-[#111827]">{value}</p>
+        </div>
+        <div className={`rounded-lg p-3 ${tones[tone] || tones.orange}`}>
+          <Icon />
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const Section = ({ title, description, icon: Icon, children, action }) => (
@@ -151,6 +191,7 @@ const LogisticsOperations = () => {
   const [loadingState, setLoadingState] = useState({});
   const [tripForm, setTripForm] = useState(initialTripForm);
   const [joinForm, setJoinForm] = useState(initialJoinForm);
+  const [groupTripPaymentForm, setGroupTripPaymentForm] = useState(initialGroupTripPaymentForm);
   const [bulkForm, setBulkForm] = useState(initialBulkForm);
   const [qrForm, setQrForm] = useState(initialQrForm);
   const [escrowForm, setEscrowForm] = useState(initialEscrowForm);
@@ -159,6 +200,7 @@ const LogisticsOperations = () => {
 
   const [tripResult, setTripResult] = useState(null);
   const [joinResult, setJoinResult] = useState(null);
+  const [groupTripPaymentResult, setGroupTripPaymentResult] = useState(null);
   const [bulkResult, setBulkResult] = useState(null);
   const [qrResult, setQrResult] = useState(null);
   const [qrListResult, setQrListResult] = useState(null);
@@ -172,6 +214,7 @@ const LogisticsOperations = () => {
     nearbyDrivers: null,
     deliveryStats: null,
   });
+  const [operationsOverview, setOperationsOverview] = useState(null);
 
   const tabs = useMemo(() => {
     const base = [
@@ -193,6 +236,20 @@ const LogisticsOperations = () => {
   const setLoadingFor = (key, value) => {
     setLoadingState((prev) => ({ ...prev, [key]: value }));
   };
+
+  useEffect(() => {
+    if (!isAllowed) return;
+
+    logisticsService.getOperationsOverview()
+      .then((result) => setOperationsOverview(result))
+      .catch(() => {
+        setOperationsOverview({
+          title: isAdmin ? 'Admin Logistics Command Center' : 'Logistics Command Center',
+          subtitle: 'Manage route tools, QR proof, escrow controls, and delivery operations.',
+          metrics: {},
+        });
+      });
+  }, [isAllowed, isAdmin]);
 
   const handleCreateTrip = async (event) => {
     event.preventDefault();
@@ -232,6 +289,31 @@ const LogisticsOperations = () => {
       toast.error(error?.response?.data?.message || error?.message || 'Failed to join group trip');
     } finally {
       setLoadingFor('joinTrip', false);
+    }
+  };
+
+  const handleGroupTripPayment = async (event) => {
+    event.preventDefault();
+    setLoadingFor('groupTripPayment', true);
+    try {
+      const result = await logisticsService.recordGroupTripPayment(
+        groupTripPaymentForm.groupTripId.trim(),
+        {
+          participantUserId: groupTripPaymentForm.participantUserId.trim(),
+          amount: groupTripPaymentForm.amount ? Number(groupTripPaymentForm.amount) : undefined,
+          paymentStatus: groupTripPaymentForm.paymentStatus,
+          paymentMethod: groupTripPaymentForm.paymentMethod,
+          paymentReference: groupTripPaymentForm.paymentReference.trim(),
+          paymentPhone: groupTripPaymentForm.paymentPhone.trim(),
+          notes: groupTripPaymentForm.notes.trim(),
+        }
+      );
+      setGroupTripPaymentResult(result);
+      toast.success('Group trip payment updated.');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to update group trip payment');
+    } finally {
+      setLoadingFor('groupTripPayment', false);
     }
   };
 
@@ -507,13 +589,15 @@ const LogisticsOperations = () => {
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#F8FAFC_0%,#FFF7ED_100%)] px-4 py-6 sm:px-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="rounded-3xl border border-orange-100 bg-white/90 p-6 shadow-sm backdrop-blur">
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#F97316]">Backend surfaces now exposed</p>
-              <h1 className="mt-2 text-3xl font-bold text-[#111827]">Logistics Operations Hub</h1>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#F97316]">Verified logistics workspace</p>
+              <h1 className="mt-2 text-3xl font-bold text-[#111827]">
+                {operationsOverview?.title || (isAdmin ? 'Admin Logistics Command Center' : 'Logistics Command Center')}
+              </h1>
               <p className="mt-2 max-w-3xl text-sm text-gray-600">
-                Create and join group trips, manage QR tokens, review escrow, run bulk status updates, and inspect sinking-fund data from one place.
+                {operationsOverview?.subtitle || 'Manage routing, QR proof, escrow readiness, and driver operations with verified backend data.'}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -521,10 +605,17 @@ const LogisticsOperations = () => {
                 to={isAdmin ? '/admin/logistics' : '/logistics/status'}
                 className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
-                Back to dashboard
+                Back to live dashboard
               </Link>
             </div>
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard label="Active Trips" value={operationsOverview?.metrics?.activeTrips ?? 0} icon={FaTruck} tone="blue" />
+          <MetricCard label="Live GPS Feeds" value={operationsOverview?.metrics?.liveGpsCount ?? 0} icon={FaMapMarkedAlt} tone="green" />
+          <MetricCard label="Delivery QR Proofs" value={operationsOverview?.metrics?.deliveryProofCount ?? 0} icon={FaQrcode} tone="orange" />
+          <MetricCard label="Escrow Held" value={formatCurrency(operationsOverview?.metrics?.escrowHeldAmount || 0)} icon={FaLock} tone="slate" />
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -619,6 +710,63 @@ const LogisticsOperations = () => {
               </form>
               <div className="mt-5">
                 <ResultBox value={joinResult} />
+              </div>
+            </Section>
+
+            <Section
+              title="Group Trip Payment"
+              description="Confirm or update participant payment for shared logistics routes."
+              icon={FaCoins}
+            >
+              <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={handleGroupTripPayment}>
+                <Field label="Group Trip ID">
+                  <Input value={groupTripPaymentForm.groupTripId} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, groupTripId: e.target.value }))} required />
+                </Field>
+                <Field label="Participant User ID">
+                  <Input value={groupTripPaymentForm.participantUserId} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, participantUserId: e.target.value }))} required />
+                </Field>
+                <Field label="Amount">
+                  <Input type="number" min="0" value={groupTripPaymentForm.amount} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, amount: e.target.value }))} />
+                </Field>
+                <Field label="Status">
+                  <Select value={groupTripPaymentForm.paymentStatus} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, paymentStatus: e.target.value }))}>
+                    <option value="paid">paid</option>
+                    <option value="pending">pending</option>
+                    <option value="unpaid">unpaid</option>
+                    <option value="failed">failed</option>
+                    <option value="refunded">refunded</option>
+                  </Select>
+                </Field>
+                <Field label="Method">
+                  <Select value={groupTripPaymentForm.paymentMethod} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, paymentMethod: e.target.value }))}>
+                    <option value="mpesa">M-Pesa</option>
+                    <option value="cash">Cash</option>
+                    <option value="wallet">Wallet</option>
+                    <option value="bank_transfer">Bank transfer</option>
+                    <option value="card">Card</option>
+                  </Select>
+                </Field>
+                <Field label="Reference">
+                  <Input value={groupTripPaymentForm.paymentReference} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, paymentReference: e.target.value }))} />
+                </Field>
+                <Field label="Phone">
+                  <Input value={groupTripPaymentForm.paymentPhone} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, paymentPhone: e.target.value }))} />
+                </Field>
+                <Field label="Notes">
+                  <Input value={groupTripPaymentForm.notes} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, notes: e.target.value }))} />
+                </Field>
+                <div className="md:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={loadingState.groupTripPayment}
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#16A34A] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-60"
+                  >
+                    {loadingState.groupTripPayment ? 'Saving...' : 'Update Payment'}
+                  </button>
+                </div>
+              </form>
+              <div className="mt-5">
+                <ResultBox value={groupTripPaymentResult} />
               </div>
             </Section>
           </div>

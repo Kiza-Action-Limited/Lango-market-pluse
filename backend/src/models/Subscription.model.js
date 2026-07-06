@@ -1,5 +1,8 @@
 // models/Subscription.js
 const mongoose = require('mongoose');
+const { PLAN_IDS, PRODUCT_LIMITS } = require('../config/subscriptionPlans');
+
+const SMS_ENABLED_PLANS = ['solo', 'smart', 'growth'];
 
 const subscriptionSchema = new mongoose.Schema(
   {
@@ -49,7 +52,7 @@ const subscriptionSchema = new mongoose.Schema(
       // Inventory limits
       maxProducts: {
         type: Number,
-        default: 30 // Solo: 30, Smart/Growth: unlimited (set to large number)
+        default: PRODUCT_LIMITS[PLAN_IDS.SOLO]
       },
       
       // SMS Credits (Plan 2: 500, Plan 3: 2000)
@@ -94,6 +97,42 @@ const subscriptionSchema = new mongoose.Schema(
         default: false
       },
       hasDailyBurn: {
+        type: Boolean,
+        default: false
+      },
+      hasProductReviews: {
+        type: Boolean,
+        default: true
+      },
+      hasOrderNotifications: {
+        type: Boolean,
+        default: true
+      },
+      hasSellerWallet: {
+        type: Boolean,
+        default: true
+      },
+      hasWithdrawals: {
+        type: Boolean,
+        default: true
+      },
+      hasEscrowOrders: {
+        type: Boolean,
+        default: true
+      },
+      hasRFQInbox: {
+        type: Boolean,
+        default: false
+      },
+      hasRelatedProducts: {
+        type: Boolean,
+        default: false
+      },
+      hasLogisticsCommandCenter: {
+        type: Boolean,
+        default: false
+      },
+      hasInventoryAlerts: {
         type: Boolean,
         default: false
       },
@@ -221,40 +260,67 @@ subscriptionSchema.pre('save', function() {
   switch(this.plan) {
     case 'solo':
       if (shouldUseDefaultPrice) this.price = 500;
-      this.features.maxProducts = 30;
-      this.features.smsCreditsAllocated = 0;
+      this.features.maxProducts = PRODUCT_LIMITS[PLAN_IDS.SOLO];
+      this.features.smsCreditsAllocated = 20;
       this.features.hasRegionalGuardian = false;
       this.features.hasBillGuardian = false;
       this.features.hasAssetTracking = false;
       this.features.hasStaffRoles = false;
       this.features.hasDailyBurn = false;
+      this.features.hasProductReviews = true;
+      this.features.hasOrderNotifications = true;
+      this.features.hasSellerWallet = true;
+      this.features.hasWithdrawals = true;
+      this.features.hasEscrowOrders = true;
+      this.features.hasRFQInbox = false;
+      this.features.hasRelatedProducts = false;
+      this.features.hasLogisticsCommandCenter = false;
+      this.features.hasInventoryAlerts = false;
       break;
       
     case 'smart':
       if (shouldUseDefaultPrice) this.price = 2500;
-      this.features.maxProducts = 999999; // Unlimited
+      this.features.maxProducts = PRODUCT_LIMITS[PLAN_IDS.SMART];
       this.features.smsCreditsAllocated = 500;
       this.features.hasRegionalGuardian = true;
       this.features.hasBillGuardian = false;
       this.features.hasAssetTracking = false;
       this.features.hasStaffRoles = false;
       this.features.hasDailyBurn = false;
+      this.features.hasProductReviews = true;
+      this.features.hasOrderNotifications = true;
+      this.features.hasSellerWallet = true;
+      this.features.hasWithdrawals = true;
+      this.features.hasEscrowOrders = true;
+      this.features.hasRFQInbox = true;
+      this.features.hasRelatedProducts = true;
+      this.features.hasLogisticsCommandCenter = true;
+      this.features.hasInventoryAlerts = true;
       break;
       
     case 'growth':
       if (shouldUseDefaultPrice) this.price = 6500;
-      this.features.maxProducts = 999999; // Unlimited
+      this.features.maxProducts = PRODUCT_LIMITS[PLAN_IDS.GROWTH];
       this.features.smsCreditsAllocated = 2000;
       this.features.hasRegionalGuardian = true;
       this.features.hasBillGuardian = true;
       this.features.hasAssetTracking = true;
       this.features.hasStaffRoles = true;
       this.features.hasDailyBurn = true;
+      this.features.hasProductReviews = true;
+      this.features.hasOrderNotifications = true;
+      this.features.hasSellerWallet = true;
+      this.features.hasWithdrawals = true;
+      this.features.hasEscrowOrders = true;
+      this.features.hasRFQInbox = true;
+      this.features.hasRelatedProducts = true;
+      this.features.hasLogisticsCommandCenter = true;
+      this.features.hasInventoryAlerts = true;
       break;
       
     case 'mizigo':
       if (this.price === undefined || this.price === null) this.price = 0;
-      this.features.maxProducts = 0;
+      this.features.maxProducts = PRODUCT_LIMITS[PLAN_IDS.MIZIGO];
       this.features.smsCreditsAllocated = 0;
       this.features.commissionRate = 5; // Default 5%, can go up to 10%
       break;
@@ -284,7 +350,7 @@ subscriptionSchema.virtual('isActive').get(function() {
 
 // Virtual for available SMS credits
 subscriptionSchema.virtual('smsCreditsRemaining').get(function() {
-  if (this.plan !== 'smart' && this.plan !== 'growth') {
+  if (!SMS_ENABLED_PLANS.includes(this.plan)) {
     return 0;
   }
   return Math.max(0, this.features.smsCreditsAllocated - this.features.smsCreditsUsed);
@@ -292,8 +358,8 @@ subscriptionSchema.virtual('smsCreditsRemaining').get(function() {
 
 // Method to use SMS credits
 subscriptionSchema.methods.useSmsCredits = async function(amount) {
-  if (this.plan !== 'smart' && this.plan !== 'growth') {
-    throw new Error('SMS credits only available on Smart and Growth plans');
+  if (!SMS_ENABLED_PLANS.includes(this.plan)) {
+    throw new Error('SMS credits only available on Solo, Smart and Growth plans');
   }
   
   if (this.smsCreditsRemaining < amount) {
@@ -308,8 +374,8 @@ subscriptionSchema.methods.useSmsCredits = async function(amount) {
 
 // Method to add SMS credits (top-up)
 subscriptionSchema.methods.addSmsCredits = async function(amount) {
-  if (this.plan !== 'smart' && this.plan !== 'growth') {
-    throw new Error('SMS credits only available on Smart and Growth plans');
+  if (!SMS_ENABLED_PLANS.includes(this.plan)) {
+    throw new Error('SMS credits only available on Solo, Smart and Growth plans');
   }
   
   this.features.smsCreditsAllocated += amount;

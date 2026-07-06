@@ -3,6 +3,7 @@ const walletService = require('../services/payment/wallet.service');
 const ledgerService = require('../services/payment/ledger.service');
 const billingService = require('../services/subscription/billing.service');
 const Payment = require('../models/Payment.model');
+const { getPlatformAccountPublicPayload } = require('../config/platformAccount');
 const { validationResult } = require('express-validator');
 
 const getMetadataValue = (metadata, key) => {
@@ -19,11 +20,16 @@ exports.initiateMpesaPayment = async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      const firstError = errors.array()[0];
+      return res.status(400).json({
+        success: false,
+        message: firstError?.msg || 'Check the payment request details.',
+        errors: errors.array(),
+      });
     }
 
     const orderId = req.body.orderId || req.params.id;
-    const phoneNumber = req.body.phoneNumber || req.user.phone;
+    const phoneNumber = req.body.phoneNumber;
     const result = await mpesaService.initiatePayment(orderId, phoneNumber, req.user.id);
     res.status(200).json({
       success: true,
@@ -70,7 +76,10 @@ exports.initiateSubscriptionMpesaPayment = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'M-Pesa prompt sent to your phone. Enter your PIN to complete payment.',
-      data: result,
+      data: {
+        ...result,
+        payeeAccount: result.payeeAccount || getPlatformAccountPublicPayload(),
+      },
     });
   } catch (error) {
     next(error);
@@ -113,7 +122,13 @@ exports.checkSubscriptionMpesaStatus = async (req, res, next) => {
             status: payment.status,
             checkoutRequestId,
             planId,
-            message: error.message || 'Waiting for M-Pesa confirmation',
+            activated: false,
+            payeeAccount: getPlatformAccountPublicPayload(),
+            code: error.code,
+            providerStatus: error.providerStatus,
+            message: error.code === 'MPESA_ACCESS_TOKEN_BLOCKED'
+              ? 'Payment is still pending. Safaricom blocked the live status query, so activation will complete when the M-Pesa callback arrives.'
+              : error.message || 'Waiting for M-Pesa confirmation',
           },
         });
       }
@@ -135,6 +150,7 @@ exports.checkSubscriptionMpesaStatus = async (req, res, next) => {
           checkoutRequestId,
           planId,
           subscription,
+          payeeAccount: getPlatformAccountPublicPayload(),
         },
       });
     }
@@ -146,6 +162,7 @@ exports.checkSubscriptionMpesaStatus = async (req, res, next) => {
         activated: false,
         checkoutRequestId,
         planId,
+        payeeAccount: getPlatformAccountPublicPayload(),
         message: payment.failureReason || 'Waiting for M-Pesa confirmation',
       },
     });

@@ -25,8 +25,22 @@ router.get(
   [
     query('page').optional().isInt({ min: 1 }),
     query('limit').optional().isInt({ min: 1, max: 100 }),
-    query('type').optional().isIn(['transfer', 'deposit', 'withdrawal', 'payment', 'refund']),
-    query('status').optional().isIn(['pending', 'completed', 'failed']),
+    query('type').optional().isIn([
+      'deposit',
+      'withdrawal',
+      'payment',
+      'refund',
+      'escrow_hold',
+      'escrow_release',
+      'fee',
+      'subscription_payment',
+      'sms_topup',
+      'commission',
+      'sinking_fund',
+      'group_buy_payout',
+      'payout',
+    ]),
+    query('status').optional().isIn(['pending', 'completed', 'failed', 'reversed']),
   ],
   walletController.getTransactionHistory
 );

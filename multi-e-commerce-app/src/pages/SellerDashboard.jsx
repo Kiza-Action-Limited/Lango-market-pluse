@@ -1,20 +1,44 @@
 // src/pages/SellerDashboard.jsx
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { FaPlus, FaEdit, FaTrash, FaBox, FaDollarSign, FaShoppingCart, FaLock, FaUnlockAlt, FaClipboardList, FaWarehouse, FaPercent, FaStar, FaUsers, FaFileExport, FaEye } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaBox, FaDollarSign, FaShoppingCart, FaLock, FaUnlockAlt, FaClipboardList, FaWarehouse, FaPercent, FaStar, FaUsers, FaFileExport, FaEye, FaTruck, FaQrcode, FaShippingFast, FaMapMarkerAlt, FaFileInvoiceDollar, FaCreditCard, FaDownload, FaComments, FaCheckCircle } from 'react-icons/fa';
 import { formatCurrency } from '../utils/formatters';
 import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
 import { productService } from '../services/productService';
 import { orderService } from '../services/orderService';
+import { logisticsService } from '../services/logisticsService';
+import { rfqService } from '../services/rfqService';
 import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill } from '../components/dashboard/DashboardWidgets';
 import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
 import SellerWalletConsole from '../components/SellerWalletConsole';
+import LiveLogisticsMapPanel from '../components/logistics/LiveLogisticsMapPanel';
+import SharedGroupTripPanel from '../components/logistics/SharedGroupTripPanel';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { buildReviewSummary, buildSalesByLocation, isPaidOrder } from '../utils/dashboardMetrics';
+import { clearPendingSubscriptionPayment, listPendingSubscriptionPayments } from '../utils/subscriptionPaymentRecovery';
+import { formatProductCategory, getEffectiveLowStockThreshold } from '../utils/inventorySensitivity';
+
+const getOrderId = (order) => order?.id || order?._id;
+const getLogisticsId = (logistics) => logistics?.id || logistics?._id;
+const getLogisticsOrderId = (logistics) => logistics?.order?._id || logistics?.order || logistics?.orderId;
+const hasGpsPoint = (point) => (
+  Number.isFinite(Number(point?.lat ?? point?.gpsLat)) &&
+  Number.isFinite(Number(point?.lng ?? point?.gpsLng))
+);
+const escapeReportText = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+const logisticsActiveStatuses = new Set(['pending', 'driver_assigned', 'en_route_to_pickup', 'picked_up', 'in_transit', 'out_for_delivery']);
+const orderDispatchReadyStatuses = new Set(['payment_escrowed', 'processing', 'dispatched', 'funds_held', 'in_transit']);
+const orderClosedStatuses = new Set(['delivered', 'completed', 'cancelled', 'released', 'refunded']);
 
 const SellerDashboard = () => {
-  const { activePlan, hasFeature } = useAuth();
+  const navigate = useNavigate();
+  const { user, activePlan, hasFeature } = useAuth();
   const [stats, setStats] = useState({
     totalProducts: 0,
     totalOrders: 0,
@@ -24,6 +48,11 @@ const SellerDashboard = () => {
   const [products, setProducts] = useState([]);
   const [planUsage, setPlanUsage] = useState(null);
   const [recentOrders, setRecentOrders] = useState([]);
+  const [logisticsByOrder, setLogisticsByOrder] = useState({});
+  const [dashboardMapTracking, setDashboardMapTracking] = useState(null);
+  const [dashboardMapLoading, setDashboardMapLoading] = useState(false);
+  const [sellerRfqs, setSellerRfqs] = useState([]);
+  const [pendingSubscriptionPayments, setPendingSubscriptionPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dashboardRange, setDashboardRange] = useState('30d');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -31,6 +60,10 @@ const SellerDashboard = () => {
   useEffect(() => {
     fetchSellerData();
   }, []);
+
+  useEffect(() => {
+    setPendingSubscriptionPayments(listPendingSubscriptionPayments(user));
+  }, [user]);
 
   const fetchSellerData = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -40,6 +73,35 @@ const SellerDashboard = () => {
       const usage = productsRes?.planUsage || null;
       const ordersRes = await orderService.getAll({ role: 'seller', page: 1, limit: 50 });
       const sellerOrders = ordersRes?.data || [];
+      let rfqRows = [];
+      try {
+        const rfqRes = await rfqService.getMy({ mode: 'seller', limit: 20 });
+        rfqRows = rfqRes?.data || [];
+      } catch (error) {
+        if (error.response?.status !== 404) {
+          console.error('Error fetching seller RFQs:', error);
+        }
+      }
+      const logisticsEntries = await Promise.allSettled(
+        sellerOrders
+          .map((order) => getOrderId(order))
+          .filter(Boolean)
+          .map(async (orderId) => {
+            try {
+              return [orderId, await logisticsService.getByOrder(orderId)];
+            } catch (error) {
+              if (error.response?.status === 404) return [orderId, null];
+              throw error;
+            }
+          })
+      );
+      const nextLogisticsByOrder = {};
+      logisticsEntries.forEach((entry) => {
+        if (entry.status === 'fulfilled' && Array.isArray(entry.value)) {
+          const [orderId, logistics] = entry.value;
+          nextLogisticsByOrder[orderId] = logistics;
+        }
+      });
       const totalRevenue = sellerOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
       const pendingOrders = sellerOrders.filter((o) =>
         ['pending_payment', 'payment_escrowed', 'processing', 'dispatched'].includes(o.status)
@@ -54,6 +116,8 @@ const SellerDashboard = () => {
         pendingOrders,
       });
       setRecentOrders(sellerOrders);
+      setLogisticsByOrder(nextLogisticsByOrder);
+      setSellerRfqs(rfqRows);
     } catch (error) {
       console.error('Error fetching seller data:', error);
     } finally {
@@ -127,7 +191,7 @@ const SellerDashboard = () => {
   const canManageInventory = hasFeature(SUBSCRIPTION_FEATURES.INVENTORY_LEDGER);
   const lowStockItems = products.filter((p) => {
     const stock = Number(p.quantityAvailable ?? p.stock ?? 0);
-    const threshold = Number(p.minThreshold ?? 0);
+    const threshold = getEffectiveLowStockThreshold(p);
     return threshold > 0 && stock <= threshold;
   });
   const daysToExpiry = (dateValue) => {
@@ -169,12 +233,93 @@ const SellerDashboard = () => {
   const paidSellerOrders = recentOrders.filter(isPaidOrder);
   const salesByLocationRows = buildSalesByLocation(recentOrders);
   const reviewSummary = buildReviewSummary(products, paidSellerOrders.length);
+  const logisticsRecords = Object.values(logisticsByOrder).filter(Boolean);
+  const dispatchReadyOrders = recentOrders.filter((order) => {
+    const orderId = getOrderId(order);
+    const status = String(order.status || '').toLowerCase();
+    return orderId
+      && orderDispatchReadyStatuses.has(status)
+      && !orderClosedStatuses.has(status)
+      && !logisticsByOrder[orderId];
+  });
+  const activeDeliveries = logisticsRecords.filter((record) => logisticsActiveStatuses.has(String(record.status || 'pending').toLowerCase()));
+  const qrHandoffPending = activeDeliveries.filter((record) => {
+    const scans = Array.isArray(record.qrScans) ? record.qrScans : [];
+    const pickupDone = Boolean(record.pickupQrConfirmed || scans.some((scan) => scan.step === 'pickup' && scan.verified !== false));
+    const deliveryDone = Boolean(record.deliveryQrConfirmed || scans.some((scan) => scan.step === 'delivery' && scan.verified !== false));
+    return !pickupDone || !deliveryDone;
+  });
+  const escrowWindows = logisticsRecords.filter((record) => record.escrowReleaseDue);
+  const logisticsCostTotal = logisticsRecords.reduce((sum, record) => sum + Number(record.shippingCost || 0), 0);
+  const escrowSplitRows = logisticsRecords
+    .filter((record) => record.escrowReleaseDue || record.settlement || Number(record.shippingCost || 0) > 0)
+    .slice(0, 5)
+    .map((record) => {
+      const order = recentOrders.find((item) => String(getOrderId(item)) === String(record.order?._id || record.order));
+      const totalEscrowed = Number(record.settlement?.totalEscrowed || order?.totalAmount || 0);
+      const driverPayout = Number(record.settlement?.driverPayout || record.shippingCost || 0);
+      const sinkingFund = Number(record.settlement?.sinkingFund || (driverPayout > 0 ? driverPayout * 0.1 : 0));
+      const platformFee = Number(record.settlement?.platformFee || 0);
+      const sellerPayout = Number(record.settlement?.sellerPayout || Math.max(0, totalEscrowed - driverPayout - platformFee));
+      return { record, totalEscrowed, sellerPayout, driverPayout, sinkingFund, platformFee };
+    });
+  const inventoryBySkuRows = [...products]
+    .map((product) => {
+      const stock = Number(product.quantityAvailable ?? product.stock ?? 0);
+      const reserved = Number(product.reservedQuantity || 0);
+      const threshold = getEffectiveLowStockThreshold(product);
+      const max = Math.max(stock, threshold, reserved, 1);
+      const riskScore = threshold > 0 ? stock / threshold : stock > 0 ? 10 : 0;
+      return { product, stock, reserved, threshold, max, riskScore };
+    })
+    .sort((a, b) => a.riskScore - b.riskScore)
+    .slice(0, 7);
+  const verifiedTrips = logisticsRecords.filter((record) => {
+    const status = String(record.status || '').toLowerCase();
+    const scans = Array.isArray(record.qrScans) ? record.qrScans : [];
+    const pickupDone = Boolean(record.pickupQrConfirmed || scans.some((scan) => scan.step === 'pickup' && scan.verified !== false));
+    const deliveryDone = Boolean(record.deliveryQrConfirmed || scans.some((scan) => scan.step === 'delivery' && scan.verified !== false));
+    return ['delivered', 'auto_released'].includes(status) && pickupDone && deliveryDone;
+  });
+  const feedbackQueue = filteredOrders
+    .filter((order) => ['delivered', 'completed'].includes(String(order.status || '').toLowerCase()))
+    .map((order) => {
+      const orderId = getOrderId(order);
+      const logistics = logisticsByOrder[orderId] || null;
+      const sellerDone = Boolean(order.sellerRating || order.sellerFeedback || order.feedback?.seller);
+      const buyerDone = Boolean(order.buyerRating || order.buyerFeedback || order.feedback?.buyer);
+      const driverDone = Boolean(logistics?.driverRating || logistics?.driverFeedback || logistics?.feedback?.driver);
+      return { order, logistics, sellerDone, buyerDone, driverDone };
+    })
+    .filter((entry) => !entry.sellerDone || !entry.buyerDone || (entry.logistics && !entry.driverDone))
+    .slice(0, 5);
+  const topActiveDeliveries = activeDeliveries.slice(0, 4);
+  const dashboardLiveDelivery = activeDeliveries.find((record) => (
+    hasGpsPoint(record.liveTracking?.driver) ||
+    hasGpsPoint(record.gpsTracking?.current) ||
+    hasGpsPoint(record.driver?.logisticsProfile?.currentLocation)
+  )) || topActiveDeliveries[0] || logisticsRecords.find((record) => (
+    hasGpsPoint(record.shippingAddress) ||
+    hasGpsPoint(record.pickupAddress)
+  )) || null;
+  const dashboardLiveDeliveryId = getLogisticsId(dashboardLiveDelivery);
+  const dashboardLiveOrderId = getLogisticsOrderId(dashboardLiveDelivery);
+  const dashboardLiveOrder = recentOrders.find((order) => String(getOrderId(order)) === String(dashboardLiveOrderId)) || null;
+  const dashboardDeliveryReached = Boolean(
+    dashboardLiveDelivery?.deliveryQrConfirmed ||
+    dashboardLiveDelivery?.qrScans?.some((scan) => scan.step === 'delivery' && scan.verified !== false) ||
+    dashboardLiveDelivery?.actualDelivery ||
+    dashboardLiveOrder?.deliveredAt
+  );
+  const openRfqs = sellerRfqs.filter((rfq) => rfq.status === 'open');
+  const quotedRfqs = sellerRfqs.filter((rfq) => rfq.status === 'quoted');
+  const latestRfqs = sellerRfqs.slice(0, 4);
   const averageRating = products.length
     ? products.reduce((sum, product) => sum + Number(product.rating || 0), 0) / products.length
     : 0;
   const ratedProducts = products.filter((product) => Number(product.rating || 0) > 0).length;
   const productCategoryCounts = products.reduce((acc, product) => {
-    const category = product.category?.name || product.category || 'Uncategorized';
+    const category = formatProductCategory(product.category || 'Uncategorized');
     acc[category] = (acc[category] || 0) + 1;
     return acc;
   }, {});
@@ -211,16 +356,102 @@ const SellerDashboard = () => {
   const productSlotPct = planUsage?.productLimit
     ? Math.min(100, Math.round((Number(planUsage.visibleProducts || 0) / Number(planUsage.productLimit || 1)) * 100))
     : 0;
+  const logisticsStatusLabel = (status) => String(status || 'pending').replace(/_/g, ' ');
   const statusTone = (status) => {
-    if (['delivered', 'completed', 'paid'].includes(status)) return 'green';
-    if (['processing', 'payment_escrowed', 'shipped'].includes(status)) return 'blue';
-    if (['dispatched', 'pending_payment', 'pending'].includes(status)) return 'amber';
-    if (['cancelled', 'refunded', 'failed'].includes(status)) return 'red';
+    const normalized = String(status || '').toLowerCase();
+    if (['delivered', 'completed', 'paid'].includes(normalized)) return 'green';
+    if (['processing', 'payment_escrowed', 'shipped', 'driver_assigned', 'en_route_to_pickup', 'picked_up', 'in_transit', 'out_for_delivery'].includes(normalized)) return 'blue';
+    if (['dispatched', 'pending_payment', 'pending'].includes(normalized)) return 'amber';
+    if (['cancelled', 'refunded', 'failed'].includes(normalized)) return 'red';
     return 'gray';
   };
   const productImage = (product) => {
     const image = product.images?.[0];
     return typeof image === 'string' ? image : image?.url;
+  };
+  const handleResumeSubscriptionPayment = (payment) => {
+    if (!payment?.planId) return;
+    navigate(`/seller/premium-payment?plan=${encodeURIComponent(payment.planId)}`);
+  };
+  const handleDismissSubscriptionPayment = (payment) => {
+    if (!payment?.planId) return;
+    clearPendingSubscriptionPayment(user, payment.planId);
+    setPendingSubscriptionPayments(listPendingSubscriptionPayments(user));
+  };
+  const fetchDashboardLiveMap = async ({ silent = false } = {}) => {
+    if (!dashboardLiveDeliveryId) {
+      setDashboardMapTracking(null);
+      return;
+    }
+
+    if (!silent) setDashboardMapLoading(true);
+    try {
+      const mapData = await logisticsService.getMapData(dashboardLiveDeliveryId);
+      setDashboardMapTracking(mapData);
+    } catch (error) {
+      if (error.response?.status !== 404) {
+        console.error('Error loading seller dashboard GPS map:', error);
+      }
+      setDashboardMapTracking(null);
+    } finally {
+      if (!silent) setDashboardMapLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardLiveMap({ silent: true });
+  }, [dashboardLiveDeliveryId]);
+
+  const refreshDashboardGps = async () => {
+    await Promise.all([
+      fetchSellerData({ silent: true }),
+      fetchDashboardLiveMap(),
+    ]);
+  };
+
+  const handlePrintVerifiedTripReport = (record) => {
+    const order = recentOrders.find((item) => String(getOrderId(item)) === String(record.order?._id || record.order));
+    const driverName = record.driver?.fullName || record.driver?.name || record.driverName || 'Driver';
+    const pickupTown = record.pickupAddress?.town || record.pickupAddress?.city || record.pickupAddress?.address || 'Origin';
+    const destinationTown = record.shippingAddress?.town || record.shippingAddress?.city || record.shippingAddress?.address || 'Destination';
+    const reportWindow = window.open('', '_blank');
+    if (!reportWindow) return;
+    const orderLabel = order?.orderNumber || record.orderNumber || String(record.order || '').slice(-8);
+    const tripLabel = record.tripId || record.bookingReference || '-';
+    const deliveredLabel = record.actualDelivery || order?.deliveredAt ? new Date(record.actualDelivery || order?.deliveredAt).toLocaleString() : '-';
+    reportWindow.document.write(`
+      <html>
+        <head>
+          <title>Verified trip ${escapeReportText(tripLabel)}</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 32px; color: #111827; }
+            h1 { font-size: 22px; margin-bottom: 4px; }
+            .muted { color: #6B7280; font-size: 12px; }
+            table { border-collapse: collapse; width: 100%; margin-top: 24px; }
+            td { border: 1px solid #E5E7EB; padding: 10px; font-size: 13px; }
+            td:first-child { font-weight: 700; width: 34%; background: #F9FAFB; }
+          </style>
+        </head>
+        <body>
+          <h1>Verified Trip Report</h1>
+          <p class="muted">Generated ${new Date().toLocaleString()}</p>
+          <table>
+            <tr><td>Order</td><td>${escapeReportText(orderLabel)}</td></tr>
+            <tr><td>Trip</td><td>${escapeReportText(tripLabel)}</td></tr>
+            <tr><td>Route</td><td>${escapeReportText(pickupTown)} to ${escapeReportText(destinationTown)}</td></tr>
+            <tr><td>Driver</td><td>${escapeReportText(driverName)}</td></tr>
+            <tr><td>Status</td><td>${escapeReportText(logisticsStatusLabel(record.status))}</td></tr>
+            <tr><td>Pickup QR</td><td>${record.pickupQrConfirmed ? 'Confirmed' : 'Confirmed by scan log'}</td></tr>
+            <tr><td>Delivery QR</td><td>${record.deliveryQrConfirmed ? 'Confirmed' : 'Confirmed by scan log'}</td></tr>
+            <tr><td>Shipping Cost</td><td>${escapeReportText(formatCurrency(record.shippingCost || 0))}</td></tr>
+            <tr><td>Delivered</td><td>${escapeReportText(deliveredLabel)}</td></tr>
+          </table>
+        </body>
+      </html>
+    `);
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.print();
   };
 
   return (
@@ -274,6 +505,41 @@ const SellerDashboard = () => {
         </div>
       </div>
 
+      {pendingSubscriptionPayments.length > 0 && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+                <FaCreditCard />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-[#111827]">Subscription payment needs attention</p>
+                <p className="mt-1 text-xs text-amber-800">
+                  {pendingSubscriptionPayments[0].message || 'M-Pesa confirmation is still pending.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleResumeSubscriptionPayment(pendingSubscriptionPayments[0])}
+                className="inline-flex h-9 items-center gap-2 rounded-md bg-[#F97316] px-3 text-xs font-medium text-white hover:bg-[#EA580C]"
+              >
+                <FaCreditCard />
+                Recover Payment
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDismissSubscriptionPayment(pendingSubscriptionPayments[0])}
+                className="h-9 rounded-md border border-amber-200 px-3 text-xs font-medium text-amber-800 hover:bg-amber-100"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard icon={FaDollarSign} label="Total Revenue" value={isSectionLoading ? '-' : formatCurrency(stats.totalRevenue)} trend={revenueTrendLabel} detail="seller earnings" color="#16A34A" points={revenueSeries} />
         <KpiCard icon={FaShoppingCart} label="Orders" value={isSectionLoading ? '-' : stats.totalOrders} trend={orderTrendLabel} detail={`${stats.pendingOrders} pending`} color="#3B82F6" points={orderSeries} />
@@ -289,6 +555,51 @@ const SellerDashboard = () => {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <Panel
+          title="SKU Inventory Health"
+          action={<Link to="/seller/products" className="text-xs font-medium text-[#F97316]">Edit thresholds</Link>}
+          className="xl:col-span-12"
+        >
+          <div className="grid gap-3 lg:grid-cols-2">
+            {inventoryBySkuRows.map(({ product, stock, reserved, threshold, max }) => {
+              const sku = product.sku || product.trackingSku || 'SKU pending';
+              const availablePct = Math.max(4, (stock / max) * 100);
+              const reservedPct = Math.max(0, (reserved / max) * 100);
+              return (
+                <div key={product.id || product._id || sku} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#111827]">{product.name}</p>
+                      <p className="truncate text-xs text-gray-500">{sku}</p>
+                    </div>
+                    <StatusPill tone={threshold > 0 && stock <= threshold ? 'amber' : stock <= 0 ? 'red' : 'green'}>
+                      {stock <= 0 ? 'out' : threshold > 0 && stock <= threshold ? 'low' : 'healthy'}
+                    </StatusPill>
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-white">
+                    <div className="h-full rounded-full bg-[#16A34A]" style={{ width: `${Math.min(100, availablePct)}%` }} />
+                  </div>
+                  {reserved > 0 && (
+                    <div className="mt-1 h-2 overflow-hidden rounded-full bg-white">
+                      <div className="h-full rounded-full bg-[#F59E0B]" style={{ width: `${Math.min(100, reservedPct)}%` }} />
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+                    <span>{stock} on hand</span>
+                    <span>{reserved} reserved</span>
+                    <span>threshold {threshold}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {!inventoryBySkuRows.length && (
+              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500 lg:col-span-2">No SKU inventory to graph yet.</p>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <NotificationPreferencesCard
           className="xl:col-span-12"
           title="Notification Preferences"
@@ -298,6 +609,245 @@ const SellerDashboard = () => {
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <SellerWalletConsole className="xl:col-span-12" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        {dashboardLiveDelivery ? (
+          <LiveLogisticsMapPanel
+            trip={dashboardLiveDelivery}
+            tracking={dashboardMapTracking}
+            order={dashboardLiveOrder}
+            title="Seller GPS Delivery Map"
+            subtitle={dashboardDeliveryReached
+              ? 'Delivery proof is recorded. Review the final driver GPS and buyer destination.'
+              : 'Track the logistics driver live from pickup until the shipment reaches the buyer.'}
+            eyebrow={dashboardDeliveryReached ? 'Reached buyer' : 'Seller live Google GPS'}
+            onRefresh={refreshDashboardGps}
+            refreshing={dashboardMapLoading || isRealtimeRefreshing}
+            trackingHref={dashboardLiveOrder ? `/orders/${getOrderId(dashboardLiveOrder)}/track` : '/seller/orders'}
+            emptyText="Live GPS appears here after the logistics driver starts sharing location."
+            className="xl:col-span-12"
+          />
+        ) : (
+          <section className="rounded-lg border border-dashed border-gray-300 bg-white p-5 text-center shadow-sm xl:col-span-12">
+            <FaMapMarkerAlt className="mx-auto text-3xl text-[#F97316]" />
+            <h3 className="mt-3 text-lg font-bold text-gray-950">Seller GPS Delivery Map</h3>
+            <p className="mt-1 text-sm text-gray-600">
+              Live Google GPS will show here once a paid order has a logistics shipment and the driver starts sharing location.
+            </p>
+            <Link
+              to="/seller/orders"
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
+            >
+              <FaTruck />
+              Open seller orders
+            </Link>
+          </section>
+        )}
+
+        <SharedGroupTripPanel
+          title="Kenya Shared Logistics"
+          description="Start or join shared routes across Kenya so buyers and sellers going the same direction can split one logistics vehicle by cargo weight."
+          canCreate
+          className="xl:col-span-12"
+        />
+
+        <Panel
+          title="Logistics Command Center"
+          action={<Link to="/seller/orders" className="text-xs font-medium text-[#F97316]">Manage dispatch</Link>}
+          className="xl:col-span-12"
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="rounded-md border border-amber-100 bg-amber-50 p-4">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+                <FaShippingFast />
+              </div>
+              <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Pending dispatch</p>
+              <p className="mt-1 text-2xl font-bold text-[#111827]">{dispatchReadyOrders.length}</p>
+              <p className="mt-1 text-xs text-amber-700">Paid orders without shipment records</p>
+            </div>
+            <div className="rounded-md border border-blue-100 bg-blue-50 p-4">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-blue-100 text-blue-700">
+                <FaTruck />
+              </div>
+              <p className="text-xs font-medium uppercase tracking-wide text-blue-700">Active deliveries</p>
+              <p className="mt-1 text-2xl font-bold text-[#111827]">{activeDeliveries.length}</p>
+              <p className="mt-1 text-xs text-blue-700">Live logistics records in motion</p>
+            </div>
+            <div className="rounded-md border border-purple-100 bg-purple-50 p-4">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-purple-100 text-purple-700">
+                <FaQrcode />
+              </div>
+              <p className="text-xs font-medium uppercase tracking-wide text-purple-700">QR handoff</p>
+              <p className="mt-1 text-2xl font-bold text-[#111827]">{qrHandoffPending.length}</p>
+              <p className="mt-1 text-xs text-purple-700">Pickup or delivery scans pending</p>
+            </div>
+            <div className="rounded-md border border-green-100 bg-green-50 p-4">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-green-100 text-green-700">
+                <FaLock />
+              </div>
+              <p className="text-xs font-medium uppercase tracking-wide text-green-700">Escrow windows</p>
+              <p className="mt-1 text-2xl font-bold text-[#111827]">{escrowWindows.length}</p>
+              <p className="mt-1 text-xs text-green-700">{formatCurrency(logisticsCostTotal)} logistics cost tracked</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded-md border border-gray-100 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-[#111827]">Dispatch Queue</p>
+                <span className="text-xs text-gray-500">{dispatchReadyOrders.length} ready</span>
+              </div>
+              <div className="space-y-3">
+                {dispatchReadyOrders.slice(0, 4).map((order) => (
+                  <div key={`dispatch-${getOrderId(order)}`} className="flex items-center justify-between gap-3 rounded-md bg-gray-50 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-[#111827]">Order #{String(getOrderId(order)).slice(-8)}</p>
+                      <p className="text-xs text-gray-500">{order.buyer?.fullName || order.customer?.fullName || 'Customer'} - {formatCurrency(order.totalAmount || 0)}</p>
+                    </div>
+                    <Link to="/seller/orders" className="shrink-0 rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-[#F97316] hover:bg-white">
+                      Open
+                    </Link>
+                  </div>
+                ))}
+                {!dispatchReadyOrders.length && (
+                  <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No paid orders waiting for shipment.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-md border border-gray-100 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-[#111827]">Active Route Tracking</p>
+                <span className="text-xs text-gray-500">{topActiveDeliveries.length} shown</span>
+              </div>
+              <div className="space-y-3">
+                {topActiveDeliveries.map((record) => {
+                  const pickupTown = record.pickupAddress?.town || record.pickupAddress?.city || record.pickupAddress?.address || 'Origin';
+                  const destinationTown = record.shippingAddress?.town || record.shippingAddress?.city || record.shippingAddress?.address || 'Destination';
+                  const driverName = record.driver?.fullName || record.driver?.name || 'Driver pending';
+                  return (
+                    <div key={`route-${record._id || record.id || record.order}`} className="rounded-md bg-gray-50 px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-[#111827]">#{String(record.orderNumber || record.order || record._id || '').slice(-8)}</p>
+                          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+                            <FaMapMarkerAlt className="shrink-0 text-[#F97316]" />
+                            <span className="truncate">{pickupTown} to {destinationTown}</span>
+                          </p>
+                        </div>
+                        <StatusPill tone={statusTone(record.status)}>{logisticsStatusLabel(record.status)}</StatusPill>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span>{driverName}</span>
+                        {record.routeInfo?.distanceKm ? <span>{Number(record.routeInfo.distanceKm).toFixed(1)} km</span> : null}
+                        {record.escrowReleaseDue ? <span>72h freeze active</span> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+                {!topActiveDeliveries.length && (
+                  <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No active delivery routes yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-md border border-gray-100 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-[#111827]">Escrow Payout Split</p>
+                <p className="mt-1 text-xs text-gray-500">Seller net, logistics cost, sinking fund, and platform fee per tracked shipment.</p>
+              </div>
+              <span className="text-xs text-gray-500">{escrowSplitRows.length} rows</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
+                    <th className="pb-2">Shipment</th>
+                    <th className="pb-2">Escrowed</th>
+                    <th className="pb-2">Seller</th>
+                    <th className="pb-2">Driver</th>
+                    <th className="pb-2">Sinking fund</th>
+                    <th className="pb-2">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {escrowSplitRows.map(({ record, totalEscrowed, sellerPayout, driverPayout, sinkingFund }) => (
+                    <tr key={`escrow-${record._id || record.id || record.order}`} className="border-b last:border-0">
+                      <td className="py-3 font-mono">#{String(record.orderNumber || record.order || record._id || '').slice(-8)}</td>
+                      <td className="py-3 font-semibold">{formatCurrency(totalEscrowed)}</td>
+                      <td className="py-3">{formatCurrency(sellerPayout)}</td>
+                      <td className="py-3">{formatCurrency(driverPayout)}</td>
+                      <td className="py-3">{formatCurrency(sinkingFund)}</td>
+                      <td className="py-3"><StatusPill tone={record.settlement?.releasedAt ? 'green' : record.escrowReleaseDue ? 'amber' : 'gray'}>{record.settlement?.releasedAt ? 'released' : record.escrowReleaseDue ? 'freeze window' : 'pending'}</StatusPill></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!escrowSplitRows.length && (
+              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No escrow payout splits available yet.</p>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <Panel
+          title="RFQ Inbox"
+          action={<Link to="/seller/rfqs" className="text-xs font-medium text-[#F97316]">Open RFQs</Link>}
+          className="xl:col-span-12"
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-md border border-blue-100 bg-blue-50 p-4">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-blue-100 text-blue-700">
+                <FaFileInvoiceDollar />
+              </div>
+              <p className="text-xs font-medium uppercase tracking-wide text-blue-700">Open RFQs</p>
+              <p className="mt-1 text-2xl font-bold text-[#111827]">{openRfqs.length}</p>
+              <p className="mt-1 text-xs text-blue-700">Buyer requests waiting for seller quote</p>
+            </div>
+            <div className="rounded-md border border-green-100 bg-green-50 p-4">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-green-100 text-green-700">
+                <FaDollarSign />
+              </div>
+              <p className="text-xs font-medium uppercase tracking-wide text-green-700">Quoted</p>
+              <p className="mt-1 text-2xl font-bold text-[#111827]">{quotedRfqs.length}</p>
+              <p className="mt-1 text-xs text-green-700">Negotiated offers sent to buyers</p>
+            </div>
+            <div className="rounded-md border border-amber-100 bg-amber-50 p-4">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+                <FaShoppingCart />
+              </div>
+              <p className="text-xs font-medium uppercase tracking-wide text-amber-700">RFQ Pipeline</p>
+              <p className="mt-1 text-2xl font-bold text-[#111827]">{sellerRfqs.length}</p>
+              <p className="mt-1 text-xs text-amber-700">Total recent wholesale requests</p>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {latestRfqs.map((rfq) => (
+              <Link
+                key={rfq._id || rfq.id}
+                to="/seller/rfqs"
+                className="rounded-md border border-gray-100 bg-gray-50 p-3 hover:border-[#F97316]/40 hover:bg-white"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[#111827]">{rfq.product?.name || 'Product RFQ'}</p>
+                    <p className="mt-1 text-xs text-gray-500">{rfq.quantity} {rfq.unit} requested</p>
+                  </div>
+                  <StatusPill tone={rfq.status === 'quoted' ? 'green' : rfq.status === 'open' ? 'amber' : 'gray'}>{rfq.status}</StatusPill>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">{rfq.buyer?.businessName || rfq.buyer?.fullName || 'Buyer'}</p>
+              </Link>
+            ))}
+            {!latestRfqs.length && (
+              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500 md:col-span-2 xl:col-span-4">No RFQ requests yet.</p>
+            )}
+          </div>
+        </Panel>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -430,7 +980,9 @@ const SellerDashboard = () => {
             {lowStockItems.slice(0, 3).map((item) => (
               <div key={`low-${item.id || item._id}`} className="rounded-md border border-red-100 bg-red-50 p-3">
                 <p className="text-sm font-semibold text-red-700">{item.name}</p>
-                <p className="text-xs text-red-600">Stock {Number(item.quantityAvailable ?? item.stock ?? 0)} is at threshold.</p>
+                <p className="text-xs text-red-600">
+                  Stock {Number(item.quantityAvailable ?? item.stock ?? 0)} is at or below threshold {getEffectiveLowStockThreshold(item)}.
+                </p>
               </div>
             ))}
             {expiringSoonItems.slice(0, 3).map((item) => (
@@ -502,6 +1054,69 @@ const SellerDashboard = () => {
                 <FaClipboardList className="mx-auto mb-2 text-2xl text-gray-400" />
                 <p className="text-sm text-gray-500">Add your first product to start tracking performance.</p>
               </div>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+        <Panel title="Verified Trip Reports" className="xl:col-span-6">
+          <div className="space-y-3">
+            {verifiedTrips.slice(0, 5).map((record) => {
+              const pickupTown = record.pickupAddress?.town || record.pickupAddress?.city || record.pickupAddress?.address || 'Origin';
+              const destinationTown = record.shippingAddress?.town || record.shippingAddress?.city || record.shippingAddress?.address || 'Destination';
+              return (
+                <div key={`verified-${record._id || record.id || record.order}`} className="flex items-center justify-between gap-3 rounded-md border border-gray-100 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-[#111827]">#{String(record.orderNumber || record.order || record._id || '').slice(-8)}</p>
+                    <p className="mt-1 truncate text-xs text-gray-500">{pickupTown} to {destinationTown}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handlePrintVerifiedTripReport(record)}
+                    className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-gray-200 px-3 text-xs font-medium text-[#F97316] hover:bg-gray-50"
+                  >
+                    <FaDownload />
+                    Print PDF
+                  </button>
+                </div>
+              );
+            })}
+            {!verifiedTrips.length && (
+              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">Verified pickup and delivery trips will appear after both QR handoffs are confirmed.</p>
+            )}
+          </div>
+        </Panel>
+
+        <Panel title="3-Way Feedback Queue" className="xl:col-span-6">
+          <div className="space-y-3">
+            {feedbackQueue.map(({ order, logistics, sellerDone, buyerDone, driverDone }) => (
+              <div key={`feedback-${getOrderId(order)}`} className="rounded-md border border-gray-100 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-[#111827]">Order #{String(getOrderId(order)).slice(-8)}</p>
+                    <p className="text-xs text-gray-500">{order.buyer?.fullName || order.customer?.fullName || 'Customer'} - {formatCurrency(order.totalAmount || 0)}</p>
+                  </div>
+                  <Link to="/seller/orders" className="text-xs font-medium text-[#F97316]">Open</Link>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <span className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-2 ${sellerDone ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {sellerDone ? <FaCheckCircle /> : <FaComments />}
+                    Seller
+                  </span>
+                  <span className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-2 ${buyerDone ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {buyerDone ? <FaCheckCircle /> : <FaComments />}
+                    Buyer
+                  </span>
+                  <span className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-2 ${!logistics || driverDone ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {!logistics || driverDone ? <FaCheckCircle /> : <FaComments />}
+                    Driver
+                  </span>
+                </div>
+              </div>
+            ))}
+            {!feedbackQueue.length && (
+              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No delivered orders are waiting for seller, buyer, or driver feedback.</p>
             )}
           </div>
         </Panel>

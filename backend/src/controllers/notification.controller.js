@@ -55,10 +55,21 @@ const countSafely = async (query) => {
   }
 };
 
+const lowStockFilter = (extra = {}) => ({
+  ...extra,
+  quantityAvailable: { $gt: 0 },
+  $expr: {
+    $and: [
+      { $gt: [{ $ifNull: ['$minThreshold', 10] }, 0] },
+      { $lte: ['$quantityAvailable', { $ifNull: ['$minThreshold', 10] }] },
+    ],
+  },
+});
+
 const buildAdminNotifications = async () => {
   const [pendingProducts, lowStockProducts, disputedOrders] = await Promise.all([
     countSafely(Product.countDocuments({ isPublished: false })),
-    countSafely(Product.countDocuments({ quantityAvailable: { $lte: 5 } })),
+    countSafely(Product.countDocuments(lowStockFilter())),
     countSafely(Order.countDocuments({ status: 'disputed' })),
   ]);
 
@@ -108,7 +119,7 @@ const buildAdminNotifications = async () => {
 
 const buildSellerNotifications = async (userId) => {
   const [lowStockProducts, activeOrders, reviewedProducts, disputedOrders] = await Promise.all([
-    countSafely(Product.countDocuments({ seller: userId, quantityAvailable: { $lte: 5 } })),
+    countSafely(Product.countDocuments(lowStockFilter({ seller: userId }))),
     countSafely(Order.countDocuments({
       seller: userId,
       status: { $in: ['pending_payment', 'payment_escrowed', 'processing', 'dispatched'] },
@@ -163,6 +174,72 @@ const buildSellerNotifications = async (userId) => {
   return notifications;
 };
 
+const buildBuyerNotifications = async () => {
+  const [newProducts, scarcityProducts] = await Promise.all([
+    Product.find({ isPublished: true })
+      .select('name price category seller createdAt')
+      .populate('seller', 'fullName name businessName')
+      .sort('-createdAt')
+      .limit(5)
+      .lean()
+      .catch(() => []),
+    Product.find(lowStockFilter({ isPublished: true }))
+      .select('name quantityAvailable minThreshold unit seller updatedAt')
+      .populate('seller', 'fullName name businessName')
+      .sort('quantityAvailable')
+      .limit(5)
+      .lean()
+      .catch(() => []),
+  ]);
+
+  const notifications = [];
+
+  if (newProducts.length > 0) {
+    notifications.push(syntheticNotification({
+      id: 'system:buyer:new-products',
+      title: 'New seller products available',
+      message: `${newProducts.length} fresh product${newProducts.length === 1 ? '' : 's'} were recently added to Lango Market.`,
+      type: 'new_product',
+      data: {
+        source: 'seller',
+        count: newProducts.length,
+        href: '/buyer/product-alerts',
+        products: newProducts.map((product) => ({
+          id: product._id,
+          name: product.name,
+          price: product.price,
+          category: product.category,
+          seller: product.seller?.businessName || product.seller?.fullName || product.seller?.name || 'Seller',
+        })),
+      },
+    }));
+  }
+
+  if (scarcityProducts.length > 0) {
+    notifications.push(syntheticNotification({
+      id: 'system:buyer:scarcity-alerts',
+      title: 'Product sensitivity alerts',
+      message: `${scarcityProducts.length} product${scarcityProducts.length === 1 ? ' is' : 's are'} near low stock. Buy soon or contact the seller.`,
+      type: 'scarcity_alert',
+      data: {
+        source: 'system',
+        count: scarcityProducts.length,
+        href: '/buyer/product-alerts',
+        products: scarcityProducts.map((product) => ({
+          id: product._id,
+          name: product.name,
+          stock: product.quantityAvailable,
+          threshold: product.minThreshold,
+          unit: product.unit,
+          seller: product.seller?.businessName || product.seller?.fullName || product.seller?.name || 'Seller',
+        })),
+      },
+    }));
+  }
+
+  return notifications;
+};
+
 const buildRoleNotifications = async (user) => {
   const userId = getUserId(user);
 
@@ -174,7 +251,7 @@ const buildRoleNotifications = async (user) => {
     return buildSellerNotifications(userId);
   }
 
-  return [];
+  return buildBuyerNotifications(userId);
 };
 
 exports.getNotifications = async (req, res, next) => {

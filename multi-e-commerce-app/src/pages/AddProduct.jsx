@@ -3,14 +3,15 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { 
-  FaBrain, FaStore, FaImage, FaTag, FaLayerGroup, 
+  FaStore, FaImage, FaTag, FaLayerGroup,
   FaWarehouse, FaSpinner, FaCloudUploadAlt, FaTrash,
   FaDollarSign, FaBoxes, FaMapMarkerAlt, FaExclamationTriangle,
-  FaLeaf, FaCalendarAlt, FaTint, FaBarcode
+  FaPlus
 } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 import { productService } from '../services/productService';
 import { getUserCategoryLabel, isFarmerUser } from '../utils/userCategory';
+import { getAutoLowStockThreshold, PRODUCT_CATEGORY_OPTIONS } from '../utils/inventorySensitivity';
 
 const AddProduct = () => {
   const { id } = useParams();
@@ -27,10 +28,15 @@ const AddProduct = () => {
     description: '',
     price: '',
     quantityAvailable: '',
+    minThreshold: '',
+    minimumOrderQuantity: '1',
+    rfqEnabled: true,
+    wholesaleTerms: '',
+    priceTiers: [],
+    warehouseStatus: 'seller_storage',
     category: '',
     unit: 'kg',
     locationHub: '',
-    customAttributes: {},
     images: [],
     isPublished: true,
   });
@@ -38,13 +44,15 @@ const AddProduct = () => {
   const [imagePreviews, setImagePreviews] = useState([]);
   const [errors, setErrors] = useState({});
 
-  const categories = [
+  const categories = PRODUCT_CATEGORY_OPTIONS.concat([
     { value: 'electronics', label: 'Electronics', icon: '📱' },
     { value: 'fashion', label: 'Fashion', icon: '👗' },
     { value: 'home-garden', label: 'Home and Garden', icon: '🏡' },
     { value: 'beauty-health', label: 'Beauty and Health', icon: '💄' },
     { value: 'sports-outdoor', label: 'Sports and Outdoor', icon: '🏀' },
-  ];
+  ]).filter((category, index, list) => (
+    list.findIndex((item) => item.value === category.value) === index
+  ));
 
   const units = [
     { value: 'kg', label: 'Kilogram (kg)' },
@@ -55,6 +63,36 @@ const AddProduct = () => {
     { value: 'litre', label: 'Litre (L)' },
   ];
 
+  const warehouseStatusOptions = [
+    { value: 'seller_storage', label: 'Seller storage' },
+    { value: 'warehouse_pending', label: 'Warehouse pending' },
+    { value: 'warehouse_received', label: 'Warehouse received' },
+    { value: 'dispatch_ready', label: 'Dispatch ready' },
+    { value: 'restricted', label: 'Restricted hold' },
+  ];
+  const fulfillmentHubSuggestions = [
+    'Nairobi Industrial Area',
+    'Mombasa Port Hub',
+    'Kisumu Market Hub',
+    'Eldoret Dispatch Hub',
+    'Kakuma Trade Hub',
+    'Kitale Produce Hub',
+    'Nakuru Distribution Hub',
+    'Naivasha Logistics Hub',
+    'Thika Industrial Hub',
+    'Machakos Pickup Hub',
+    'Meru Produce Hub',
+    'Nyeri Market Hub',
+    'Kisii Trade Hub',
+    'Garissa Dispatch Hub',
+  ];
+  const autoLowStockThreshold = getAutoLowStockThreshold(formData);
+  const hasReachedProductLimit = Boolean(planUsage && planUsage.remainingSlots !== null && Number(planUsage.remainingSlots) === 0 && !id);
+  const isFreeProductLimit = Boolean(planUsage && !planUsage.currentPlan && Number(planUsage.productLimit) === 5);
+  const productLimitMessage = isFreeProductLimit
+    ? "You've reached your free 5 product limit. Upgrade your subscription to add more products."
+    : 'Product limit reached. Upgrade your subscription to add more products.';
+
   useEffect(() => {
     checkPlanUsage();
     if (id) {
@@ -63,7 +101,7 @@ const AddProduct = () => {
   }, [id]);
 
   useEffect(() => {
-    if (isFarmer && formData.category !== 'grocery') {
+    if (isFarmer && !formData.category) {
       setFormData((prev) => ({ ...prev, category: 'grocery' }));
     }
   }, [isFarmer, formData.category]);
@@ -74,10 +112,12 @@ const AddProduct = () => {
       if (response.planUsage) {
         setPlanUsage(response.planUsage);
         if (response.planUsage.remainingSlots === 0 && !id) {
-          const planLabel = response.planUsage.currentPlan
-            ? response.planUsage.currentPlan.toUpperCase()
-            : 'subscription';
-          toast.error(`You've reached your ${planLabel} product limit. Activate a subscription to add more products.`);
+          const reachedFreeLimit = !response.planUsage.currentPlan && Number(response.planUsage.productLimit) === 5;
+          toast.error(
+            reachedFreeLimit
+              ? "You've reached your free 5 product limit. Upgrade your subscription to add more products."
+              : 'Product limit reached. Upgrade your subscription to add more products.'
+          );
         }
       }
     } catch (error) {
@@ -98,10 +138,19 @@ const AddProduct = () => {
         description: product.description || '',
         price: product.price || '',
         quantityAvailable: product.quantityAvailable || '',
+        minThreshold: product.minThreshold ?? '',
+        minimumOrderQuantity: product.minimumOrderQuantity ?? product.wholesale?.minimumOrderQuantity ?? 1,
+        rfqEnabled: product.rfqEnabled ?? product.wholesale?.rfqEnabled ?? true,
+        wholesaleTerms: product.wholesaleTerms ?? product.wholesale?.terms ?? '',
+        priceTiers: Array.isArray(product.priceTiers)
+          ? product.priceTiers
+          : Array.isArray(product.wholesale?.priceTiers)
+            ? product.wholesale.priceTiers
+            : [],
+        warehouseStatus: product.warehouseStatus || 'seller_storage',
         category: product.category || '',
         unit: product.unit || 'kg',
         locationHub: product.locationHub || '',
-        customAttributes: product.customAttributes || {},
         images: product.images || [],
         isPublished: product.isPublished !== undefined ? product.isPublished : true,
       });
@@ -132,6 +181,26 @@ const AddProduct = () => {
     if (formData.quantityAvailable === '' || Number.isNaN(quantity) || quantity < 0) {
       newErrors.quantityAvailable = 'Enter a valid stock quantity of 0 or more';
     }
+
+    const threshold = Number(formData.minThreshold);
+    if (formData.minThreshold !== '' && (Number.isNaN(threshold) || threshold < 0)) {
+      newErrors.minThreshold = 'Enter a valid alert threshold of 0 or more';
+    }
+
+    const moq = Number(formData.minimumOrderQuantity);
+    if (formData.minimumOrderQuantity === '' || Number.isNaN(moq) || moq < 1) {
+      newErrors.minimumOrderQuantity = 'Enter an MOQ of at least 1';
+    }
+
+    const invalidTier = formData.priceTiers.some((tier) => {
+      const minQuantity = Number(tier.minQuantity);
+      const unitPrice = Number(tier.unitPrice);
+      return !Number.isFinite(minQuantity) || minQuantity < 1 || !Number.isFinite(unitPrice) || unitPrice < 0;
+    });
+    if (invalidTier) {
+      newErrors.priceTiers = 'Tier quantities must be at least 1 and prices cannot be negative';
+    }
+
     if (!formData.category) {
       newErrors.category = 'Please select a category';
     }
@@ -164,9 +233,40 @@ const AddProduct = () => {
     }
   };
 
+  const addPriceTier = () => {
+    setFormData(prev => ({
+      ...prev,
+      priceTiers: [
+        ...prev.priceTiers,
+        { minQuantity: '', unitPrice: '', label: '' },
+      ],
+    }));
+  };
+
+  const updatePriceTier = (index, field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      priceTiers: prev.priceTiers.map((tier, tierIndex) => (
+        tierIndex === index ? { ...tier, [field]: value } : tier
+      )),
+    }));
+    if (errors.priceTiers) {
+      setErrors(prev => ({ ...prev, priceTiers: '' }));
+    }
+  };
+
+  const removePriceTier = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      priceTiers: prev.priceTiers.filter((_, tierIndex) => tierIndex !== index),
+    }));
+  };
+
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files);
     const maxImages = 10;
+    const maxImageSizeMb = 10;
+    const maxImageSizeBytes = maxImageSizeMb * 1024 * 1024;
     
     if (imagePreviews.length + files.length > maxImages) {
       toast.error(`Maximum ${maxImages} images allowed`);
@@ -176,8 +276,8 @@ const AddProduct = () => {
     setUploadingImages(true);
     
     for (const file of files) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error(`${file.name} exceeds 5MB limit`);
+      if (file.size > maxImageSizeBytes) {
+        toast.error(`${file.name} exceeds ${maxImageSizeMb}MB limit`);
         continue;
       }
       if (!file.type.startsWith('image/')) {
@@ -208,38 +308,6 @@ const AddProduct = () => {
     }));
   };
 
-  const handleCustomAttributeChange = (key, value) => {
-    setFormData(prev => ({
-      ...prev,
-      customAttributes: {
-        ...prev.customAttributes,
-        [key]: value,
-      },
-    }));
-  };
-
-  const addCustomAttribute = () => {
-    const key = prompt('Enter attribute name (e.g., organic, harvest_date, origin):');
-    if (key && key.trim()) {
-      setFormData(prev => ({
-        ...prev,
-        customAttributes: {
-          ...prev.customAttributes,
-          [key.trim()]: '',
-        },
-      }));
-    }
-  };
-
-  const removeCustomAttribute = (key) => {
-    const newAttributes = { ...formData.customAttributes };
-    delete newAttributes[key];
-    setFormData(prev => ({
-      ...prev,
-      customAttributes: newAttributes,
-    }));
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -255,8 +323,8 @@ const AddProduct = () => {
       return;
     }
     
-    if (planUsage && planUsage.remainingSlots === 0 && !id) {
-      toast.error('Product limit reached. Please upgrade your plan.');
+    if (hasReachedProductLimit) {
+      toast.error(productLimitMessage);
       return;
     }
     
@@ -270,15 +338,16 @@ const AddProduct = () => {
       submitData.append('description', formData.description);
       submitData.append('price', parseFloat(formData.price));
       submitData.append('quantityAvailable', parseInt(formData.quantityAvailable, 10));
+      submitData.append('minThreshold', formData.minThreshold === '' ? autoLowStockThreshold : parseInt(formData.minThreshold, 10));
+      submitData.append('minimumOrderQuantity', parseInt(formData.minimumOrderQuantity, 10));
+      submitData.append('rfqEnabled', formData.rfqEnabled);
+      submitData.append('wholesaleTerms', formData.wholesaleTerms || '');
+      submitData.append('priceTiers', JSON.stringify(formData.priceTiers));
+      submitData.append('warehouseStatus', formData.warehouseStatus);
       submitData.append('category', formData.category);
       submitData.append('unit', formData.unit);
       submitData.append('locationHub', formData.locationHub || '');
       submitData.append('isPublished', formData.isPublished);
-      
-      // Append custom attributes as JSON
-      if (Object.keys(formData.customAttributes).length > 0) {
-        submitData.append('customAttributes', JSON.stringify(formData.customAttributes));
-      }
       
       // Append images (only new File objects)
       for (const image of formData.images) {
@@ -324,24 +393,59 @@ const AddProduct = () => {
     );
   }
 
+  const hasFiniteProductLimit = Boolean(
+    planUsage &&
+    Number.isFinite(Number(planUsage.productLimit)) &&
+    Number(planUsage.productLimit) < Number.MAX_SAFE_INTEGER
+  );
+  const isNearProductLimit = hasFiniteProductLimit && Number(planUsage?.remainingSlots || 0) <= 2;
+  const slotUsagePct = hasFiniteProductLimit
+    ? Math.min(100, Math.round((Number(planUsage.totalProducts || 0) / Number(planUsage.productLimit || 1)) * 100))
+    : 0;
+  const productSlotLabel = hasFiniteProductLimit
+    ? `${planUsage?.remainingSlots} of ${planUsage?.productLimit} slots remaining`
+    : 'Unlimited product slots';
+  const fieldClass = 'h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20';
+  const iconFieldClass = 'h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm text-gray-900 outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20';
+  const errorFieldClass = 'border-red-500 focus:border-red-500 focus:ring-red-100';
+
   return (
-    <div className="bg-gray-50 min-h-screen py-8">
-      <div className="container mx-auto px-4 max-w-5xl">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <FaStore className="text-orange-500 text-3xl" />
-            <h1 className="text-3xl font-bold text-gray-900">
-              {id ? 'Edit Product' : 'Add New Product'}
-            </h1>
+    <div className="min-h-screen bg-[#F6F7F9] py-6">
+      <div className="mx-auto max-w-7xl px-4">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <button
+              type="button"
+              onClick={() => navigate('/seller/products')}
+              className="mb-3 text-sm font-medium text-[#6B7280] hover:text-[#111827]"
+            >
+              Back to products
+            </button>
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#F97316] text-white shadow-sm">
+                <FaStore />
+              </span>
+              <div>
+                <h1 className="text-2xl font-bold text-[#111827] md:text-3xl">
+                  {id ? 'Edit Product' : 'Add Product'}
+                </h1>
+                <p className="mt-1 text-sm text-[#6B7280]">
+                  {userCategoryLabel} catalog listing
+                </p>
+              </div>
+            </div>
           </div>
-          <p className="text-gray-600">
-            List products for your {userCategoryLabel} account and reach customers across Kenya
-          </p>
+
+          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-semibold uppercase text-[#6B7280]">Publish state</p>
+            <p className={`mt-1 text-sm font-semibold ${formData.isPublished ? 'text-green-700' : 'text-gray-700'}`}>
+              {formData.isPublished ? 'Live after save' : 'Draft after save'}
+            </p>
+          </div>
         </div>
 
         {!hasBusinessName && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
+          <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
             <div className="flex items-start gap-3">
               <FaExclamationTriangle className="mt-0.5 text-red-600" />
               <div>
@@ -354,26 +458,33 @@ const AddProduct = () => {
           </div>
         )}
 
-        {/* Plan Usage Alert */}
         {planUsage && !id && (
-          <div className={`mb-6 p-4 rounded-lg ${planUsage.remainingSlots <= 2 ? 'bg-yellow-50 border border-yellow-200' : 'bg-blue-50 border border-blue-200'}`}>
-            <div className="flex items-start gap-3">
-              <FaExclamationTriangle className={`${planUsage.remainingSlots <= 2 ? 'text-yellow-600' : 'text-blue-600'} text-xl mt-0.5`} />
+          <div className={`mb-5 rounded-lg border p-4 ${isNearProductLimit ? 'border-amber-200 bg-amber-50' : 'border-blue-200 bg-blue-50'}`}>
+            <div className="flex flex-wrap items-start gap-3">
+              <FaExclamationTriangle className={`${isNearProductLimit ? 'text-amber-600' : 'text-blue-600'} mt-0.5 text-xl`} />
               <div className="flex-1">
-                <p className="font-semibold text-gray-900">
-                  {planUsage.currentPlan ? `${planUsage.currentPlan.toUpperCase()} Plan` : 'No active subscription'} - {planUsage.remainingSlots} of {planUsage.productLimit} slots remaining
+                <p className="font-semibold text-[#111827]">
+                  {planUsage.currentPlan ? `${planUsage.currentPlan.toUpperCase()} plan` : 'Free catalog'}: {productSlotLabel}
                 </p>
-                <p className="text-sm text-gray-600 mt-1">
+                <p className="mt-1 text-sm text-[#6B7280]">
                   You have {planUsage.totalProducts} products currently.
-                  {planUsage.remainingSlots === 0 && (
-                    <span className="text-red-600 font-medium"> Upgrade your plan to add more products.</span>
+                  {hasReachedProductLimit && (
+                    <span className="text-red-600 font-medium"> {productLimitMessage}</span>
                   )}
                 </p>
-                {planUsage.remainingSlots > 0 && (
+                {hasReachedProductLimit ? (
+                  <button
+                    type="button"
+                    onClick={() => navigate('/seller/subscription-plans')}
+                    className="mt-3 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600"
+                  >
+                    Upgrade Subscription
+                  </button>
+                ) : (
                   <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
                     <div 
                       className="bg-orange-500 rounded-full h-2 transition-all"
-                      style={{ width: `${(planUsage.totalProducts / planUsage.productLimit) * 100}%` }}
+                      style={{ width: `${slotUsagePct}%` }}
                     />
                   </div>
                 )}
@@ -382,336 +493,449 @@ const AddProduct = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Basic Information */}
-          <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-orange-500">
-            <div className="flex items-center gap-2 mb-4">
-              <FaTag className="text-orange-500 text-xl" />
-              <h2 className="text-xl font-semibold text-gray-900">Basic Information</h2>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-900">
-                  Product Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleChange}
-                  className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
-                    errors.name ? 'border-red-500' : 'border-gray-300'
-                  }`}
-                  placeholder="Enter product name"
-                />
-                {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-900">
-                  Description
-                </label>
-                <textarea
-                  name="description"
-                  value={formData.description}
-                  onChange={handleChange}
-                  rows="4"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                  placeholder="Describe your product in detail..."
-                />
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-900">
-                    Price (KSh) <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <FaDollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="number"
-                      name="price"
-                      value={formData.price}
-                      onChange={handleNumberChange}
-                      step="0.01"
-                      min="0"
-                      className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
-                        errors.price ? 'border-red-500' : 'border-gray-300'
-                      }`}
-                      placeholder="0.00"
-                    />
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="space-y-5">
+              <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
+                <div className="border-b border-gray-100 px-5 py-4">
+                  <div className="flex items-center gap-2">
+                    <FaTag className="text-[#F97316]" />
+                    <h2 className="text-lg font-semibold text-[#111827]">Product Details</h2>
                   </div>
-                  {errors.price && <p className="text-red-500 text-sm mt-1">{errors.price}</p>}
                 </div>
-                
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-900">
-                    Stock Quantity <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <FaBoxes className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="number"
-                      name="quantityAvailable"
-                      value={formData.quantityAvailable}
-                      onChange={handleNumberChange}
-                      min="0"
-                      className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
-                        errors.quantityAvailable ? 'border-red-500' : 'border-gray-300'
-                      }`}
-                      placeholder="0"
-                    />
-                  </div>
-                  {errors.quantityAvailable && <p className="text-red-500 text-sm mt-1">{errors.quantityAvailable}</p>}
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-900">
-                    Category <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    name="category"
-                    value={formData.category}
-                    onChange={handleChange}
-                    disabled={isFarmer}
-                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
-                      errors.category ? 'border-red-500' : 'border-gray-300'
-                    }`}
-                  >
-                    <option value="">Select category</option>
-                    {isFarmer ? (
-                      <option value="grocery">Grocery</option>
-                    ) : (
-                      categories.filter((cat) => cat.value !== 'grocery').map(cat => (
-                        <option key={cat.value} value={cat.value}>
-                          {cat.label}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                  {isFarmer && (
-                    <p className="text-sm text-gray-500 mt-1">
-                      Your account category is Farmer, so all products are automatically categorized as Grocery.
-                    </p>
-                  )}
-                  {errors.category && <p className="text-red-500 text-sm mt-1">{errors.category}</p>}
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-gray-900">
-                    Unit <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    name="unit"
-                    value={formData.unit}
-                    onChange={handleChange}
-                    className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
-                      errors.unit ? 'border-red-500' : 'border-gray-300'
-                    }`}
-                  >
-                    {units.map(unit => (
-                      <option key={unit.value} value={unit.value}>{unit.label}</option>
-                    ))}
-                  </select>
-                  {errors.unit && <p className="text-red-500 text-sm mt-1">{errors.unit}</p>}
-                </div>
-              </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-900">
-                  Location Hub
-                </label>
-                <div className="relative">
-                  <FaMapMarkerAlt className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    name="locationHub"
-                    value={formData.locationHub}
-                    onChange={handleChange}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                    placeholder="e.g., Nairobi Fresh Produce Market"
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  name="isPublished"
-                  checked={formData.isPublished}
-                  onChange={handleChange}
-                  className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
-                />
-                <span className="text-sm text-gray-900">Publish product immediately</span>
-              </label>
-            </div>
-          </div>
-
-          {/* Product Images */}
-          <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500">
-            <div className="flex items-center gap-2 mb-4">
-              <FaImage className="text-green-500 text-xl" />
-              <h2 className="text-xl font-semibold text-gray-900">Product Images</h2>
-            </div>
-            
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2 text-gray-900">
-                Upload Images (Up to 10)
-              </label>
-              <div className="flex items-center justify-center w-full">
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-orange-500 transition-colors">
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    {uploadingImages ? (
-                      <FaSpinner className="text-orange-500 text-3xl animate-spin mb-2" />
-                    ) : (
-                      <FaCloudUploadAlt className="text-gray-400 text-3xl mb-2" />
-                    )}
-                    <p className="text-sm text-gray-600">
-                      {uploadingImages ? 'Uploading...' : 'Click to upload or drag and drop'}
-                    </p>
-                    <p className="text-xs text-gray-500">PNG, JPG, WebP (MAX. 5MB each)</p>
-                  </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={handleImageUpload}
-                    className="hidden"
-                    disabled={uploadingImages}
-                  />
-                </label>
-              </div>
-            </div>
-            
-            {imagePreviews.length > 0 && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                {imagePreviews.map((image, index) => (
-                  <div key={index} className="relative group">
-                    <img
-                      src={image}
-                      alt={`Product ${index + 1}`}
-                      className="w-full h-32 object-cover rounded-lg shadow-md"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(index)}
-                      className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                    >
-                      <FaTrash className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Custom Attributes */}
-          <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-purple-500">
-            <div className="flex justify-between items-center mb-4">
-              <div className="flex items-center gap-2">
-                <FaWarehouse className="text-purple-500 text-xl" />
-                <h2 className="text-xl font-semibold text-gray-900">Custom Attributes</h2>
-              </div>
-              <button
-                type="button"
-                onClick={addCustomAttribute}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors"
-              >
-                + Add Attribute
-              </button>
-            </div>
-            
-            <p className="text-sm text-gray-600 mb-4">
-              Add specific details like organic certification, harvest date, origin, etc.
-            </p>
-            
-            {Object.keys(formData.customAttributes).length > 0 ? (
-              <div className="space-y-3">
-                {Object.entries(formData.customAttributes).map(([key, value]) => (
-                  <div key={key} className="flex gap-3 items-start">
-                    <div className="flex-1 relative">
-                      {key === 'organic' && <FaLeaf className="absolute left-3 top-1/2 transform -translate-y-1/2 text-green-500" />}
-                      {key === 'harvest_date' && <FaCalendarAlt className="absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-500" />}
-                      {key === 'moisture_level' && <FaTint className="absolute left-3 top-1/2 transform -translate-y-1/2 text-blue-400" />}
-                      {key === 'batch_id' && <FaBarcode className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />}
-                      <input
-                        type="text"
-                        value={key}
-                        readOnly
-                        className="w-full pl-10 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-700"
-                      />
-                    </div>
+                <div className="space-y-5 p-5">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#111827]">
+                      Product Name <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
-                      value={value}
-                      onChange={(e) => handleCustomAttributeChange(key, e.target.value)}
-                      className="flex-2 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                      placeholder="Value"
+                      name="name"
+                      value={formData.name}
+                      onChange={handleChange}
+                      className={`${fieldClass} ${errors.name ? errorFieldClass : ''}`}
+                      placeholder="Product name"
                     />
+                    {errors.name && <p className="mt-1 text-sm text-red-500">{errors.name}</p>}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#111827]">Description</label>
+                    <textarea
+                      name="description"
+                      value={formData.description}
+                      onChange={handleChange}
+                      rows="4"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm text-gray-900 outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                      placeholder="Product description"
+                    />
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#111827]">
+                        Category <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        name="category"
+                        value={formData.category}
+                        onChange={handleChange}
+                        className={`${fieldClass} ${errors.category ? errorFieldClass : ''}`}
+                      >
+                        <option value="">Select category</option>
+                        {categories.map(cat => (
+                          <option key={cat.value} value={cat.value}>{cat.label}</option>
+                        ))}
+                      </select>
+                      {isFarmer && (
+                        <p className="mt-1 text-xs text-[#6B7280]">Farmer products default to Grocery.</p>
+                      )}
+                      {errors.category && <p className="mt-1 text-sm text-red-500">{errors.category}</p>}
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#111827]">
+                        Unit <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        name="unit"
+                        value={formData.unit}
+                        onChange={handleChange}
+                        className={`${fieldClass} ${errors.unit ? errorFieldClass : ''}`}
+                      >
+                        {units.map(unit => (
+                          <option key={unit.value} value={unit.value}>{unit.label}</option>
+                        ))}
+                      </select>
+                      {errors.unit && <p className="mt-1 text-sm text-red-500">{errors.unit}</p>}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
+                <div className="border-b border-gray-100 px-5 py-4">
+                  <div className="flex items-center gap-2">
+                    <FaBoxes className="text-[#2563EB]" />
+                    <h2 className="text-lg font-semibold text-[#111827]">Pricing And Inventory</h2>
+                  </div>
+                </div>
+
+                <div className="space-y-5 p-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#111827]">
+                        Price (KSh) <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <FaDollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="number"
+                          name="price"
+                          value={formData.price}
+                          onChange={handleNumberChange}
+                          step="0.01"
+                          min="0"
+                          className={`${iconFieldClass} ${errors.price ? errorFieldClass : ''}`}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      {errors.price && <p className="mt-1 text-sm text-red-500">{errors.price}</p>}
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#111827]">
+                        Stock Quantity <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <FaBoxes className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="number"
+                          name="quantityAvailable"
+                          value={formData.quantityAvailable}
+                          onChange={handleNumberChange}
+                          min="0"
+                          className={`${iconFieldClass} ${errors.quantityAvailable ? errorFieldClass : ''}`}
+                          placeholder="0"
+                        />
+                      </div>
+                      {errors.quantityAvailable && <p className="mt-1 text-sm text-red-500">{errors.quantityAvailable}</p>}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#111827]">Low Stock Alert Threshold</label>
+                      <div className="relative">
+                        <FaExclamationTriangle className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500" />
+                        <input
+                          type="number"
+                          name="minThreshold"
+                          value={formData.minThreshold}
+                          onChange={handleNumberChange}
+                          min="0"
+                          className={`${iconFieldClass} ${errors.minThreshold ? errorFieldClass : ''}`}
+                          placeholder={`Auto ${autoLowStockThreshold}`}
+                        />
+                      </div>
+                      {errors.minThreshold && <p className="mt-1 text-sm text-red-500">{errors.minThreshold}</p>}
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#111827]">Warehouse Status</label>
+                      <div className="relative">
+                        <FaWarehouse className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <select
+                          name="warehouseStatus"
+                          value={formData.warehouseStatus}
+                          onChange={handleChange}
+                          className={iconFieldClass}
+                        >
+                          {warehouseStatusOptions.map(option => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+                      <label className="block text-sm font-medium text-[#111827]">Fulfillment / Pickup Hub</label>
+                      <span className="text-xs font-medium text-[#6B7280]">Shown to logistics and scarcity tools</span>
+                    </div>
+                    <div className="relative">
+                      <FaMapMarkerAlt className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        name="locationHub"
+                        value={formData.locationHub}
+                        onChange={handleChange}
+                        className={iconFieldClass}
+                        placeholder="e.g., Nairobi Industrial Area warehouse"
+                      />
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {fulfillmentHubSuggestions.map((hub) => (
+                        <button
+                          key={hub}
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, locationHub: hub }))}
+                          className={`rounded-md border px-2.5 py-1.5 text-xs font-medium transition ${
+                            formData.locationHub === hub
+                              ? 'border-[#F97316] bg-orange-50 text-[#C2410C]'
+                              : 'border-gray-200 bg-white text-[#374151] hover:border-[#F97316] hover:text-[#C2410C]'
+                          }`}
+                        >
+                          {hub}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-[#6B7280]">
+                      Use the nearest warehouse, market, depot, or pickup point customers and drivers can recognize.
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
+                <div className="border-b border-gray-100 px-5 py-4">
+                  <div className="flex items-center gap-2">
+                    <FaLayerGroup className="text-[#2563EB]" />
+                    <h2 className="text-lg font-semibold text-[#111827]">Wholesale And RFQ</h2>
+                  </div>
+                </div>
+
+                <div className="space-y-5 p-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-[#111827]">
+                        Minimum Order Quantity <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        name="minimumOrderQuantity"
+                        value={formData.minimumOrderQuantity}
+                        onChange={handleNumberChange}
+                        min="1"
+                        className={`${fieldClass} ${errors.minimumOrderQuantity ? errorFieldClass : ''}`}
+                        placeholder="1"
+                      />
+                      {errors.minimumOrderQuantity && <p className="mt-1 text-sm text-red-500">{errors.minimumOrderQuantity}</p>}
+                    </div>
+
+                    <label className="flex min-h-11 items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        name="rfqEnabled"
+                        checked={formData.rfqEnabled}
+                        onChange={handleChange}
+                        className="h-4 w-4 rounded text-[#F97316] focus:ring-[#F97316]"
+                      />
+                      <span className="text-sm font-medium text-[#111827]">RFQ enabled</span>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-[#111827]">Wholesale Terms</label>
+                    <textarea
+                      name="wholesaleTerms"
+                      value={formData.wholesaleTerms}
+                      onChange={handleChange}
+                      rows="3"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-3 text-sm text-gray-900 outline-none transition focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                      placeholder="Payment, delivery, and quotation terms"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-[#111827]">Tier Pricing</p>
+                      <button
+                        type="button"
+                        onClick={addPriceTier}
+                        className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        <FaPlus />
+                        Add Tier
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {formData.priceTiers.map((tier, index) => (
+                        <div key={`tier-${index}`} className="grid grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+                          <input
+                            type="number"
+                            min="1"
+                            value={tier.minQuantity}
+                            onChange={(event) => updatePriceTier(index, 'minQuantity', event.target.value)}
+                            className={fieldClass}
+                            placeholder="Min quantity"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={tier.unitPrice}
+                            onChange={(event) => updatePriceTier(index, 'unitPrice', event.target.value)}
+                            className={fieldClass}
+                            placeholder="Unit price"
+                          />
+                          <input
+                            type="text"
+                            value={tier.label || ''}
+                            onChange={(event) => updatePriceTier(index, 'label', event.target.value)}
+                            className={fieldClass}
+                            placeholder="Label"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removePriceTier(index)}
+                            className="inline-flex h-11 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-red-600 hover:bg-red-50"
+                            title="Remove tier"
+                          >
+                            <FaTrash />
+                          </button>
+                        </div>
+                      ))}
+
+                      {!formData.priceTiers.length && (
+                        <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-[#6B7280]">No tier pricing set.</p>
+                      )}
+                    </div>
+                    {errors.priceTiers && <p className="mt-2 text-sm text-red-500">{errors.priceTiers}</p>}
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <aside className="space-y-5">
+              <section className="rounded-lg border border-gray-200 bg-white shadow-sm xl:sticky xl:top-6">
+                <div className="border-b border-gray-100 px-5 py-4">
+                  <div className="flex items-center gap-2">
+                    <FaImage className="text-[#16A34A]" />
+                    <h2 className="text-lg font-semibold text-[#111827]">Product Images</h2>
+                  </div>
+                </div>
+
+                <div className="space-y-4 p-5">
+                  <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center transition hover:border-[#F97316] hover:bg-orange-50">
+                    {uploadingImages ? (
+                      <FaSpinner className="mb-3 text-2xl text-[#F97316] animate-spin" />
+                    ) : (
+                      <FaCloudUploadAlt className="mb-3 text-2xl text-[#6B7280]" />
+                    )}
+                    <span className="text-sm font-semibold text-[#111827]">
+                      {uploadingImages ? 'Uploading images' : 'Choose product images'}
+                    </span>
+                    <span className="mt-1 text-xs text-[#6B7280]">PNG, JPG, WebP up to 10MB</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleImageUpload}
+                      className="hidden"
+                      disabled={uploadingImages}
+                    />
+                  </label>
+
+                  {imagePreviews.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {imagePreviews.map((image, index) => (
+                        <div key={index} className="group relative aspect-square overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+                          <img
+                            src={image}
+                            alt={`Product ${index + 1}`}
+                            className="h-full w-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeImage(index)}
+                            className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-red-600 shadow-sm opacity-0 transition group-hover:opacity-100"
+                            title="Remove image"
+                          >
+                            <FaTrash className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg bg-gray-50 px-4 py-3 text-sm text-[#6B7280]">
+                      No images selected.
+                    </div>
+                  )}
+
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-semibold text-[#111827]">Listing Summary</p>
+                    <div className="mt-3 space-y-3 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#6B7280]">Name</span>
+                        <span className="max-w-44 truncate font-medium text-[#111827]">{formData.name || 'Untitled'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#6B7280]">Category</span>
+                        <span className="font-medium text-[#111827]">{formData.category || 'Not set'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#6B7280]">Stock</span>
+                        <span className="font-medium text-[#111827]">{formData.quantityAvailable || 0} {formData.unit}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#6B7280]">RFQ</span>
+                        <span className="font-medium text-[#111827]">{formData.rfqEnabled ? 'Enabled' : 'Off'}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#6B7280]">Fulfillment</span>
+                        <span className="max-w-44 truncate font-medium text-[#111827]">{formData.locationHub || 'Not set'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                    <span className="text-sm font-medium text-[#111827]">Publish product</span>
+                    <input
+                      type="checkbox"
+                      name="isPublished"
+                      checked={formData.isPublished}
+                      onChange={handleChange}
+                      className="h-4 w-4 rounded text-[#F97316] focus:ring-[#F97316]"
+                    />
+                  </label>
+
+                  <div className="flex gap-3 pt-2">
                     <button
                       type="button"
-                      onClick={() => removeCustomAttribute(key)}
-                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      onClick={() => navigate('/seller/products')}
+                      className="h-11 flex-1 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-[#374151] hover:bg-gray-50"
                     >
-                      <FaTrash className="w-4 h-4" />
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading || !hasBusinessName || hasReachedProductLimit}
+                      title={
+                        !hasBusinessName
+                          ? 'Add your business name before creating products.'
+                          : hasReachedProductLimit
+                            ? productLimitMessage
+                            : ''
+                      }
+                      className="h-11 flex-1 rounded-lg bg-[#F97316] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {loading ? (
+                        <span className="inline-flex items-center gap-2">
+                          <FaSpinner className="animate-spin" />
+                          {id ? 'Updating' : 'Adding'}
+                        </span>
+                      ) : (
+                        id ? 'Update Product' : 'Add Product'
+                      )}
                     </button>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm text-center py-4 bg-gray-50 rounded-lg">
-                No custom attributes added. Click "Add Attribute" to add product-specific details.
-              </p>
-            )}
-          </div>
-
-          {/* AI Tip */}
-          <div className="bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl p-4 border border-orange-200">
-            <div className="flex items-start gap-3">
-              <FaBrain className="text-orange-500 text-xl mt-0.5" />
-              <div>
-                <h4 className="font-semibold text-gray-900 mb-1">AI Selling Tip</h4>
-                <p className="text-sm text-gray-700">
-                  Products with high-quality images and detailed descriptions get <span className="text-green-600 font-medium">40% more views</span>. 
-                  Add custom attributes to highlight unique features and improve search visibility.
-                </p>
-              </div>
-            </div>
-          </div>
-          
-          {/* Submit Buttons */}
-          <div className="flex justify-end gap-4 pt-4">
-            <button
-              type="button"
-              onClick={() => navigate('/seller/products')}
-              className="px-6 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !hasBusinessName || (planUsage && planUsage.remainingSlots === 0 && !id)}
-              title={
-                !hasBusinessName
-                  ? 'Add your business name before creating products.'
-                  : planUsage && planUsage.remainingSlots === 0 && !id
-                    ? 'Plan limit reached. Upgrade to Smart or Growth for unlimited SKUs.'
-                    : ''
-              }
-              className="px-8 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-            >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <FaSpinner className="animate-spin" />
-                  {id ? 'Updating...' : 'Adding...'}
-                </span>
-              ) : (
-                id ? 'Update Product' : 'Add Product'
-              )}
-            </button>
+                </div>
+              </section>
+            </aside>
           </div>
         </form>
       </div>

@@ -2,20 +2,23 @@ const Product = require('../models/Product.model');
 const User = require('../models/User.model');
 const Order = require('../models/Order.model');
 const { validationResult } = require('express-validator');
+const notificationService = require('../services/notification/notification.service');
 const planService = require('../services/subscription/plan.service');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary.config');
-const { PLAN_IDS } = require('../config/subscriptionPlans');
+const { PLAN_IDS, PRODUCT_LIMITS } = require('../config/subscriptionPlans');
 const { getEffectiveUserCategory, isFarmerUser, isSellerUser } = require('../utils/userCategory');
 
+const NO_ACTIVE_SUBSCRIPTION_PRODUCT_LIMIT = PRODUCT_LIMITS.FREE;
+
 const PLAN_PRODUCT_LIMITS = {
-  none: 0,
-  free: 30,
-  v3: Number.MAX_SAFE_INTEGER,
-  v4: Number.MAX_SAFE_INTEGER,
-  [PLAN_IDS.SOLO]: 30,
-  [PLAN_IDS.SMART]: Number.MAX_SAFE_INTEGER,
-  [PLAN_IDS.GROWTH]: Number.MAX_SAFE_INTEGER,
-  [PLAN_IDS.MIZIGO]: Number.MAX_SAFE_INTEGER,
+  none: NO_ACTIVE_SUBSCRIPTION_PRODUCT_LIMIT,
+  free: NO_ACTIVE_SUBSCRIPTION_PRODUCT_LIMIT,
+  v3: PRODUCT_LIMITS[PLAN_IDS.SMART],
+  v4: PRODUCT_LIMITS[PLAN_IDS.GROWTH],
+  [PLAN_IDS.SOLO]: PRODUCT_LIMITS[PLAN_IDS.SOLO],
+  [PLAN_IDS.SMART]: PRODUCT_LIMITS[PLAN_IDS.SMART],
+  [PLAN_IDS.GROWTH]: PRODUCT_LIMITS[PLAN_IDS.GROWTH],
+  [PLAN_IDS.MIZIGO]: PRODUCT_LIMITS[PLAN_IDS.MIZIGO],
 };
 
 const PAID_REVIEW_STATUSES = ['payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed'];
@@ -28,6 +31,7 @@ const getEffectivePlan = async (userId) => {
   try {
     const subscription = await planService.getUserSubscription(userId);
     if (planService.isSubscriptionActive(subscription)) {
+      if (subscription.plan === 'free') return 'free';
       return planService.normalizePlanId(subscription.plan);
     }
     return null;
@@ -39,6 +43,18 @@ const getEffectivePlan = async (userId) => {
 
 const getProductLimitForPlan = (plan) => PLAN_PRODUCT_LIMITS[plan || 'none'] ?? 0;
 
+const isFreeProductPlan = (plan) => !plan || plan === 'free';
+
+const buildProductLimitMessage = (plan, productLimit) => {
+  if (isFreeProductPlan(plan)) {
+    return `You've reached your free ${productLimit} product limit. Upgrade your subscription to add more products.`;
+  }
+
+  const readableLimit = Number.isFinite(productLimit) ? productLimit.toLocaleString() : 'unlimited';
+  const planLabel = String(plan || 'subscription').toUpperCase();
+  return `You have reached your ${planLabel} product limit (${readableLimit}). Upgrade your subscription to add more products.`;
+};
+
 const PRODUCT_LIMIT_MAX = 100;
 
 const parsePositiveInt = (value, fallback) => {
@@ -46,7 +62,201 @@ const parsePositiveInt = (value, fallback) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const parseNonNegativeInt = (value, fallback = 0) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const parseBoolean = (value, fallback = false) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  return ['true', '1', 'yes', 'on'].includes(String(value).trim().toLowerCase());
+};
+
+const parseJsonField = (value, fallback) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const normalizePriceTiers = (value) => {
+  const parsed = parseJsonField(value, []);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((tier) => ({
+      minQuantity: parsePositiveInt(tier?.minQuantity, 0),
+      unitPrice: Number(tier?.unitPrice),
+      label: String(tier?.label || '').trim(),
+    }))
+    .filter((tier) => tier.minQuantity > 0 && Number.isFinite(tier.unitPrice) && tier.unitPrice >= 0)
+    .sort((a, b) => a.minQuantity - b.minQuantity);
+};
+
+const WAREHOUSE_STATUSES = new Set(['seller_storage', 'warehouse_pending', 'warehouse_received', 'dispatch_ready', 'restricted']);
+
+const normalizeWarehouseStatus = (value, fallback = 'seller_storage') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return WAREHOUSE_STATUSES.has(normalized) ? normalized : fallback;
+};
+
+const normalizeWholesalePayload = (body = {}, existing = {}) => {
+  const nested = parseJsonField(body.wholesale, {});
+  const source = nested && typeof nested === 'object' ? nested : {};
+  const existingWholesale = existing && typeof existing === 'object' ? existing : {};
+
+  return {
+    minimumOrderQuantity: parsePositiveInt(
+      body.minimumOrderQuantity ?? body.moq ?? source.minimumOrderQuantity ?? source.moq,
+      existingWholesale.minimumOrderQuantity || 1
+    ),
+    rfqEnabled: parseBoolean(
+      body.rfqEnabled ?? source.rfqEnabled,
+      existingWholesale.rfqEnabled !== undefined ? existingWholesale.rfqEnabled : true
+    ),
+    terms: String(body.wholesaleTerms ?? source.terms ?? existingWholesale.terms ?? '').trim(),
+    priceTiers: normalizePriceTiers(body.priceTiers ?? source.priceTiers ?? existingWholesale.priceTiers ?? []),
+  };
+};
+
 const normalizeProductCategory = (category) => String(category || '').trim().toLowerCase();
+
+const LOW_STOCK_SENSITIVITY_RULES = [
+  { threshold: 50, terms: ['maize', 'corn', 'unga', 'posho', 'grains-cereals', 'food-staples'] },
+  { threshold: 45, terms: ['sugar', 'jaggery', 'sugar-baking'] },
+  { threshold: 40, terms: ['rice', 'beans', 'wheat', 'flour', 'millet', 'sorghum'] },
+  { threshold: 25, terms: ['cooking oil', 'oil', 'cooking-oil'] },
+  { threshold: 20, terms: ['milk', 'dairy', 'eggs', 'dairy-eggs'] },
+  { threshold: 18, terms: ['vegetables', 'tomato', 'onion', 'potato', 'cabbage', 'fresh'] },
+  { threshold: 15, terms: ['beverage', 'water', 'juice', 'soda', 'beverages'] },
+  { threshold: 12, terms: ['household', 'soap', 'detergent', 'tissue'] },
+  { threshold: 10, terms: ['farm-inputs', 'seed', 'fertilizer', 'feed'] },
+];
+
+const getAutoLowStockThreshold = (product = {}) => {
+  const haystack = `${product.name || ''} ${product.category || ''}`.toLowerCase();
+  const matchedRule = LOW_STOCK_SENSITIVITY_RULES.find((rule) => (
+    rule.terms.some((term) => haystack.includes(term))
+  ));
+
+  return matchedRule?.threshold || 10;
+};
+
+const getEffectiveLowStockThreshold = (product = {}) => {
+  const configured = Number(product.minThreshold);
+  if (Number.isFinite(configured) && configured === 0) return 0;
+  const autoThreshold = getAutoLowStockThreshold(product);
+  if (!Number.isFinite(configured) || configured < 0) return autoThreshold;
+  return Math.max(configured, autoThreshold);
+};
+
+const SCARCITY_SENSITIVITY = {
+  normal: { thresholdMultiplier: 1, riskRatio: 1.2, criticalRatio: 0.5 },
+  sensitive: { thresholdMultiplier: 1.25, riskRatio: 1.5, criticalRatio: 0.65 },
+  high: { thresholdMultiplier: 1.5, riskRatio: 1.8, criticalRatio: 0.8 },
+};
+
+const normalizeScarcitySensitivity = (value) => {
+  const key = String(value || 'sensitive').trim().toLowerCase();
+  return SCARCITY_SENSITIVITY[key] ? key : 'sensitive';
+};
+
+const getScarcityThreshold = (product = {}, sensitivity = 'sensitive') => {
+  const baseThreshold = getEffectiveLowStockThreshold(product);
+  if (baseThreshold <= 0) return 0;
+  const config = SCARCITY_SENSITIVITY[sensitivity] || SCARCITY_SENSITIVITY.sensitive;
+  return Math.ceil(baseThreshold * config.thresholdMultiplier);
+};
+
+const isEssentialCommodity = (product = {}) => {
+  const haystack = `${product.name || ''} ${product.category || ''}`.toLowerCase();
+  return [
+    'maize',
+    'corn',
+    'unga',
+    'posho',
+    'sugar',
+    'rice',
+    'beans',
+    'wheat',
+    'flour',
+    'millet',
+    'sorghum',
+    'cooking oil',
+    'oil',
+    'milk',
+    'eggs',
+    'vegetables',
+    'food-staples',
+    'grains-cereals',
+    'sugar-baking',
+    'cooking-oil',
+    'dairy-eggs',
+  ].some((term) => haystack.includes(term));
+};
+
+const compactSkuCode = (value, fallback = 'GEN') => {
+  const normalized = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!normalized) return fallback;
+  const withoutVowels = normalized.replace(/[AEIOU]/g, '');
+  return (withoutVowels || normalized).slice(0, 3).padEnd(3, 'X');
+};
+
+const buildTrackingSku = (product) => {
+  if (product.sku) return product.sku;
+
+  const location = compactSkuCode(product.locationHub, 'ORG');
+  const category = compactSkuCode(product.category, 'CAT');
+  const productCode = compactSkuCode(product.name, 'PRD');
+  const quantity = Math.max(1, Math.round(Number(product.quantityAvailable || 0)));
+  const unit = String(product.unit || 'UNIT').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'UNIT';
+  const suffix = String(product._id || '').slice(-4).toUpperCase();
+
+  return `${location}-${category}-${productCode}-${quantity}${unit}${suffix ? `-${suffix}` : ''}`;
+};
+
+const appendInventoryGraph = (product) => {
+  if (!product) return product;
+  const quantityAvailable = Number(product.quantityAvailable || 0);
+  const reservedQuantity = Number(product.reservedQuantity || 0);
+  const history = Array.isArray(product.inventoryHistory) ? product.inventoryHistory : [];
+  const sku = buildTrackingSku(product);
+
+  return {
+    ...product,
+    sku,
+    trackingSku: sku,
+    minimumOrderQuantity: product.wholesale?.minimumOrderQuantity || 1,
+    rfqEnabled: product.wholesale?.rfqEnabled !== false,
+    priceTiers: product.wholesale?.priceTiers || [],
+    wholesaleTerms: product.wholesale?.terms || '',
+    warehouseStatus: normalizeWarehouseStatus(product.warehouseStatus),
+    minThreshold: getEffectiveLowStockThreshold(product),
+    availableQuantity: Math.max(0, quantityAvailable - reservedQuantity),
+    inventoryGraph: history.length
+      ? history.map((entry) => ({
+          onHand: Number(entry.onHand || 0),
+          reserved: Number(entry.reserved || 0),
+          available: Number(entry.available || 0),
+          unit: entry.unit || product.unit,
+          event: entry.event,
+          recordedAt: entry.recordedAt,
+        }))
+      : [{
+          onHand: quantityAvailable,
+          reserved: reservedQuantity,
+          available: Math.max(0, quantityAvailable - reservedQuantity),
+          unit: product.unit,
+          event: 'created',
+          recordedAt: product.createdAt || new Date(),
+        }],
+  };
+};
 
 /**
  * Create a new product (farmer/seller only)
@@ -87,15 +297,15 @@ exports.createProduct = async (req, res, next) => {
     const currentProductCount = await Product.countDocuments({ seller: req.user.id });
 
     if (currentProductCount >= productLimit) {
-      const readableLimit = Number.isFinite(productLimit) ? productLimit : 'unlimited';
-      const planLabel = plan ? plan.toUpperCase() : 'NO ACTIVE SUBSCRIPTION';
       return res.status(403).json({
         success: false,
-        message: `You have reached your ${planLabel} product limit (${readableLimit}). Activate a subscription to add products.`,
+        message: buildProductLimitMessage(plan, productLimit),
         data: {
           currentPlan: plan || null,
           productLimit,
           currentProductCount,
+          remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - currentProductCount) : null,
+          upgradeRequired: isFreeProductPlan(plan) || (Number.isFinite(productLimit) && currentProductCount >= productLimit),
         },
       });
     }
@@ -134,7 +344,7 @@ exports.createProduct = async (req, res, next) => {
     }
 
     let category = String(req.body.category || '').trim().toLowerCase();
-    if (isFarmerUser(req.user)) {
+    if (isFarmerUser(req.user) && !category) {
       category = 'grocery';
     }
 
@@ -143,9 +353,15 @@ exports.createProduct = async (req, res, next) => {
       description: req.body.description,
       price: parseFloat(req.body.price),
       quantityAvailable: parseInt(req.body.quantityAvailable, 10),
+      minThreshold: parseNonNegativeInt(req.body.minThreshold, getAutoLowStockThreshold({
+        name: req.body.name,
+        category,
+      })),
       category,
       unit: req.body.unit,
       locationHub: req.body.locationHub || '',
+      warehouseStatus: normalizeWarehouseStatus(req.body.warehouseStatus),
+      wholesale: normalizeWholesalePayload(req.body),
       images: uploadedImages,
       customAttributes: customAttributes,
       isPublished: req.body.isPublished === 'true' || req.body.isPublished === true,
@@ -154,6 +370,26 @@ exports.createProduct = async (req, res, next) => {
 
     const product = new Product(productData);
     await product.save();
+
+    // send in-app notifications to buyers about new product (non-blocking)
+    (async () => {
+      try {
+        const buyers = await User.find({ role: 'buyer', isActive: true }).select('_id');
+        const buyerIds = buyers.map((b) => b._id);
+        const sellerName = req.user?.fullName || req.user?.name || req.user?.businessName || 'Seller';
+        if (buyerIds.length > 0) {
+          await notificationService.sendBulkNotifications(buyerIds, {
+            type: 'in_app',
+            channel: 'new_product',
+            title: 'New product available',
+            body: `${sellerName} added ${product.name} to the marketplace.`,
+            data: { productId: String(product._id), sellerId: String(req.user.id) },
+          });
+        }
+      } catch (e) {
+        console.error('Error sending new product notifications:', e);
+      }
+    })();
 
     res.status(201).json({
       success: true,
@@ -164,6 +400,7 @@ exports.createProduct = async (req, res, next) => {
         productLimit,
         currentProductCount: currentProductCount + 1,
         remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - (currentProductCount + 1)) : null,
+        upgradeRequired: Number.isFinite(productLimit) ? currentProductCount + 1 >= productLimit : false,
       },
     });
   } catch (error) {
@@ -268,10 +505,12 @@ exports.getProducts = async (req, res, next) => {
 
     const totalPages = Math.max(1, Math.ceil(totalProducts / limitNum));
 
+    const productsWithInventoryGraph = products.map(appendInventoryGraph);
+
     res.status(200).json({
       success: true,
-      products,
-      data: products,
+      products: productsWithInventoryGraph,
+      data: productsWithInventoryGraph,
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -301,13 +540,172 @@ exports.getFeaturedProducts = async (req, res, next) => {
       .populate('seller', 'fullName name email businessName businessType businessLogoUrl')
       .lean();
 
+    const productsWithInventoryGraph = products.map(appendInventoryGraph);
+
     res.status(200).json({
       success: true,
-      products,
-      data: products,
+      products: productsWithInventoryGraph,
+      data: productsWithInventoryGraph,
     });
   } catch (error) {
     console.error('Error in getFeaturedProducts:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get live regional scarcity board from published inventory
+ * GET /api/v1/products/scarcity-board
+ */
+exports.getScarcityBoard = async (req, res, next) => {
+  try {
+    const category = normalizeProductCategory(req.query.category || '');
+    const hub = String(req.query.hub || '').trim();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 1000, 1), 2000);
+    const sensitivity = normalizeScarcitySensitivity(req.query.sensitivity);
+    const sensitivityConfig = SCARCITY_SENSITIVITY[sensitivity];
+
+    const query = { isPublished: true };
+    if (category && category !== 'all') query.category = category;
+    if (hub && hub !== 'all') query.locationHub = hub;
+
+    const products = await Product.find(query)
+      .select('name category quantityAvailable minThreshold reservedQuantity unit price locationHub images seller updatedAt createdAt')
+      .populate('seller', 'fullName name businessName businessType location campus')
+      .sort({ updatedAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const hubs = new Map();
+    const categorySummary = new Map();
+    let totalStock = 0;
+    let alertCount = 0;
+    let criticalCount = 0;
+    let essentialAtRiskCount = 0;
+
+    products.forEach((product) => {
+      const hubName = product.locationHub || product.seller?.location || product.seller?.campus || 'Unassigned Hub';
+      const categoryName = product.category || 'other';
+      const stock = Number(product.quantityAvailable || 0);
+      const reserved = Number(product.reservedQuantity || 0);
+      const threshold = getScarcityThreshold(product, sensitivity);
+      const available = Math.max(0, stock - reserved);
+      const alert = threshold > 0 && stock <= threshold;
+      const critical = alert && stock <= Math.max(1, Math.ceil(threshold * sensitivityConfig.criticalRatio));
+      const essential = isEssentialCommodity(product);
+      const riskRatio = threshold > 0 ? stock / threshold : 999;
+      const sellerId = String(product.seller?._id || product.seller || 'unknown');
+
+      totalStock += stock;
+      if (alert) alertCount += 1;
+      if (critical) criticalCount += 1;
+      if (essential && riskRatio <= sensitivityConfig.riskRatio) essentialAtRiskCount += 1;
+
+      if (!hubs.has(hubName)) {
+        hubs.set(hubName, {
+          hub: hubName,
+          totalStock: 0,
+          totalSkus: 0,
+          alertCount: 0,
+          criticalCount: 0,
+          essentialCount: 0,
+          essentialsAtRisk: [],
+          categories: {},
+          sellerIds: new Set(),
+          updatedAt: product.updatedAt || product.createdAt,
+        });
+      }
+
+      const hubRow = hubs.get(hubName);
+      hubRow.totalStock += stock;
+      hubRow.totalSkus += 1;
+      hubRow.alertCount += alert ? 1 : 0;
+      hubRow.criticalCount += critical ? 1 : 0;
+      hubRow.essentialCount += essential ? 1 : 0;
+      hubRow.sellerIds.add(sellerId);
+      hubRow.updatedAt = new Date(product.updatedAt || product.createdAt) > new Date(hubRow.updatedAt || 0)
+        ? product.updatedAt || product.createdAt
+        : hubRow.updatedAt;
+
+      if (!hubRow.categories[categoryName]) {
+        hubRow.categories[categoryName] = { category: categoryName, stock: 0, skus: 0, alerts: 0 };
+      }
+      hubRow.categories[categoryName].stock += stock;
+      hubRow.categories[categoryName].skus += 1;
+      hubRow.categories[categoryName].alerts += alert ? 1 : 0;
+
+      if (essential && riskRatio <= sensitivityConfig.riskRatio) {
+        hubRow.essentialsAtRisk.push({
+          id: product._id,
+          name: product.name,
+          category: categoryName,
+          stock,
+          available,
+          reserved,
+          threshold,
+          ratio: riskRatio,
+          unit: product.unit,
+          severity: critical ? 'critical' : 'low',
+          sensitivity,
+          seller: product.seller?.businessName || product.seller?.fullName || product.seller?.name || 'Seller',
+          updatedAt: product.updatedAt || product.createdAt,
+        });
+      }
+
+      if (!categorySummary.has(categoryName)) {
+        categorySummary.set(categoryName, { category: categoryName, stock: 0, skus: 0, alerts: 0 });
+      }
+      const categoryRow = categorySummary.get(categoryName);
+      categoryRow.stock += stock;
+      categoryRow.skus += 1;
+      categoryRow.alerts += alert ? 1 : 0;
+    });
+
+    const hubRows = Array.from(hubs.values())
+      .map((row) => {
+        const categories = Object.values(row.categories).sort((a, b) => b.alerts - a.alerts || b.stock - a.stock);
+        const essentialsAtRisk = row.essentialsAtRisk.sort((a, b) => a.ratio - b.ratio).slice(0, 8);
+        const guardianState = row.criticalCount > 0 || essentialsAtRisk.length > 0
+          ? 'scarcity-risk'
+          : row.alertCount > 0 ? 'watch' : 'stable';
+
+        return {
+          hub: row.hub,
+          totalStock: row.totalStock,
+          totalSkus: row.totalSkus,
+          alertCount: row.alertCount,
+          criticalCount: row.criticalCount,
+          essentialCount: row.essentialCount,
+          essentialsAtRisk,
+          categories,
+          guardianState,
+          sellerCount: row.sellerIds.size,
+          updatedAt: row.updatedAt,
+        };
+      })
+      .sort((a, b) => b.criticalCount - a.criticalCount || b.alertCount - a.alertCount || b.totalStock - a.totalStock);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        generatedAt: new Date().toISOString(),
+        summary: {
+          hubs: hubRows.length,
+          products: products.length,
+          totalStock,
+          alertCount,
+          criticalCount,
+          essentialAtRiskCount,
+          sensitivity,
+          thresholdMultiplier: sensitivityConfig.thresholdMultiplier,
+          earlyWarningRatio: sensitivityConfig.riskRatio,
+        },
+        hubs: hubRows,
+        categories: Array.from(categorySummary.values()).sort((a, b) => b.alerts - a.alerts || b.stock - a.stock),
+      },
+    });
+  } catch (error) {
+    console.error('Error in getScarcityBoard:', error);
     next(error);
   }
 };
@@ -339,7 +737,7 @@ exports.getProductById = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      data: product,
+      data: appendInventoryGraph(product),
     });
   } catch (error) {
     console.error('Error in getProductById:', error);
@@ -390,17 +788,20 @@ exports.updateProduct = async (req, res, next) => {
     }
 
     // Update other fields
-    const allowedUpdates = ['name', 'description', 'price', 'quantityAvailable', 'unit', 'category', 'isPublished', 'locationHub'];
+    const allowedUpdates = ['name', 'description', 'price', 'quantityAvailable', 'minThreshold', 'unit', 'category', 'isPublished', 'locationHub', 'warehouseStatus'];
     allowedUpdates.forEach(field => {
       if (req.body[field] !== undefined) {
         if (field === 'price') product[field] = parseFloat(req.body[field]);
-        else if (field === 'quantityAvailable') product[field] = parseInt(req.body[field], 10);
+        else if (field === 'quantityAvailable' || field === 'minThreshold') product[field] = parseNonNegativeInt(req.body[field], field === 'minThreshold' ? 10 : 0);
         else if (field === 'isPublished') product[field] = req.body[field] === 'true' || req.body[field] === true;
+        else if (field === 'warehouseStatus') product[field] = normalizeWarehouseStatus(req.body[field], product.warehouseStatus);
         else product[field] = req.body[field];
       }
     });
 
-    if (isFarmerUser(req.user)) {
+    product.wholesale = normalizeWholesalePayload(req.body, product.wholesale);
+
+    if (isFarmerUser(req.user) && !product.category) {
       product.category = 'grocery';
     }
 
@@ -419,7 +820,7 @@ exports.updateProduct = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'Product updated successfully',
-      data: product,
+      data: appendInventoryGraph(product),
     });
   } catch (error) {
     console.error('Error in updateProduct:', error);
@@ -542,15 +943,20 @@ exports.updateMetadata = async (req, res, next) => {
  */
 exports.getLowStockProducts = async (req, res, next) => {
   try {
-    const threshold = parseInt(req.query.threshold) || 10;
+    const threshold = parseNonNegativeInt(req.query.threshold, 0);
     const products = await Product.find({
       seller: req.user.id,
-      quantityAvailable: { $lt: threshold },
-    }).select('name quantityAvailable unit price images');
+      quantityAvailable: { $gt: 0 },
+    }).select('name category quantityAvailable minThreshold unit price images sku inventoryHistory reservedQuantity');
+
+    const lowStockProducts = products.filter((product) => {
+      const effectiveThreshold = threshold > 0 ? threshold : getEffectiveLowStockThreshold(product);
+      return effectiveThreshold > 0 && Number(product.quantityAvailable || 0) <= effectiveThreshold;
+    });
 
     res.status(200).json({
       success: true,
-      data: products,
+      data: lowStockProducts.map(appendInventoryGraph),
     });
   } catch (error) {
     console.error('Error in getLowStockProducts:', error);
@@ -577,9 +983,11 @@ exports.getMyProducts = async (req, res, next) => {
     const plan = await getEffectivePlan(req.user.id);
     const productLimit = getProductLimitForPlan(plan);
     const totalProducts = await Product.countDocuments({ seller: req.user.id });
+    const remainingSlots = Number.isFinite(productLimit) ? Math.max(0, productLimit - totalProducts) : null;
+    const upgradeRequired = isFreeProductPlan(plan) && remainingSlots === 0;
 
     const safeLimit = Math.min(requestedLimit, productLimit);
-    const normalizedLimit = Number.isFinite(safeLimit) ? safeLimit : requestedLimit;
+    const normalizedLimit = Math.max(1, Number.isFinite(safeLimit) ? safeLimit : requestedLimit);
     const skip = (page - 1) * normalizedLimit;
     const maxVisibleProducts = Math.min(totalProducts, productLimit);
 
@@ -594,11 +1002,12 @@ exports.getMyProducts = async (req, res, next) => {
           pages: Math.ceil(maxVisibleProducts / normalizedLimit) || 1,
         },
         planUsage: {
-          currentPlan: plan,
+          currentPlan: plan || null,
           productLimit,
           totalProducts,
           visibleProducts: maxVisibleProducts,
-          remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - totalProducts) : null,
+          remainingSlots,
+          upgradeRequired,
         },
       });
     }
@@ -621,11 +1030,12 @@ exports.getMyProducts = async (req, res, next) => {
         pages: Math.ceil(maxVisibleProducts / normalizedLimit) || 1,
       },
       planUsage: {
-        currentPlan: plan,
+        currentPlan: plan || null,
         productLimit,
         totalProducts,
         visibleProducts: maxVisibleProducts,
-        remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - totalProducts) : null,
+        remainingSlots,
+        upgradeRequired,
       },
     });
   } catch (error) {

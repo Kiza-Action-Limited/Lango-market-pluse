@@ -4,7 +4,6 @@ const { body, param, query } = require('express-validator');
 const orderController = require('../../controllers/order.controller');
 const paymentController = require('../../controllers/payment.controller');
 const { protect: authMiddleware } = require('../../middleware/auth');
-const subscriptionGate = require('../../middleware/subscriptionGate');
 const requireVerified = require('../../middleware/requireVerified');
 
 router.use(authMiddleware);
@@ -17,7 +16,7 @@ router.post('/', [
     if (value && typeof value === 'object') return true;
     throw new Error('deliveryAddress must be a string or address object');
   }),
-], subscriptionGate('v3'), orderController.createOrder);
+], orderController.createOrder);
 
 router.post('/:id/pay', requireVerified, [
   param('id').isMongoId(),
@@ -47,12 +46,24 @@ router.get('/', [
   query('role').optional().isIn(['buyer', 'seller']),
 ], orderController.getOrders);
 
+router.get('/buyer/sellers', orderController.getBuyerSellers);
+router.get('/buyer/review-queue', orderController.getBuyerReviewQueue);
+router.get('/:id/tracking', param('id').isMongoId(), orderController.getOrderTracking);
 router.get('/:id', param('id').isMongoId(), orderController.getOrderById);
 router.put(
   '/:id/status',
   [
     param('id').isMongoId(),
-    body('status').isIn(['processing', 'dispatched', 'delivered', 'cancelled']),
+    body('status').isIn([
+      'processing',
+      'dispatched',
+      'delivered',
+      'cancelled',
+      'IN_TRANSIT',
+      'DELIVERED',
+      'DISPUTED',
+      'RELEASED',
+    ]),
   ],
   orderController.updateOrderStatus
 );

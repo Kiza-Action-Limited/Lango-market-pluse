@@ -4,8 +4,23 @@ const http = require('http');
 const app = require('./app');
 const connectDB = require('./config/db');
 const { initSocket } = require('./config/socket');
+const logger = require('./utils/logger');
 
 const PORT = process.env.PORT || 5000;
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection', {
+    message: reason?.message || reason,
+    stack: reason?.stack,
+  });
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception', {
+    message: error.message,
+    stack: error.stack,
+  });
+});
 
 const startServer = async () => {
   try {
@@ -24,7 +39,10 @@ const startServer = async () => {
       console.log(`Server running on port ${PORT}`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error.message);
+    logger.error('Failed to start server', {
+      message: error.message,
+      stack: error.stack,
+    });
     process.exit(1);
   }
 };

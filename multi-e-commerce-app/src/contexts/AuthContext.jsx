@@ -10,7 +10,7 @@ import {
   resolveActivePlan,
 } from '../utils/subscription';
 import { subscriptionService } from '../services/subscriptionService';
-import { isBuyerUser, isSellerUser } from '../utils/userCategory';
+import { isBuyerUser, isLogisticsUser, isSellerUser } from '../utils/userCategory';
 
 const AuthContext = createContext();
 
@@ -67,7 +67,7 @@ export const AuthProvider = ({ children }) => {
       setToken(token);
       setUser(user);
       toast.success('Login successful! Welcome back!');
-      return { success: true, user };
+      return { success: true, user, redirectTo: response.redirectTo };
     } catch (error) {
       const errorMessage = handleApiError(error);
       toast.error(errorMessage.message || 'Login failed');
@@ -87,7 +87,7 @@ export const AuthProvider = ({ children }) => {
       setToken(token);
       setUser(user);
       toast.success('Registration successful! Welcome to MultiVendor Hub!');
-      return { success: true };
+      return { success: true, user, redirectTo: response.redirectTo };
     } catch (error) {
       const errorMessage = handleApiError(error);
       toast.error(errorMessage.message || 'Registration failed');
@@ -95,12 +95,14 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = ({ silent = false } = {}) => {
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
     setActivePlan(null);
-    toast.success('Logged out successfully');
+    if (!silent) {
+      toast.success('Logged out successfully');
+    }
   };
 
   const updateUser = (updatedData) => {
@@ -179,6 +181,7 @@ export const AuthProvider = ({ children }) => {
     resetPlanToDefault,
     isAuthenticated: !!user,
     isAdmin: user?.role === 'admin',
+    isLogistics: isLogisticsUser(user),
     isSeller: isSellerUser(user),
     isBuyer: isBuyerUser(user)
   };

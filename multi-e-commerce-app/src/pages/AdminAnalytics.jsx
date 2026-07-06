@@ -1,168 +1,190 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { FaChartLine, FaBox, FaSeedling, FaShoppingCart, FaSpinner, FaArrowUp, FaArrowDown, FaSignal, FaFileExport } from 'react-icons/fa';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FaArrowDown,
+  FaArrowUp,
+  FaBox,
+  FaChartLine,
+  FaClipboardCheck,
+  FaFileExport,
+  FaMoneyBillWave,
+  FaShieldAlt,
+  FaShoppingCart,
+  FaSpinner,
+  FaStore,
+  FaTruck,
+  FaUsers,
+} from 'react-icons/fa';
 import api from '../config/axios';
 import { formatCurrency } from '../utils/formatters';
+
+const number = (value) => Number(value || 0);
+
+const formatNumber = (value) => number(value).toLocaleString('en-KE');
+
+const trendMeta = (series = []) => {
+  if (series.length < 2) return { changePct: 0, direction: 'flat' };
+  const first = number(series[0]);
+  const last = number(series[series.length - 1]);
+  const changePct = first ? ((last - first) / Math.abs(first)) * 100 : 0;
+  return {
+    changePct: Number(changePct.toFixed(1)),
+    direction: changePct > 0 ? 'up' : changePct < 0 ? 'down' : 'flat',
+  };
+};
+
+const Sparkline = ({ series = [], color = '#F97316' }) => {
+  const values = series.map(number);
+  if (!values.length) return <div className="h-14 rounded-md bg-gray-50" />;
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const points = values.map((value, index) => {
+    const x = (index / Math.max(values.length - 1, 1)) * 240;
+    const y = 56 - ((value - min) / range) * 52;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <svg viewBox="0 0 240 60" className="h-14 w-full">
+      <polyline fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={points} />
+    </svg>
+  );
+};
+
+const KpiCard = ({ icon: Icon, label, value, detail, series, color = '#F97316' }) => {
+  const trend = trendMeta(series || []);
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-gray-50" style={{ color }}>
+          <Icon />
+        </span>
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${
+          trend.direction === 'up' ? 'bg-green-50 text-green-700' : trend.direction === 'down' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+        }`}>
+          {trend.direction === 'up' ? <FaArrowUp /> : trend.direction === 'down' ? <FaArrowDown /> : null}
+          {trend.changePct}%
+        </span>
+      </div>
+      <p className="mt-4 text-xs font-semibold uppercase text-gray-500">{label}</p>
+      <p className="mt-1 text-2xl font-bold text-gray-950">{value}</p>
+      <p className="mt-1 text-sm text-gray-600">{detail}</p>
+      <div className="mt-3">
+        <Sparkline series={series} color={color} />
+      </div>
+    </div>
+  );
+};
+
+const ProgressRow = ({ label, value, total, color = '#F97316', detail }) => {
+  const pct = total ? Math.min(100, Math.round((number(value) / number(total)) * 100)) : number(value);
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+        <span className="font-medium text-gray-700">{label}</span>
+        <span className="text-gray-500">{detail || `${pct}%`}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+};
+
+const Panel = ({ title, subtitle, children, action }) => (
+  <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4">
+      <div>
+        <h3 className="font-semibold text-gray-950">{title}</h3>
+        {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+    <div className="p-5">{children}</div>
+  </section>
+);
 
 const AdminAnalytics = () => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState('month');
   const fetchedOnceRef = useRef(false);
+
+  const fetchAnalytics = async (nextPeriod = period) => {
+    setLoading(true);
+    try {
+      const res = await api.get('/v1/admin/analytics', { params: { period: nextPeriod } });
+      setAnalytics(res.data?.data || null);
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (fetchedOnceRef.current) return;
     fetchedOnceRef.current = true;
-
-    const fetchAnalytics = async () => {
-      try {
-        const res = await api.get('/v1/admin/analytics', { params: { period: 'month' } });
-        setAnalytics(res.data?.data || null);
-      } catch (error) {
-        console.error('Error fetching analytics:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAnalytics();
+    fetchAnalytics('month');
   }, []);
 
-  const pickSeries = (source) => {
-    if (!source) return [];
-    if (Array.isArray(source)) return source.map((v) => Number(v) || 0);
-    if (typeof source === 'object') {
-      const values = Object.values(source).map((v) => Number(v) || 0);
-      return values;
-    }
-    return [];
-  };
+  const trends = analytics?.trends || [];
+  const revenueSeries = trends.map((item) => number(item.totalRevenue));
+  const orderSeries = trends.map((item) => number(item.orderCount));
+  const fulfillmentSeries = trends.map((item) => number(item.deliveredCount));
+  const maxRevenue = Math.max(...revenueSeries, 1);
 
-  const firstNonEmptySeries = (...sources) => {
-    for (const source of sources) {
-      const series = pickSeries(source);
-      if (series.length) return series;
-    }
-    return [];
-  };
+  const summary = analytics?.summary || {};
+  const financials = analytics?.financials || {};
+  const users = analytics?.users || {};
+  const operations = analytics?.operations || {};
+  const productHealth = operations.products || {};
+  const logistics = operations.logistics || {};
 
-  const usageSeries = firstNonEmptySeries(
-    analytics?.platformUsageTrend,
-    analytics?.usageTrend,
-    analytics?.trafficTrend,
-    analytics?.visitsTrend
-  );
-
-  const visitsSeries = firstNonEmptySeries(
-    analytics?.platformVisitsTrend,
-    analytics?.dailyVisits,
-    analytics?.visitTrend
-  );
-
-  const buildChartPoints = (series, width = 280, height = 84) => {
-    if (!series.length) return '';
-    const max = Math.max(...series);
-    const min = Math.min(...series);
-    const range = max - min || 1;
-    return series
-      .map((value, index) => {
-        const x = (index / Math.max(series.length - 1, 1)) * width;
-        const y = height - ((value - min) / range) * height;
-        return `${x},${y}`;
-      })
-      .join(' ');
-  };
-
-  const trendMeta = (series) => {
-    if (!series || series.length < 2) {
-      return { changePct: 0, direction: 'flat' };
-    }
-    const first = Number(series[0]) || 0;
-    const last = Number(series[series.length - 1]) || 0;
-    const raw = first === 0 ? 0 : ((last - first) / Math.abs(first)) * 100;
-    return {
-      changePct: Number(raw.toFixed(1)),
-      direction: raw > 0 ? 'up' : raw < 0 ? 'down' : 'flat',
-    };
-  };
-
-  const usageTrend = trendMeta(usageSeries);
-  const visitsTrend = trendMeta(visitsSeries);
-  const usagePoints = buildChartPoints(usageSeries);
-  const visitsPoints = buildChartPoints(visitsSeries);
+  const paymentRows = useMemo(() => analytics?.paymentStats || [], [analytics]);
+  const escrowRows = useMemo(() => analytics?.escrowStats || [], [analytics]);
 
   const exportPdfReport = () => {
     const pdfEscape = (text = '') => String(text).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
     const lines = [];
     let y = 800;
     const left = 48;
-
     const text = (size, value, x = left) => {
       lines.push(`BT /F1 ${size} Tf ${x} ${y} Td (${pdfEscape(value)}) Tj ET`);
-      y -= size + 6;
+      y -= size + 7;
     };
 
-    const sectionTitle = (value) => {
-      y -= 6;
-      text(13, value);
-      y -= 2;
-    };
-
-    const drawBarChart = (series, x, chartY, width, height, rgb = '0.95 0.45 0.09') => {
-      if (!series.length) return;
-      const max = Math.max(...series) || 1;
-      const barWidth = Math.max(4, width / Math.max(1, series.length * 1.8));
-      series.forEach((v, i) => {
-        const h = (Math.max(0, Number(v) || 0) / max) * height;
-        const bx = x + i * (barWidth + 3);
-        lines.push(`${rgb} rg`);
-        lines.push(`${bx.toFixed(2)} ${chartY.toFixed(2)} ${barWidth.toFixed(2)} ${h.toFixed(2)} re f`);
-      });
-      lines.push(`0.75 0.75 0.75 RG`);
-      lines.push(`${x} ${chartY} ${width} 0 re S`);
-    };
-
-    text(18, 'Lango MarketPulse - Admin Analytics Report');
+    text(18, 'Lango MarketPulse - Platform Analytics');
     text(10, `Generated: ${new Date().toLocaleString()}`);
-    y -= 6;
-
-    sectionTitle('Platform Trend Overview');
-    text(10, `Usage Trend: ${usageTrend.changePct}% ${usageTrend.direction}`);
-    text(10, `Visits Trend: ${visitsTrend.changePct}% ${visitsTrend.direction}`);
-    const trendChartY = y - 110;
-    drawBarChart(usageSeries.slice(0, 18), left, trendChartY, 230, 90, '0.97 0.45 0.09');
-    drawBarChart(visitsSeries.slice(0, 18), left + 260, trendChartY, 230, 90, '0.09 0.64 0.27');
-    y = trendChartY - 28;
-
-    sectionTitle('Sales by User Type');
-    (analytics?.salesByUserType || []).slice(0, 8).forEach((item) => {
-      text(10, `${item._id || 'Individual'}: ${item.orderCount || 0} orders | ${formatCurrency(item.totalSales || 0)}`);
-    });
-
-    y -= 6;
-    sectionTitle('Top Products');
+    text(10, `Period: ${period}`);
+    y -= 8;
+    text(13, 'Executive Summary');
+    text(10, `Revenue: ${formatCurrency(summary.totalRevenue || 0)}`);
+    text(10, `Orders: ${formatNumber(summary.totalOrders || 0)}`);
+    text(10, `Users: ${formatNumber(summary.totalUsers || 0)}`);
+    text(10, `Products: ${formatNumber(summary.totalProducts || 0)}`);
+    text(10, `Active Logistics: ${formatNumber(summary.activeLogistics || 0)}`);
+    y -= 8;
+    text(13, 'Financials');
+    text(10, `Marketplace: ${formatCurrency(financials.marketplaceRevenue || 0)}`);
+    text(10, `Subscriptions: ${formatCurrency(financials.subscriptionRevenue || 0)}`);
+    text(10, `Platform Fees: ${formatCurrency(financials.platformFeeRevenue || 0)}`);
+    text(10, `Escrow Held: ${formatCurrency(financials.escrowHeld || 0)}`);
+    y -= 8;
+    text(13, 'Top Products');
     (analytics?.topProducts || []).slice(0, 8).forEach((item) => {
-      text(10, `${item.product?.name || 'Unnamed'}: ${item.totalSold || 0} sold | ${formatCurrency(item.revenue || 0)}`);
-    });
-
-    y -= 6;
-    sectionTitle('Top Performing Farmers');
-    (analytics?.farmerPerformance || []).slice(0, 10).forEach((farmer) => {
-      text(
-        10,
-        `${farmer.farmer?.businessName || farmer.farmer?.name || 'Unknown'} | Orders: ${farmer.orderCount || 0} | Revenue: ${formatCurrency(farmer.revenue || 0)}`
-      );
+      text(10, `${item.product?.name || 'Unnamed'} - ${formatCurrency(item.revenue || 0)} - ${formatNumber(item.totalSold || 0)} sold`);
     });
 
     const content = lines.join('\n');
     const encoder = new TextEncoder();
-    const objects = [];
-    const pushObj = (str) => objects.push(str);
-
-    pushObj('1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj');
-    pushObj('2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj');
-    pushObj('3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj');
-    pushObj('4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj');
-    pushObj(`5 0 obj << /Length ${encoder.encode(content).length} >> stream\n${content}\nendstream endobj`);
-
+    const objects = [
+      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
+      '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
+      `5 0 obj << /Length ${encoder.encode(content).length} >> stream\n${content}\nendstream endobj`,
+    ];
     let pdf = '%PDF-1.4\n';
     const offsets = [0];
     objects.forEach((obj) => {
@@ -170,18 +192,15 @@ const AdminAnalytics = () => {
       pdf += `${obj}\n`;
     });
     const xrefStart = encoder.encode(pdf).length;
-    pdf += `xref\n0 ${objects.length + 1}\n`;
-    pdf += '0000000000 65535 f \n';
-    for (let i = 1; i <= objects.length; i += 1) {
-      pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-    }
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    for (let i = 1; i <= objects.length; i += 1) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
     pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
 
     const blob = new Blob([pdf], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `admin_analytics_${new Date().toISOString().slice(0, 10)}.pdf`;
+    a.download = `admin_platform_analytics_${new Date().toISOString().slice(0, 10)}.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -193,173 +212,221 @@ const AdminAnalytics = () => {
       <div className="flex h-80 items-center justify-center">
         <div className="text-center">
           <FaSpinner className="mx-auto mb-3 animate-spin text-4xl text-[#F97316]" />
-          <p className="text-gray-600">Loading analytics...</p>
+          <p className="text-gray-600">Loading platform analytics...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#F9FAFB] min-h-screen py-8">
-      <div className="container mx-auto px-4">
-        <div className="mb-8">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <FaChartLine className="text-3xl text-[#F97316]" />
-              <h1 className="text-3xl font-bold text-[#F97316]">Admin Analytics</h1>
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
+      <div className="mx-auto max-w-screen-2xl space-y-6">
+        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase text-[#F97316]">Admin analytics</p>
+              <h1 className="mt-2 text-2xl font-bold text-gray-950">Lango Market platform performance</h1>
+              <p className="mt-1 text-sm text-gray-600">Revenue, users, sellers, products, payments, logistics, escrow, and support activity in one professional view.</p>
             </div>
-            <button
-              type="button"
-              onClick={exportPdfReport}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white hover:opacity-95"
-            >
-              <FaFileExport />
-              Export PDF
-            </button>
-          </div>
-          <p className="text-[#6B7280]">Performance insights for sales, products, and seller output.</p>
-        </div>
-
-        <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-xl bg-white p-6 shadow-md">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-lg font-semibold text-[#111827]">
-                <FaSignal className="text-[#F97316]" />
-                Platform Usage Trend
-              </h3>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
-                  usageTrend.direction === 'up'
-                    ? 'bg-green-100 text-green-700'
-                    : usageTrend.direction === 'down'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-gray-100 text-gray-700'
-                }`}
+            <div className="flex flex-wrap gap-2">
+              {[
+                ['week', '7 days'],
+                ['month', '30 days'],
+                ['year', '12 months'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setPeriod(value);
+                    fetchAnalytics(value);
+                  }}
+                  className={`h-10 rounded-md px-3 text-sm font-semibold ${period === value ? 'bg-[#111827] text-white' : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={exportPdfReport}
+                className="inline-flex h-10 items-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-semibold text-white hover:bg-[#EA580C]"
               >
-                {usageTrend.direction === 'up' ? <FaArrowUp /> : usageTrend.direction === 'down' ? <FaArrowDown /> : null}
-                {usageTrend.changePct}% {usageTrend.direction === 'up' ? 'increase' : usageTrend.direction === 'down' ? 'decrease' : 'steady'}
-              </span>
+                <FaFileExport />
+                Export PDF
+              </button>
             </div>
-            {usageSeries.length ? (
-              <svg viewBox="0 0 280 84" className="h-24 w-full">
-                <polyline fill="none" stroke="#F97316" strokeWidth="3" points={usagePoints} />
-              </svg>
-            ) : (
-              <p className="text-sm text-gray-500">No usage trend data available.</p>
-            )}
           </div>
+        </section>
 
-          <div className="rounded-xl bg-white p-6 shadow-md">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-lg font-semibold text-[#111827]">
-                <FaChartLine className="text-[#16A34A]" />
-                Platform Visits Trend
-              </h3>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
-                  visitsTrend.direction === 'up'
-                    ? 'bg-green-100 text-green-700'
-                    : visitsTrend.direction === 'down'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-gray-100 text-gray-700'
-                }`}
-              >
-                {visitsTrend.direction === 'up' ? <FaArrowUp /> : visitsTrend.direction === 'down' ? <FaArrowDown /> : null}
-                {visitsTrend.changePct}% {visitsTrend.direction === 'up' ? 'increase' : visitsTrend.direction === 'down' ? 'decrease' : 'steady'}
-              </span>
-            </div>
-            {visitsSeries.length ? (
-              <svg viewBox="0 0 280 84" className="h-24 w-full">
-                <polyline fill="none" stroke="#16A34A" strokeWidth="3" points={visitsPoints} />
-              </svg>
-            ) : (
-              <p className="text-sm text-gray-500">No visit trend data available.</p>
-            )}
-          </div>
-        </div>
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <KpiCard icon={FaMoneyBillWave} label="Marketplace revenue" value={formatCurrency(summary.totalRevenue || 0)} detail={`${formatCurrency(summary.averageOrderValue || 0)} average order`} series={revenueSeries} color="#16A34A" />
+          <KpiCard icon={FaShoppingCart} label="Orders" value={formatNumber(summary.totalOrders || 0)} detail={`${formatNumber(summary.deliveredOrders || 0)} delivered`} series={orderSeries} color="#3B82F6" />
+          <KpiCard icon={FaUsers} label="Users" value={formatNumber(summary.totalUsers || 0)} detail={`${formatNumber(summary.activeUsers || 0)} active accounts`} series={analytics?.platformUsageTrend || []} color="#F97316" />
+          <KpiCard icon={FaTruck} label="Logistics" value={formatNumber(summary.totalLogistics || 0)} detail={`${formatNumber(summary.activeLogistics || 0)} active shipments`} series={fulfillmentSeries} color="#06B6D4" />
+        </section>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-xl bg-white p-6 shadow-md">
-            <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-[#111827]">
-              <FaShoppingCart className="text-[#16A34A]" />
-              Sales by User Type
-            </h3>
-            <div className="space-y-3">
-              {analytics?.salesByUserType?.length ? (
-                analytics.salesByUserType.map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between rounded-lg bg-gray-50 p-3">
-                    <div>
-                      <p className="font-medium capitalize">{item._id || 'Individual'}</p>
-                      <p className="text-sm text-gray-600">{item.orderCount} orders</p>
-                    </div>
-                    <p className="font-bold text-[#16A34A]">{formatCurrency(item.totalSales)}</p>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-500">No sales analytics available.</p>
+        <section className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+          <Panel title="Revenue Overview" subtitle="Marketplace revenue by day for the selected period">
+            <div className="flex h-72 items-end gap-2 border-b border-l border-gray-100 px-2 pb-2">
+              {revenueSeries.length ? revenueSeries.map((value, index) => (
+                <div key={`${trends[index]?.date || index}`} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+                  <div
+                    className="w-full rounded-t-md bg-[#16A34A]"
+                    style={{ height: `${Math.max(6, (value / maxRevenue) * 230)}px` }}
+                    title={`${trends[index]?.date}: ${formatCurrency(value)}`}
+                  />
+                </div>
+              )) : (
+                <div className="flex h-full w-full items-center justify-center text-sm text-gray-500">No revenue trend yet.</div>
               )}
             </div>
-          </div>
-
-          <div className="rounded-xl bg-white p-6 shadow-md">
-            <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-[#111827]">
-              <FaBox className="text-[#F97316]" />
-              Top Products
-            </h3>
-            <div className="space-y-3">
-              {analytics?.topProducts?.length ? (
-                analytics.topProducts.slice(0, 8).map((item, idx) => (
-                  <div key={idx} className="flex items-center justify-between rounded-lg bg-gray-50 p-3">
-                    <div>
-                      <p className="font-medium">{item.product?.name || 'Unnamed Product'}</p>
-                      <p className="text-sm text-gray-600">{item.totalSold} sold</p>
-                    </div>
-                    <p className="font-semibold text-[#16A34A]">{formatCurrency(item.revenue)}</p>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-500">No product analytics available.</p>
-              )}
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-md bg-green-50 p-3">
+                <p className="text-xs font-semibold uppercase text-green-700">Marketplace</p>
+                <p className="mt-1 text-lg font-bold text-gray-950">{formatCurrency(financials.marketplaceRevenue || 0)}</p>
+              </div>
+              <div className="rounded-md bg-orange-50 p-3">
+                <p className="text-xs font-semibold uppercase text-orange-700">Platform fees</p>
+                <p className="mt-1 text-lg font-bold text-gray-950">{formatCurrency(financials.platformFeeRevenue || 0)}</p>
+              </div>
+              <div className="rounded-md bg-blue-50 p-3">
+                <p className="text-xs font-semibold uppercase text-blue-700">Escrow held</p>
+                <p className="mt-1 text-lg font-bold text-gray-950">{formatCurrency(financials.escrowHeld || 0)}</p>
+              </div>
             </div>
-          </div>
-        </div>
+          </Panel>
 
-        <div className="mt-6 rounded-xl bg-white p-6 shadow-md">
-          <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold text-[#111827]">
-            <FaSeedling className="text-[#16A34A]" />
-            Top Performing Farmers
-          </h3>
+          <Panel title="Platform Health" subtitle="Verification, fulfillment, product, and GPS readiness">
+            <div className="space-y-5">
+              <ProgressRow label="Fulfillment" value={operations.fulfillmentRate || 0} color="#16A34A" />
+              <ProgressRow label="KYC verified" value={users.kycVerificationRate || 0} color="#3B82F6" />
+              <ProgressRow label="Phone verified" value={users.phoneVerificationRate || 0} color="#F97316" />
+              <ProgressRow label="GPS coverage" value={operations.gpsCoverageRate || 0} color="#06B6D4" />
+              <ProgressRow label="Active products" value={productHealth.active || 0} total={productHealth.total || 0} color="#8B5CF6" detail={`${formatNumber(productHealth.active || 0)} of ${formatNumber(productHealth.total || 0)}`} />
+            </div>
+          </Panel>
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-3">
+          <Panel title="All Users" subtitle="Role distribution and account verification">
+            <div className="space-y-4">
+              {(analytics?.roleBreakdown || []).map((role) => (
+                <ProgressRow key={role.role} label={role.role} value={role.count} total={summary.totalUsers || 0} detail={`${formatNumber(role.count)} users`} color="#F97316" />
+              ))}
+              <div className="grid grid-cols-2 gap-3 pt-2 text-sm">
+                <div className="rounded-md bg-gray-50 p-3">
+                  <p className="text-gray-500">Documents</p>
+                  <p className="font-bold text-gray-950">{formatNumber(users.documents || 0)}</p>
+                </div>
+                <div className="rounded-md bg-gray-50 p-3">
+                  <p className="text-gray-500">KYC pending</p>
+                  <p className="font-bold text-gray-950">{formatNumber(users.kycPending || 0)}</p>
+                </div>
+              </div>
+            </div>
+          </Panel>
+
+          <Panel title="Product Health" subtitle="Catalog status across sellers">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ['Total', productHealth.total, FaBox, '#111827'],
+                ['Active', productHealth.active, FaClipboardCheck, '#16A34A'],
+                ['Inactive', productHealth.inactive, FaShieldAlt, '#F59E0B'],
+                ['Low stock', productHealth.lowStock, FaStore, '#DC2626'],
+              ].map(([label, value, Icon, color]) => (
+                <div key={label} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                  <Icon style={{ color }} />
+                  <p className="mt-3 text-xs font-semibold uppercase text-gray-500">{label}</p>
+                  <p className="text-xl font-bold text-gray-950">{formatNumber(value || 0)}</p>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="Payments & Escrow" subtitle="Money movement by type and escrow status">
+            <div className="space-y-4">
+              {paymentRows.slice(0, 5).map((row) => (
+                <div key={row._id || 'payment'} className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold capitalize text-gray-800">{String(row._id || 'payment').replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-gray-500">{formatNumber(row.count)} transactions</p>
+                  </div>
+                  <p className="font-semibold text-gray-950">{formatCurrency(row.amount || 0)}</p>
+                </div>
+              ))}
+              {escrowRows.slice(0, 4).map((row) => (
+                <div key={`escrow-${row._id || 'status'}`} className="flex items-center justify-between gap-3 rounded-md bg-blue-50 p-3">
+                  <p className="text-sm font-semibold capitalize text-blue-900">{String(row._id || 'escrow').replace(/_/g, ' ')}</p>
+                  <p className="font-semibold text-blue-900">{formatCurrency(row.amount || 0)}</p>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-2">
+          <Panel title="Top Products" subtitle="Best sellers by revenue">
+            <div className="space-y-3">
+              {(analytics?.topProducts || []).slice(0, 8).map((item, index) => (
+                <div key={item._id || index} className="flex items-center justify-between gap-4 rounded-md bg-gray-50 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-gray-950">{item.product?.name || 'Unnamed product'}</p>
+                    <p className="text-sm text-gray-500">{formatNumber(item.totalSold || 0)} sold | {formatNumber(item.orderCount || 0)} orders</p>
+                  </div>
+                  <p className="font-semibold text-green-700">{formatCurrency(item.revenue || 0)}</p>
+                </div>
+              ))}
+              {!analytics?.topProducts?.length && <p className="text-sm text-gray-500">No product sales yet.</p>}
+            </div>
+          </Panel>
+
+          <Panel title="Seller Performance" subtitle="Top sellers by completed revenue">
+            <div className="space-y-3">
+              {(analytics?.sellerPerformance || analytics?.farmerPerformance || []).slice(0, 8).map((seller, index) => (
+                <div key={seller.sellerId || seller.farmerId || index} className="flex items-center justify-between gap-4 rounded-md bg-gray-50 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-gray-950">{seller.farmer?.businessName || seller.farmer?.fullName || seller.farmer?.name || 'Unknown seller'}</p>
+                    <p className="text-sm text-gray-500">{formatNumber(seller.orderCount || 0)} orders | {formatNumber(seller.totalSold || 0)} units</p>
+                  </div>
+                  <p className="font-semibold text-green-700">{formatCurrency(seller.revenue || 0)}</p>
+                </div>
+              ))}
+              {!analytics?.sellerPerformance?.length && !analytics?.farmerPerformance?.length && <p className="text-sm text-gray-500">No seller performance yet.</p>}
+            </div>
+          </Panel>
+        </section>
+
+        <Panel title="Recent Platform Activity" subtitle="Latest orders, users, logistics updates, and payments">
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 text-left">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-500">
                 <tr>
-                  <th className="px-4 py-2">Name</th>
-                  <th className="px-4 py-2">Orders</th>
-                  <th className="px-4 py-2">Total Sold</th>
-                  <th className="px-4 py-2">Revenue</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Activity</th>
+                  <th className="px-4 py-3">Detail</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Date</th>
                 </tr>
               </thead>
-              <tbody>
-                {analytics?.farmerPerformance?.length ? (
-                  analytics.farmerPerformance.slice(0, 10).map((farmer, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="px-4 py-3">{farmer.farmer?.businessName || farmer.farmer?.name || 'Unknown'}</td>
-                      <td className="px-4 py-3">{farmer.orderCount}</td>
-                      <td className="px-4 py-3">{farmer.totalSold}</td>
-                      <td className="px-4 py-3 font-semibold text-[#16A34A]">{formatCurrency(farmer.revenue)}</td>
-                    </tr>
-                  ))
-                ) : (
+              <tbody className="divide-y divide-gray-100">
+                {(analytics?.recentActivity || []).map((item, index) => (
+                  <tr key={`${item.type}-${index}`} className="bg-white">
+                    <td className="px-4 py-3 font-semibold capitalize text-gray-800">{item.type}</td>
+                    <td className="px-4 py-3 text-gray-950">{item.title}</td>
+                    <td className="px-4 py-3 text-gray-600">{item.detail}</td>
+                    <td className="px-4 py-3 font-semibold text-green-700">{item.amount ? formatCurrency(item.amount) : '-'}</td>
+                    <td className="px-4 py-3 text-gray-500">{item.createdAt ? new Date(item.createdAt).toLocaleString() : '-'}</td>
+                  </tr>
+                ))}
+                {!analytics?.recentActivity?.length && (
                   <tr>
-                    <td className="px-4 py-3 text-sm text-gray-500" colSpan={4}>
-                      No farmer analytics available.
-                    </td>
+                    <td className="px-4 py-6 text-center text-gray-500" colSpan={5}>No recent activity available.</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-        </div>
+        </Panel>
       </div>
     </div>
   );

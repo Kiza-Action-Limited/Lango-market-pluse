@@ -9,7 +9,6 @@ const defaultPrefs = {
   emailEnabled: true,
   pushEnabled: true,
   orderUpdates: true,
-  scarcityAlerts: true,
 };
 
 const Toggle = ({ label, checked, onChange, description }) => (
@@ -35,7 +34,7 @@ const NotificationPreferencesCard = ({
   backLinkLabel = 'Back home',
   title = 'Notification Preferences',
   eyebrow = 'Notification control',
-  description = 'Choose how the platform reaches you for order updates, scarcity alerts, and account activity.',
+  description = 'Choose how the platform reaches you for order updates and account activity.',
 }) => {
   const { isAuthenticated, loading } = useAuth();
   const [prefs, setPrefs] = useState(defaultPrefs);
@@ -111,13 +110,6 @@ const NotificationPreferencesCard = ({
         checked={!!prefs.orderUpdates}
         onChange={(value) => setPrefs((prev) => ({ ...prev, orderUpdates: value }))}
       />
-      <Toggle
-        label="Scarcity alerts"
-        description="Low-stock and demand alerts."
-        checked={!!prefs.scarcityAlerts}
-        onChange={(value) => setPrefs((prev) => ({ ...prev, scarcityAlerts: value }))}
-      />
-
       <div className="flex flex-wrap items-center gap-3 pt-2">
         <button
           type="submit"

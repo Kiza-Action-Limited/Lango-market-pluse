@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { FaEnvelope, FaLock, FaBrain, FaArrowRight, FaEye, FaEyeSlash, FaUser, FaStore, FaTruck } from 'react-icons/fa';
 import marketPulseLogo from '../assets/Marketpulse-logo.png';
 import { createPrefetchHandlers } from '../utils/prefetch';
+import { isBuyerUser, isLogisticsUser, isSellerUser } from '../utils/userCategory';
 
 const ADMIN_LOGIN_EMAIL = String(import.meta.env.VITE_ADMIN_LOGIN_EMAIL || 'admin@langomarket.com').toLowerCase();
 
@@ -14,11 +15,15 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [accountType, setAccountType] = useState('buyer');
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isAdminLogin = location.pathname.startsWith('/admin');
+  const isSellerLogin = location.pathname.startsWith('/seller/login');
+  const isBuyerLogin = location.pathname.startsWith('/buyer/login');
+  const isLogisticsLogin = location.pathname.startsWith('/logistics/login');
+  const fromPath = location.state?.from?.pathname;
 
   useEffect(() => {
     if (isAdminLogin) {
@@ -26,14 +31,39 @@ const Login = () => {
       return;
     }
 
+    if (fromPath?.startsWith('/logistics')) {
+      setAccountType('logistics');
+      return;
+    }
+
+    if (isSellerLogin) {
+      setAccountType('seller');
+      return;
+    }
+
+    if (isBuyerLogin) {
+      setAccountType('buyer');
+      return;
+    }
+
+    if (isLogisticsLogin) {
+      setAccountType('logistics');
+      return;
+    }
+
     const roleParam = searchParams.get('role');
     if (roleParam === 'seller' || roleParam === 'buyer' || roleParam === 'logistics') {
       setAccountType(roleParam);
     }
-  }, [isAdminLogin, searchParams]);
+  }, [fromPath, isAdminLogin, isBuyerLogin, isLogisticsLogin, isSellerLogin, searchParams]);
 
   const selectAccountType = (nextType) => {
     setAccountType(nextType);
+    if (isSellerLogin || isBuyerLogin || isLogisticsLogin) {
+      navigate(`/login?role=${nextType}`, { replace: true });
+      return;
+    }
+
     const params = new URLSearchParams(searchParams);
     params.set('role', nextType);
     setSearchParams(params, { replace: true });
@@ -55,23 +85,32 @@ const Login = () => {
     const result = await login(cleanIdentifier, cleanPassword);
     if (result.success) {
       const resolvedRole = String(result?.user?.role || '').toLowerCase();
-      const resolvedBusinessType = String(result?.user?.businessType || '').toLowerCase();
       const isAdminUser = resolvedRole === 'admin';
-      const isLogisticsUser = resolvedRole === 'logistics' || resolvedBusinessType === 'logistics';
-      const isSellerUser =
-        resolvedRole === 'seller' ||
-        ['wholesaler', 'retailer', 'farmer', 'manufacturer'].includes(resolvedRole) ||
-        ['wholesaler', 'retailer', 'farmer', 'manufacturer'].includes(resolvedBusinessType);
+      const isBuyerAccount = isBuyerUser(result.user);
+      const isLogisticsAccount = isLogisticsUser(result.user);
+      const isSellerAccount = !isAdminUser && !isLogisticsAccount && isSellerUser(result.user);
 
-      if (isAdminUser) {
-        navigate('/admin');
-      } else if (isLogisticsUser) {
-        navigate('/logistics/dashboard');
-      } else if (isSellerUser) {
-        navigate('/seller');
-      } else {
-        navigate('/');
+      const portalAllowed =
+        (accountType === 'buyer' && isBuyerAccount) ||
+        (accountType === 'seller' && isSellerAccount) ||
+        (accountType === 'logistics' && isLogisticsAccount) ||
+        (accountType === 'admin' && isAdminUser);
+
+      if (!portalAllowed) {
+        logout({ silent: true });
+        const expectedPortal =
+          isSellerAccount ? 'Seller Sign In' : isBuyerAccount ? 'Buyer Sign In' : isLogisticsAccount ? 'Logistics Provider Sign In' : 'the correct account portal';
+        toast.error(`This account belongs to ${expectedPortal}. Please use that login option.`);
+        setLoading(false);
+        return;
       }
+
+      const defaultPath = result.redirectTo || (isAdminUser ? '/admin/dashboard' : isLogisticsAccount ? '/logistics/dashboard' : isSellerAccount ? '/seller' : '/');
+      const blockedReturnPaths = ['/login', '/buyer/login', '/seller/login', '/logistics/login', '/register'];
+      const nextPath = fromPath && !blockedReturnPaths.includes(fromPath) && !isLogisticsAccount
+        ? fromPath
+        : defaultPath;
+      navigate(nextPath, { replace: true });
     }
 
     setLoading(false);
@@ -99,10 +138,13 @@ const Login = () => {
       title: 'Logistics Provider',
       subtitle: 'Deliver orders and earn',
       icon: FaTruck,
-      activeClass: 'border-[#3B82F6] bg-[#3B82F6]/5',
-      iconClass: 'text-[#3B82F6]',
+      activeClass: 'border-[#F97316] bg-[#F97316]/5',
+      iconClass: 'text-[#F97316]',
     },
   ];
+  const forgotPasswordPath = accountType === 'admin'
+    ? '/forgot-password?role=admin'
+    : `/forgot-password?role=${accountType}`;
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center bg-linear-to-br from-[#F9FAFB] to-[#E5E7EB] py-8 px-4 sm:px-6 lg:px-8">
@@ -191,8 +233,8 @@ const Login = () => {
                 <span className="ml-2 text-sm text-[#6B7280]">Remember me</span>
               </label>
 
-              <Link to="/forgot-password" className="text-sm font-medium text-[#FB923C] hover:text-[#F97316] transition-colors">
-                Forgot password?
+              <Link to={forgotPasswordPath} className="text-sm font-medium text-[#FB923C] hover:text-[#F97316] transition-colors">
+                Forgot your password?
               </Link>
             </div>
 

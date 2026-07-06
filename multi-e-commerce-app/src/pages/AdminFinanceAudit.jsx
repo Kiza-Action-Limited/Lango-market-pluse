@@ -259,6 +259,23 @@ const AdminFinanceAudit = () => {
     }
   };
 
+  const exportAdminReport = async () => {
+    try {
+      const response = await api.get('/v1/admin/reports/summary.pdf', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `admin_finance_report_${new Date().toISOString().slice(0, 10)}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('PDF report exported');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Failed to export PDF report');
+    }
+  };
+
   if (loading) {
     return <div className="min-h-screen bg-[#F9FAFB] p-8">Loading finance and audit data...</div>;
   }
@@ -286,6 +303,13 @@ const AdminFinanceAudit = () => {
                 className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 <FaRedo /> Refresh
+              </button>
+              <button
+                type="button"
+                onClick={exportAdminReport}
+                className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <FaFileAlt /> Export PDF
               </button>
               <Link
                 to="/admin/dashboard"

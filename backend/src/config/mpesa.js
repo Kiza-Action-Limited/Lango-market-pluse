@@ -3,6 +3,7 @@ const axios = require('axios');
 const MPESA_BASE_URL = process.env.MPESA_ENV === 'production'
   ? 'https://api.safaricom.co.ke'
   : 'https://sandbox.safaricom.co.ke';
+const MPESA_SHORTCODE = process.env.MPESA_SHORTCODE || process.env.MPESA_SHORT_CODE;
 
 let tokenCache = { token: null, expiresAt: 0 };
 
@@ -53,17 +54,17 @@ const stkPush = async (phoneNumber, amount, accountReference, transactionDesc) =
   const token = await getAccessToken();
   const timestamp = getTimestamp();
   const password = Buffer.from(
-    `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
+    `${MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
   ).toString('base64');
 
   const payload = {
-    BusinessShortCode: process.env.MPESA_SHORTCODE,
+    BusinessShortCode: MPESA_SHORTCODE,
     Password: password,
     Timestamp: timestamp,
     TransactionType: 'CustomerPayBillOnline',
     Amount: Math.ceil(Number(amount)),
     PartyA: normalizeMpesaPhone(phoneNumber),
-    PartyB: process.env.MPESA_SHORTCODE,
+    PartyB: MPESA_SHORTCODE,
     PhoneNumber: normalizeMpesaPhone(phoneNumber),
     CallBackURL: process.env.MPESA_STK_CALLBACK_URL || `${process.env.BASE_URL}/webhooks/mpesa/callback`,
     AccountReference: accountReference,
@@ -87,11 +88,11 @@ const queryStatus = async (checkoutRequestID) => {
   const token = await getAccessToken();
   const timestamp = getTimestamp();
   const password = Buffer.from(
-    `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
+    `${MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
   ).toString('base64');
 
   const payload = {
-    BusinessShortCode: process.env.MPESA_SHORTCODE,
+    BusinessShortCode: MPESA_SHORTCODE,
     Password: password,
     Timestamp: timestamp,
     CheckoutRequestID: checkoutRequestID,
@@ -118,7 +119,7 @@ const b2cPayment = async ({ phoneNumber, amount, remarks, occasion, originatorCo
     SecurityCredential: process.env.MPESA_INITIATOR_CREDENTIAL,
     CommandID: 'BusinessPayment',
     Amount: Math.ceil(Number(amount)),
-    PartyA: process.env.MPESA_SHORTCODE,
+    PartyA: MPESA_SHORTCODE,
     PartyB: normalizeMpesaPhone(phoneNumber),
     Remarks: remarks || 'Lango MarketPulse payout',
     QueueTimeOutURL: process.env.MPESA_B2C_TIMEOUT_URL,
@@ -156,6 +157,7 @@ const extractStkMetadata = (stkCallback = {}) => {
 
 module.exports = {
   MPESA_BASE_URL,
+  MPESA_SHORTCODE,
   getAccessToken,
   stkPush,
   queryStatus,

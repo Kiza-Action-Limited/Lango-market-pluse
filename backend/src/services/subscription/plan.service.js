@@ -3,6 +3,7 @@ const Subscription = require('../../models/Subscription.model');
 const {
   PLANS,
   PLAN_IDS,
+  PRODUCT_LIMITS,
   normalizePlanId,
   meetsTier,
 } = require('../../config/subscriptionPlans');
@@ -53,20 +54,38 @@ const httpError = (message, statusCode, details = {}) => {
   return error;
 };
 
+const NO_ACTIVE_SUBSCRIPTION_PRODUCT_LIMIT = PRODUCT_LIMITS.FREE;
+const PLAN_SMS_CREDITS = {
+  [PLAN_IDS.SOLO]: 20,
+  [PLAN_IDS.SMART]: 500,
+  [PLAN_IDS.GROWTH]: 2000,
+  [PLAN_IDS.MIZIGO]: 0,
+};
+
 const PLAN_FEATURES = {
   solo: {
-    maxProducts: 30,
-    hasSMS: false,
+    maxProducts: PRODUCT_LIMITS[PLAN_IDS.SOLO],
+    hasSMS: true,
     hasRegionalGuardian: false,
     hasBillGuardian: false,
     hasAssetTracking: false,
     hasStaffRoles: false,
     hasDailyBurn: false,
     hasNetProfitGauge: false,
+    hasRestockAlerts: false,
+    hasProductReviews: true,
+    hasOrderNotifications: true,
+    hasSellerWallet: true,
+    hasWithdrawals: true,
+    hasEscrowOrders: true,
+    hasRFQInbox: false,
+    hasRelatedProducts: false,
+    hasLogisticsCommandCenter: false,
+    hasInventoryAlerts: false,
     reportType: 'vitals'
   },
   smart: {
-    maxProducts: Infinity,
+    maxProducts: PRODUCT_LIMITS[PLAN_IDS.SMART],
     hasSMS: true,
     hasRegionalGuardian: true,
     hasBillGuardian: false,
@@ -74,10 +93,20 @@ const PLAN_FEATURES = {
     hasStaffRoles: false,
     hasDailyBurn: false,
     hasNetProfitGauge: true,
+    hasRestockAlerts: true,
+    hasProductReviews: true,
+    hasOrderNotifications: true,
+    hasSellerWallet: true,
+    hasWithdrawals: true,
+    hasEscrowOrders: true,
+    hasRFQInbox: true,
+    hasRelatedProducts: true,
+    hasLogisticsCommandCenter: true,
+    hasInventoryAlerts: true,
     reportType: 'performance'
   },
   growth: {
-    maxProducts: Infinity,
+    maxProducts: PRODUCT_LIMITS[PLAN_IDS.GROWTH],
     hasSMS: true,
     hasRegionalGuardian: true,
     hasBillGuardian: true,
@@ -85,10 +114,20 @@ const PLAN_FEATURES = {
     hasStaffRoles: true,
     hasDailyBurn: true,
     hasNetProfitGauge: true,
+    hasRestockAlerts: true,
+    hasProductReviews: true,
+    hasOrderNotifications: true,
+    hasSellerWallet: true,
+    hasWithdrawals: true,
+    hasEscrowOrders: true,
+    hasRFQInbox: true,
+    hasRelatedProducts: true,
+    hasLogisticsCommandCenter: true,
+    hasInventoryAlerts: true,
     reportType: 'audit'
   },
   mizigo: {
-    maxProducts: 0,
+    maxProducts: PRODUCT_LIMITS[PLAN_IDS.MIZIGO],
     hasSMS: false,
     hasRegionalGuardian: false,
     hasBillGuardian: false,
@@ -102,10 +141,13 @@ const PLAN_FEATURES = {
 
 const LOCKED_FEATURES = {
   solo: {
-    'Send SMS': { plan: 'smart', price: 2500, prompt: 'Upgrade to Plan 2 to message your customers.' },
     'Restock Alert': { plan: 'smart', price: 2500, prompt: 'Upgrade to Plan 2 to get restock alerts.' },
     'Net Profit Gauge': { plan: 'smart', price: 2500, prompt: 'Upgrade to Plan 2 to see your net profit.' },
     'Regional Scarcity Alerts': { plan: 'smart', price: 2500, prompt: 'Upgrade to Plan 2 to monitor regional stock.' },
+    'RFQ Inbox': { plan: 'smart', price: 2500, prompt: 'Upgrade to Smart to receive and manage RFQs.' },
+    'Related Product Recommendations': { plan: 'smart', price: 2500, prompt: 'Upgrade to Smart to connect related products and bundles.' },
+    'Logistics Command Center': { plan: 'smart', price: 2500, prompt: 'Upgrade to Smart to coordinate dispatch and delivery tools.' },
+    'Inventory Alerts': { plan: 'smart', price: 2500, prompt: 'Upgrade to Smart to unlock sensitive stock alerts.' },
     'Staff Roles': { plan: 'growth', price: 6500, prompt: 'Upgrade to Plan 3 to manage staff access.' },
     'Bill Guardian': { plan: 'growth', price: 6500, prompt: 'Upgrade to Plan 3 to get bill reminders.' }
   },
@@ -168,7 +210,7 @@ class PlanService {
       description: plan.description,
       features: PLAN_FEATURES[plan.id],
       lockedFeatures: LOCKED_FEATURES[plan.id] || {},
-      smsCreditsIncluded: plan.id === 'smart' ? 500 : (plan.id === 'growth' ? 2000 : 0),
+      smsCreditsIncluded: PLAN_SMS_CREDITS[plan.id] || 0,
       targetAudience: this.getTargetAudience(plan.id)
     }));
   }
@@ -210,7 +252,7 @@ class PlanService {
       planName: subscription.planName,
       active: isActive,
       billingModel: subscription.billingModel,
-      maxProducts: isActive ? features.maxProducts : 0,
+      maxProducts: isActive ? features.maxProducts : NO_ACTIVE_SUBSCRIPTION_PRODUCT_LIMIT,
       smsCredits: {
         balance: getSmsCreditBalanceFromSubscription(subscription),
         includedPerCycle: subscription.features?.smsCreditsAllocated || 0,
@@ -290,9 +332,18 @@ class PlanService {
     
     const featureMap = {
       'sendSms': entitlements.features.hasSMS,
-      'restockAlert': entitlements.features.hasSMS,
+      'restockAlert': entitlements.features.hasRestockAlerts,
       'netProfitGauge': entitlements.features.hasNetProfitGauge,
       'regionalGuardian': entitlements.features.hasRegionalGuardian,
+      'rfqInbox': entitlements.features.hasRFQInbox,
+      'relatedProducts': entitlements.features.hasRelatedProducts,
+      'logisticsCommandCenter': entitlements.features.hasLogisticsCommandCenter,
+      'inventoryAlerts': entitlements.features.hasInventoryAlerts,
+      'productReviews': entitlements.features.hasProductReviews,
+      'orderNotifications': entitlements.features.hasOrderNotifications,
+      'sellerWallet': entitlements.features.hasSellerWallet,
+      'withdrawals': entitlements.features.hasWithdrawals,
+      'escrowOrders': entitlements.features.hasEscrowOrders,
       'billGuardian': entitlements.features.hasBillGuardian,
       'assetTracking': entitlements.features.hasAssetTracking,
       'staffRoles': entitlements.features.hasStaffRoles,
@@ -304,10 +355,14 @@ class PlanService {
 
   async getUpgradePlanForFeature(feature) {
     const featureToPlan = {
-      'sendSms': { id: 'smart', name: 'Smart', price: 2500 },
+      'sendSms': { id: 'solo', name: 'Solo', price: 500 },
       'restockAlert': { id: 'smart', name: 'Smart', price: 2500 },
       'netProfitGauge': { id: 'smart', name: 'Smart', price: 2500 },
       'regionalGuardian': { id: 'smart', name: 'Smart', price: 2500 },
+      'rfqInbox': { id: 'smart', name: 'Smart', price: 2500 },
+      'relatedProducts': { id: 'smart', name: 'Smart', price: 2500 },
+      'logisticsCommandCenter': { id: 'smart', name: 'Smart', price: 2500 },
+      'inventoryAlerts': { id: 'smart', name: 'Smart', price: 2500 },
       'staffRoles': { id: 'growth', name: 'Growth', price: 6500 },
       'billGuardian': { id: 'growth', name: 'Growth', price: 6500 },
       'assetTracking': { id: 'growth', name: 'Growth', price: 6500 },
@@ -346,9 +401,9 @@ class PlanService {
 
   getNewFeatures(fromPlan, toPlan) {
     const allFeatures = {
-      solo: ['Basic Inventory', 'QR Sync', 'Vitals PDF'],
-      smart: ['500 SMS/month', 'Net Profit Gauge', 'Regional Guardian', 'Restock Alerts'],
-      growth: ['2000 SMS/month', 'Staff Roles', 'Bill Guardian', 'Asset Tracking', 'Daily Burn']
+      solo: ['200 products', 'Product reviews', 'Order notifications', 'Wallet and withdrawals', 'Escrow orders'],
+      smart: ['5,000 products', '500 SMS/month', 'RFQ inbox', 'Related products', 'Logistics command center', 'Regional scarcity board'],
+      growth: ['10,000 products', '2000 SMS/month', 'Staff Roles', 'Bill Guardian', 'Asset Tracking', 'Daily Burn']
     };
     
     return allFeatures[toPlan] || [];

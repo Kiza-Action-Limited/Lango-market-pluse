@@ -34,7 +34,7 @@ export const PAYMENT_METHODS = {
 };
 
 export const SHIPPING_COST = 5;
-export const FREE_SHIPPING_THRESHOLD = 50;
+export const FREE_SHIPPING_THRESHOLD = Number.POSITIVE_INFINITY;
 
 export const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest First' },

@@ -7,6 +7,25 @@ const Subscription = require('../../models/Subscription.model');
 const memoryStore = require('./authMemoryStore');
 const { getEffectiveUserCategory, isSellerUser } = require('../../utils/userCategory');
 
+const applyDotPath = (target, path, value) => {
+  const segments = String(path).split('.');
+  let current = target;
+  segments.forEach((segment, index) => {
+    if (index === segments.length - 1) {
+      current[segment] = value;
+      return;
+    }
+    current[segment] = current[segment] && typeof current[segment] === 'object' ? current[segment] : {};
+    current = current[segment];
+  });
+};
+
+const expandDotUpdates = (updates = {}) => Object.entries(updates).reduce((acc, [key, value]) => {
+  if (key.includes('.')) applyDotPath(acc, key, value);
+  else acc[key] = value;
+  return acc;
+}, {});
+
 // Safe imports with fallbacks
 let smsQueue = null;
 let redisClient = null;
@@ -18,6 +37,16 @@ try {
   console.warn('⚠️ Redis/SMS queue not available – SMS features disabled');
 }
 
+const getDefaultRedirectForUser = (user = {}) => {
+  const role = String(user.role || '').toLowerCase();
+  const category = getEffectiveUserCategory(user);
+
+  if (role === 'admin' || category === 'admin') return '/admin/dashboard';
+  if (role === 'logistics' || category === 'logistics') return '/logistics/dashboard';
+  if (isSellerUser(user)) return '/seller';
+  return '/';
+};
+
 class AuthService {
   useFallback() {
     return process.env.AUTH_FALLBACK_MODE === 'true' || mongoose.connection.readyState !== 1;
@@ -28,7 +57,17 @@ class AuthService {
   }
 
   async register(userData) {
-    const { password, email, fullName, role, businessType, businessLogoUrl, businessName } = userData;
+    const {
+      password,
+      email,
+      fullName,
+      role,
+      businessType,
+      businessLogoUrl,
+      businessName,
+      isPhoneVerified = false,
+      isEmailVerified = false,
+    } = userData;
     const phone = this.normalizePhone(userData.phone);
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : undefined;
 
@@ -50,6 +89,14 @@ class AuthService {
     const normalizedBusinessType = typeof businessType === 'string' ? businessType.trim().toLowerCase() : null;
     const normalizedBusinessLogoUrl = typeof businessLogoUrl === 'string' ? businessLogoUrl.trim() : '';
     const normalizedBusinessName = typeof businessName === 'string' ? businessName.trim().replace(/\s+/g, ' ') : '';
+
+    if (normalizedBusinessLogoUrl.startsWith('data:')) {
+      const error = new Error('Please re-upload your business logo before registering.');
+      error.statusCode = 400;
+      error.code = 'INLINE_BUSINESS_LOGO_NOT_ALLOWED';
+      throw error;
+    }
+
     const roleMap = {
       seller: 'seller',
       farmer: 'farmer',
@@ -70,13 +117,9 @@ class AuthService {
       password,
       fullName,
       role: roleMap[normalizedRole] || 'buyer',
+      isPhoneVerified: Boolean(isPhoneVerified),
+      isEmailVerified: Boolean(isEmailVerified),
     };
-
-    if (userPayload.role === 'seller' && !normalizedBusinessLogoUrl) {
-      const error = new Error('Business logo is required for seller accounts');
-      error.statusCode = 400;
-      throw error;
-    }
 
     if (userPayload.role === 'seller' && normalizedBusinessName.length < 2) {
       const error = new Error('Business name is required for seller accounts');
@@ -107,7 +150,8 @@ class AuthService {
       smsQueue.add('send', { to: phone, message: 'Welcome to MarketPulse!' }).catch(console.error);
     }
 
-    return { user: this.sanitizeUser(user), ...tokens };
+    const sanitizedUser = this.sanitizeUser(user);
+    return { user: sanitizedUser, redirectTo: getDefaultRedirectForUser(sanitizedUser), ...tokens };
   }
 
   async login(credentials) {
@@ -132,7 +176,8 @@ class AuthService {
         throw error;
       }
       const tokens = this.generateTokens(fallbackUser);
-      return { user: this.sanitizeUser(fallbackUser), ...tokens };
+      const sanitizedUser = this.sanitizeUser(fallbackUser);
+      return { user: sanitizedUser, redirectTo: getDefaultRedirectForUser(sanitizedUser), ...tokens };
     }
 
     let user = null;
@@ -165,7 +210,8 @@ class AuthService {
     await User.updateOne({ _id: user._id }, { $set: { lastLogin: loginAt } });
 
     const tokens = this.generateTokens(user);
-    return { user: this.sanitizeUser(user), ...tokens };
+    const sanitizedUser = this.sanitizeUser(user);
+    return { user: sanitizedUser, redirectTo: getDefaultRedirectForUser(sanitizedUser), ...tokens };
   }
 
   async verifyKYC(userId, kycData) {
@@ -346,6 +392,19 @@ class AuthService {
   async updateCurrentUser(userId, profileData = {}) {
     const allowedUpdates = {};
     const unsetUpdates = {};
+    const useFallbackStore = this.useFallback();
+    const currentUser = useFallbackStore
+      ? memoryStore.getUserById(userId)
+      : await User.findById(userId).select('role businessType location logisticsProfile').lean();
+
+    if (!currentUser) {
+      const error = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const effectiveCategory = getEffectiveUserCategory(currentUser);
+    const isLogisticsProfile = effectiveCategory === 'logistics';
 
     if (profileData.fullName !== undefined || profileData.name !== undefined) {
       allowedUpdates.fullName = String(profileData.fullName ?? profileData.name ?? '').trim();
@@ -362,16 +421,65 @@ class AuthService {
     if (profileData.businessLogoUrl !== undefined) {
       allowedUpdates.businessLogoUrl = profileData.businessLogoUrl || null;
     }
+    if (profileData.profileImageUrl !== undefined) {
+      allowedUpdates.profileImageUrl = profileData.profileImageUrl || null;
+    }
+    if (profileData.locationHub !== undefined) {
+      allowedUpdates.locationHub = String(profileData.locationHub || '').trim();
+    }
+    if (profileData.city !== undefined) {
+      allowedUpdates.city = String(profileData.city || '').trim();
+    }
     if (profileData.address !== undefined) {
       allowedUpdates.address = String(profileData.address || '').trim();
+    }
+
+    const logisticsProfileInput = profileData.logisticsProfile;
+    if (
+      logisticsProfileInput &&
+      typeof logisticsProfileInput === 'object' &&
+      !Array.isArray(logisticsProfileInput)
+    ) {
+      if (!isLogisticsProfile) {
+        const error = new Error('Only logistics accounts can update logistics profile details');
+        error.statusCode = 403;
+        throw error;
+      }
+
+      if (logisticsProfileInput.baseHub !== undefined || logisticsProfileInput.locationHub !== undefined) {
+        const baseHub = String(
+          logisticsProfileInput.baseHub ?? logisticsProfileInput.locationHub ?? ''
+        ).trim();
+        allowedUpdates['logisticsProfile.baseHub'] = baseHub;
+        allowedUpdates['logisticsProfile.locationHub'] = baseHub;
+        allowedUpdates.locationHub = baseHub;
+      }
+
+      if (logisticsProfileInput.driverMode !== undefined) {
+        const driverMode = String(logisticsProfileInput.driverMode || '').trim();
+        if (driverMode) allowedUpdates['logisticsProfile.driverMode'] = driverMode;
+        else unsetUpdates['logisticsProfile.driverMode'] = '';
+      }
+
+      if (logisticsProfileInput.vehiclePlate !== undefined) {
+        const vehiclePlate = String(logisticsProfileInput.vehiclePlate || '').trim().toUpperCase();
+        if (vehiclePlate) allowedUpdates['logisticsProfile.vehiclePlate'] = vehiclePlate;
+        else unsetUpdates['logisticsProfile.vehiclePlate'] = '';
+      }
+
+      if (logisticsProfileInput.cargoCapacityKg !== undefined) {
+        const rawCapacity = String(logisticsProfileInput.cargoCapacityKg ?? '').trim();
+        if (rawCapacity) allowedUpdates['logisticsProfile.cargoCapacityKg'] = Number(rawCapacity);
+        else unsetUpdates['logisticsProfile.cargoCapacityKg'] = '';
+      }
     }
 
     if (Object.keys(allowedUpdates).length === 0 && Object.keys(unsetUpdates).length === 0) {
       return this.getCurrentUser(userId);
     }
 
-    if (this.useFallback()) {
-      const fallbackUpdates = { ...allowedUpdates };
+    if (useFallbackStore) {
+      const fallbackUpdates = expandDotUpdates(allowedUpdates);
       delete fallbackUpdates.location;
       const user = memoryStore.updateUserById(userId, fallbackUpdates);
       if (!user) {
@@ -382,7 +490,6 @@ class AuthService {
       return this.getCurrentUser(userId);
     }
 
-    const currentUser = await User.findById(userId).select('location').lean();
     const hasValidGeoLocation =
       currentUser?.location?.type === 'Point' &&
       Array.isArray(currentUser.location.coordinates) &&

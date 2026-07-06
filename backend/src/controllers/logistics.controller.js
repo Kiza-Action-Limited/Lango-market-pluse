@@ -12,8 +12,13 @@ const Logistics = require('../models/Logistics.model');
 const Order = require('../models/Order.model');
 const User = require('../models/User.model');
 const GroupTrip = require('../models/GroupTrip.model');
+const GroupTripRoute = require('../models/GroupTripRoute.model');
+const Payment = require('../models/Payment.model');
 const QRToken = require('../models/QRToken.model');
+const Escrow = require('../models/Escrow.model');
+const Transaction = require('../models/Transaction.model');
 const SinkingFund = require('../services/logistics/sinkingfund.service');
+const walletService = require('../services/payment/wallet.service');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { validationResult } = require('express-validator');
 const dispatchSvc = require('../services/notification/dispatch.service');
@@ -28,6 +33,304 @@ const logger = require('../utils/logger');
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+
+const ACTIVE_TRIP_STATUSES = [
+  'pending',
+  'driver_assigned',
+  'en_route_to_pickup',
+  'picked_up',
+  'in_transit',
+  'out_for_delivery',
+];
+
+const KENYA_ROUTE_POINTS = {
+  Nairobi: { lat: -1.2921, lng: 36.8219 },
+  Nakuru: { lat: -0.3031, lng: 36.0800 },
+  Eldoret: { lat: 0.5143, lng: 35.2698 },
+  Kitale: { lat: 1.0157, lng: 35.0062 },
+  Kapenguria: { lat: 1.2389, lng: 35.1119 },
+  Lodwar: { lat: 3.1191, lng: 35.5966 },
+  Kakuma: { lat: 3.7167, lng: 34.8667 },
+  Lokichoggio: { lat: 4.2041, lng: 34.3539 },
+  Kisumu: { lat: -0.0917, lng: 34.7680 },
+  Garissa: { lat: -0.4536, lng: 39.6401 },
+  Mombasa: { lat: -4.0435, lng: 39.6682 },
+  Malindi: { lat: -3.2192, lng: 40.1169 },
+  Busia: { lat: 0.4608, lng: 34.1115 },
+};
+
+const buildDefaultRoute = ({ routeId, routeCode, stops, cargoType }) => {
+  const originName = stops[0];
+  const destinationName = stops[stops.length - 1];
+  return {
+    routeId,
+    routeCode,
+    label: stops.join(' to '),
+    originName,
+    destinationName,
+    origin: KENYA_ROUTE_POINTS[originName],
+    destination: KENYA_ROUTE_POINTS[destinationName],
+    stops,
+    cargoType,
+    isDefault: true,
+    isActive: true,
+  };
+};
+
+const DEFAULT_GROUP_TRIP_ROUTES = [
+  buildDefaultRoute({ routeId: 'eldoret-kitale', stops: ['Eldoret', 'Kitale'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'kitale-lodwar', stops: ['Kitale', 'Kapenguria', 'Lodwar'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'lodwar-kakuma', stops: ['Lodwar', 'Kakuma'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'kakuma-lodwar', stops: ['Kakuma', 'Lodwar'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'kakuma-lokichoggio', stops: ['Kakuma', 'Lokichoggio'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'lokichoggio-kakuma', stops: ['Lokichoggio', 'Kakuma'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'lodwar-lokichoggio', stops: ['Lodwar', 'Kakuma', 'Lokichoggio'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'lokichoggio-lodwar', stops: ['Lokichoggio', 'Kakuma', 'Lodwar'], cargoType: 'Northern Kenya corridor cargo' }),
+  buildDefaultRoute({ routeId: 'gt-001-nairobi-nakuru-eldoret', routeCode: 'GT-001', stops: ['Nairobi', 'Nakuru', 'Eldoret'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-002-nairobi-nakuru-kisumu', routeCode: 'GT-002', stops: ['Nairobi', 'Nakuru', 'Kisumu'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-003-nairobi-garissa', routeCode: 'GT-003', stops: ['Nairobi', 'Garissa'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-004-mombasa-malindi', routeCode: 'GT-004', stops: ['Mombasa', 'Malindi'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-005-kisumu-busia', routeCode: 'GT-005', stops: ['Kisumu', 'Busia'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-006-eldoret-kitale-lodwar', routeCode: 'GT-006', stops: ['Eldoret', 'Kitale', 'Lodwar'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-007-lodwar-kakuma', routeCode: 'GT-007', stops: ['Lodwar', 'Kakuma'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-008-kakuma-lokichoggio', routeCode: 'GT-008', stops: ['Kakuma', 'Lokichoggio'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-009-nairobi-kitale-lodwar-kakuma', routeCode: 'GT-009', stops: ['Nairobi', 'Kitale', 'Lodwar', 'Kakuma'], cargoType: 'Shared truck load' }),
+  buildDefaultRoute({ routeId: 'gt-010-nairobi-eldoret-lodwar-kakuma-lokichoggio', routeCode: 'GT-010', stops: ['Nairobi', 'Eldoret', 'Lodwar', 'Kakuma', 'Lokichoggio'], cargoType: 'Shared truck load' }),
+];
+
+const num = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const sameId = (left, right) => {
+  if (!left || !right) return false;
+  const leftValue = typeof left === 'object' ? left._id || left.id || left : left;
+  const rightValue = typeof right === 'object' ? right._id || right.id || right : right;
+  return String(leftValue) === String(rightValue);
+};
+
+const hasQrStep = (trip, step) => {
+  const scans = Array.isArray(trip?.qrScans) ? trip.qrScans : [];
+  return Boolean(
+    scans.some((scan) => scan.step === step && scan.verified !== false) ||
+    trip?.[`${step}QrConfirmed`] ||
+    trip?.[`${step}QrScannedAt`]
+  );
+};
+
+const getAddressLabel = (address = {}) => (
+  address.label ||
+  [address.town, address.county].filter(Boolean).join(', ') ||
+  address.street ||
+  ''
+);
+
+const buildRouteId = (value) => String(value || '')
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '')
+  .slice(0, 80);
+
+const ensureDefaultGroupTripRoutes = async () => {
+  const activeDefaultRouteIds = DEFAULT_GROUP_TRIP_ROUTES.map((route) => route.routeId);
+  const operations = DEFAULT_GROUP_TRIP_ROUTES.map((route) => ({
+    updateOne: {
+      filter: { routeId: route.routeId },
+      update: {
+        $setOnInsert: route,
+        $set: {
+          routeCode: route.routeCode,
+          label: route.label,
+          originName: route.originName,
+          destinationName: route.destinationName,
+          origin: route.origin,
+          destination: route.destination,
+          stops: route.stops,
+          cargoType: route.cargoType,
+          isDefault: true,
+        },
+      },
+      upsert: true,
+    },
+  }));
+
+  if (operations.length) {
+    await GroupTripRoute.bulkWrite(operations, { ordered: false });
+    await GroupTripRoute.updateMany(
+      {
+        isDefault: true,
+        routeId: { $nin: activeDefaultRouteIds },
+      },
+      { $set: { isActive: false } }
+    );
+  }
+};
+
+const serializeGroupTripRoute = (route) => ({
+  id: route._id,
+  routeId: route.routeId,
+  routeCode: route.routeCode,
+  label: route.label,
+  originName: route.originName,
+  destinationName: route.destinationName,
+  origin: route.origin,
+  destination: route.destination,
+  stops: route.stops || [],
+  cargoType: route.cargoType,
+  isDefault: Boolean(route.isDefault),
+  isActive: Boolean(route.isActive),
+  createdAt: route.createdAt,
+  updatedAt: route.updatedAt,
+});
+
+const getCoordinatePair = (source = {}) => {
+  const lat = Number(source.lat ?? source.gpsLat);
+  const lng = Number(source.lng ?? source.gpsLng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+};
+
+const buildGoogleMapsUrl = (points = []) => {
+  const validPoints = points.filter((point) => point?.lat && point?.lng);
+  if (!validPoints.length) return null;
+  if (validPoints.length === 1) {
+    return `https://www.google.com/maps/search/?api=1&query=${validPoints[0].lat},${validPoints[0].lng}`;
+  }
+  const [origin, ...rest] = validPoints;
+  const destination = rest[rest.length - 1];
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}`;
+};
+
+const buildGoogleMapsEmbedUrl = (points = []) => {
+  const validPoints = points.filter((point) => point?.lat && point?.lng);
+  if (!validPoints.length) return null;
+  const driverPoint = validPoints.find((point) => point.label === 'driver');
+  const target = driverPoint || validPoints[validPoints.length - 1];
+  return `https://maps.google.com/maps?q=${target.lat},${target.lng}&z=13&output=embed`;
+};
+
+const hoursBetween = (start, end) => {
+  if (!start || !end) return null;
+  const value = (new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+};
+
+const getEscrowForTrip = (trip, escrowByOrder, escrowByLogistics) => {
+  const orderId = trip?.order?._id || trip?.order;
+  const logisticsId = trip?._id;
+  return escrowByOrder.get(String(orderId || '')) || escrowByLogistics.get(String(logisticsId || '')) || null;
+};
+
+const buildPayoutSnapshot = (trip, escrow, userId) => {
+  const isFleetOwner = sameId(trip?.fleetOwner, userId);
+  const isDriver = sameId(trip?.driver, userId);
+  const role = isFleetOwner ? 'fleet_owner' : isDriver ? 'driver' : 'available_driver';
+  const completedPayout = escrow?.payouts?.find((payout) => (
+    sameId(payout.recipient, userId) && ['driver', 'fleet_owner'].includes(payout.role)
+  ));
+  const settlementAmount = isFleetOwner
+    ? num(trip?.settlement?.fleetOwnerPayout || escrow?.driverPayout)
+    : num(trip?.settlement?.driverPayout || escrow?.driverPayout);
+  const expectedAmount = settlementAmount || num(trip?.shippingCost);
+  const released = completedPayout?.status === 'completed' || Boolean(trip?.settlement?.releasedAt);
+
+  return {
+    role,
+    expectedAmount,
+    status: completedPayout?.status || (released ? 'completed' : escrow?.status === 'DISPUTED' ? 'frozen' : 'pending'),
+    released,
+    releasedAt: completedPayout?.completedAt || trip?.settlement?.releasedAt || escrow?.releasedAt || null,
+    reference: completedPayout?.mpesaTransactionId || completedPayout?._id || null,
+  };
+};
+
+const serializeDashboardTrip = (trip, escrow, userId) => {
+  const pickupConfirmed = hasQrStep(trip, 'pickup');
+  const deliveryConfirmed = hasQrStep(trip, 'delivery');
+  const payout = buildPayoutSnapshot(trip, escrow, userId);
+  const pickupCoords = getCoordinatePair(trip.pickupAddress);
+  const deliveryCoords = getCoordinatePair(trip.shippingAddress);
+  const driverCoords = getCoordinatePair(trip.driver?.logisticsProfile?.currentLocation || trip.gpsTracking?.current);
+  const routePoints = [pickupCoords, driverCoords, deliveryCoords].filter(Boolean);
+
+  return {
+    _id: trip._id,
+    tripId: trip.tripId,
+    bookingReference: trip.bookingReference,
+    order: trip.order,
+    orderNumber: trip.orderNumber || trip.order?.orderNumber,
+    status: trip.status,
+    carrier: trip.carrier,
+    cargoType: trip.cargoType,
+    weight: trip.weight,
+    weightUnit: trip.weightUnit,
+    pickupAddress: trip.pickupAddress,
+    shippingAddress: trip.shippingAddress,
+    route: {
+      pickup: getAddressLabel(trip.pickupAddress),
+      delivery: getAddressLabel(trip.shippingAddress),
+      distanceKm: num(trip.routeInfo?.totalDistanceKm),
+      etaMinutes: num(trip.routeInfo?.estimatedDurationMin),
+      pickupCoords,
+      deliveryCoords,
+      driverCoords,
+      routePath: routePoints,
+      googleMapsUrl: buildGoogleMapsUrl([pickupCoords, deliveryCoords]),
+      liveGoogleMapsUrl: buildGoogleMapsUrl(routePoints),
+    },
+    seller: trip.seller,
+    buyer: trip.buyer,
+    driver: trip.driver,
+    fleetOwner: trip.fleetOwner,
+    driverName: trip.driverName,
+    driverPhone: trip.driverPhone,
+    shippingCost: num(trip.shippingCost),
+    escrowReleaseDue: trip.escrowReleaseDue || escrow?.autoReleaseAt || null,
+    actualDelivery: trip.actualDelivery,
+    estimatedDelivery: trip.estimatedDelivery,
+    createdAt: trip.createdAt,
+    updatedAt: trip.updatedAt,
+    qr: {
+      pickupConfirmed,
+      deliveryConfirmed,
+      pickupAt: trip.qrScans?.find((scan) => scan.step === 'pickup')?.scannedAt || trip.pickupQrScannedAt || null,
+      deliveryAt: trip.qrScans?.find((scan) => scan.step === 'delivery')?.scannedAt || trip.deliveryQrScannedAt || null,
+      nextStep: !pickupConfirmed ? 'pickup' : !deliveryConfirmed ? 'delivery' : 'complete',
+    },
+    escrow: escrow ? {
+      _id: escrow._id,
+      status: escrow.status,
+      amount: num(escrow.amount),
+      sellerPayout: num(escrow.sellerPayout),
+      driverPayout: num(escrow.driverPayout),
+      sinkingFundAmount: num(escrow.sinkingFundAmount),
+      autoReleaseAt: escrow.autoReleaseAt,
+      releasedAt: escrow.releasedAt,
+      deliveredAt: escrow.deliveredAt,
+    } : null,
+    payout,
+    timeline: (trip.trackingHistory || [])
+      .slice(-6)
+      .reverse()
+      .map((event) => ({
+        status: event.status,
+        location: event.location,
+        notes: event.notes,
+        gpsCoords: event.gpsCoords,
+        timestamp: event.timestamp,
+      })),
+    proofOfDelivery: {
+      qrConfirmed: deliveryConfirmed,
+      confirmedAt: trip.qrScans?.find((scan) => scan.step === 'delivery')?.scannedAt || trip.deliveryQrScannedAt || null,
+      confirmedBy: trip.qrScans?.find((scan) => scan.step === 'delivery')?.scannedBy || trip.deliveryQrScannedBy || null,
+      gpsVerified: Boolean(deliveryConfirmed && (
+        trip.gpsTracking?.deliveryGeofence?.enteredAt ||
+        trip.qrScans?.some((scan) => scan.step === 'delivery' && scan.gpsCoords?.lat && scan.gpsCoords?.lng)
+      )),
+    },
+  };
+};
 
 const logGoogleMapsHelperError = (operation, error) => {
   logger.error(`${operation} error: ${error.message}`, {
@@ -251,7 +554,7 @@ const normalizeCarrier = (carrier) => {
   return aliases[normalized] || 'other';
 };
 
-const uploadLogisticsDocument = async (file, userId, documentType) => {
+const uploadLogisticsDocument = async (file, userId, documentType, documentNumber) => {
   if (!file?.buffer) return null;
 
   const result = await uploadToCloudinary(
@@ -262,9 +565,96 @@ const uploadLogisticsDocument = async (file, userId, documentType) => {
 
   return {
     documentType,
+    documentNumber,
+    originalName: file.originalname,
+    mimeType: file.mimetype,
+    size: file.size,
     url: result.secure_url,
     publicId: result.public_id,
+    source: 'logistics_application',
     uploadedAt: new Date(),
+  };
+};
+
+const normalizeStringList = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 12);
+  }
+
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+};
+
+const summarizeGroupTrip = (trip, userId) => {
+  const currentCapacityKg = Number(trip.currentCapacityKg || 0);
+  const maxCapacityKg = Number(trip.maxCapacityKg || 1);
+  const participants = Array.isArray(trip.participants) ? trip.participants : [];
+  const userParticipant = participants.find((participant) => sameId(participant.user, userId));
+  const paymentSummary = participants.reduce((summary, participant) => {
+    const status = participant.paymentStatus || 'unpaid';
+    const amount = Number(participant.paymentAmount || participant.share || 0);
+    summary.totalDue += Number(participant.share || 0);
+    if (status === 'paid') summary.paid += amount || Number(participant.share || 0);
+    if (status === 'pending') summary.pending += amount || Number(participant.share || 0);
+    if (status === 'unpaid') summary.unpaid += Number(participant.share || 0);
+    summary.byStatus[status] = (summary.byStatus[status] || 0) + 1;
+    return summary;
+  }, {
+    totalDue: 0,
+    paid: 0,
+    pending: 0,
+    unpaid: 0,
+    byStatus: {},
+  });
+
+  return {
+    id: trip._id,
+    tripId: trip.tripId,
+    origin: trip.origin,
+    destination: trip.destination,
+    distanceKm: trip.distanceKm,
+    baseFare: trip.baseFare,
+    maxCapacityKg,
+    currentCapacityKg,
+    availableCapacityKg: Math.max(0, maxCapacityKg - currentCapacityKg),
+    fillPercentage: Math.round((currentCapacityKg / maxCapacityKg) * 100),
+    participantCount: participants.length,
+    participants: participants.map((participant) => ({
+      user: participant.user,
+      weightKg: participant.weightKg,
+      share: participant.share,
+      paymentStatus: participant.paymentStatus || 'unpaid',
+      paymentMethod: participant.paymentMethod || 'mpesa',
+      paymentReference: participant.paymentReference || '',
+      paymentPhone: participant.paymentPhone || '',
+      paymentAmount: participant.paymentAmount || participant.share || 0,
+      paidAt: participant.paidAt || null,
+      paymentConfirmedBy: participant.paymentConfirmedBy || null,
+      paymentNotes: participant.paymentNotes || '',
+      joinedAt: participant.joinedAt,
+    })),
+    paymentSummary,
+    initiator: trip.initiator,
+    joined: Boolean(userParticipant),
+    yourShare: userParticipant?.share || 0,
+    yourWeightKg: userParticipant?.weightKg || 0,
+    yourPaymentStatus: userParticipant?.paymentStatus || (userParticipant ? 'unpaid' : null),
+    yourPaymentMethod: userParticipant?.paymentMethod || null,
+    yourPaymentReference: userParticipant?.paymentReference || '',
+    yourPaymentAmount: userParticipant?.paymentAmount || userParticipant?.share || 0,
+    yourPaidAt: userParticipant?.paidAt || null,
+    routeCode: trip.routeCode,
+    routeLabel: trip.routeLabel,
+    stops: trip.stops || [],
+    deadline: trip.deadline,
+    cargoType: trip.cargoType,
+    status: trip.status,
+    notes: trip.notes,
+    etaMinutes: trip.etaMinutes,
+    createdAt: trip.createdAt,
   };
 };
 
@@ -317,6 +707,13 @@ exports.applyAsLogistics = async (req, res, next) => {
 
     const {
       driverMode = 'owner_operator',
+      businessName,
+      baseHub,
+      locationHub,
+      operatingAddress,
+      serviceAreas,
+      vehicleType,
+      fleetSize,
       vehiclePlate,
       cargoCapacityKg,
       documentType,
@@ -336,42 +733,71 @@ exports.applyAsLogistics = async (req, res, next) => {
     const files = req.files || {};
     const nationalIdImage = files.nationalIdImage?.[0];
     const businessPermitImage = files.businessPermitImage?.[0];
+    const driverLicenseImage = files.driverLicenseImage?.[0];
+    const vehicleLogbookImage = files.vehicleLogbookImage?.[0];
+    const insuranceCertificateImage = files.insuranceCertificateImage?.[0];
+    const kraPinCertificateImage = files.kraPinCertificateImage?.[0];
 
-    if (!nationalIdImage && !businessPermitImage) {
+    if (!nationalIdImage || !businessPermitImage) {
       return res.status(400).json({
         success: false,
-        message: 'At least one document image is required (nationalIdImage or businessPermitImage).',
+        message: 'National ID and vehicle/business permit documents are both required.',
       });
     }
 
     const uploadedDocs = [];
-    if (nationalIdImage) {
-      const doc = await uploadLogisticsDocument(nationalIdImage, user._id, 'national_id');
-      if (doc) uploadedDocs.push(doc);
-    }
-    if (businessPermitImage) {
-      const doc = await uploadLogisticsDocument(businessPermitImage, user._id, 'business_permit');
+    const documentUploads = [
+      ['national_id', nationalIdImage],
+      ['business_permit', businessPermitImage],
+      ['driver_license', driverLicenseImage],
+      ['vehicle_logbook', vehicleLogbookImage],
+      ['insurance_certificate', insuranceCertificateImage],
+      ['kra_pin_certificate', kraPinCertificateImage],
+    ];
+
+    for (const [docType, file] of documentUploads) {
+      if (!file) continue;
+      const doc = await uploadLogisticsDocument(file, user._id, docType, documentNumber);
       if (doc) uploadedDocs.push(doc);
     }
 
     const latitude = toFiniteNumber(gpsLat);
     const longitude = toFiniteNumber(gpsLng);
-    const geocodedLocation = latitude !== null && longitude !== null
-      ? { lat: latitude, lng: longitude }
-      : null;
+    if (latitude === null || longitude === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'GPS hub location is required. Capture GPS before submitting.',
+      });
+    }
+
+    const geocodedLocation = { lat: latitude, lng: longitude };
     const geoPoint = geocodedLocation
       ? { type: 'Point', coordinates: [longitude, latitude] }
       : null;
     const existingProfile = getPlainLogisticsProfile(user.logisticsProfile);
+    const normalizedBaseHub = String(baseHub || locationHub || existingProfile.baseHub || user.locationHub || user.city || '').trim();
+    const normalizedOperatingAddress = String(operatingAddress || user.address || '').trim();
+    const normalizedServiceAreas = normalizeStringList(serviceAreas);
+    const normalizedBusinessName = String(businessName || user.businessName || user.fullName || '').trim();
 
     user.role = 'logistics';
     user.businessType = 'logistics';
+    if (normalizedBusinessName) user.businessName = normalizedBusinessName;
+    user.locationHub = normalizedBaseHub;
+    user.city = normalizedBaseHub || user.city;
+    user.address = normalizedOperatingAddress || user.address;
     user.subscriptionTier = 'mizigo';
     user.logisticsProfile = {
       ...existingProfile,
       verificationStatus: 'pending',
       documentType,
       documentNumber,
+      baseHub: normalizedBaseHub,
+      locationHub: normalizedBaseHub,
+      operatingAddress: normalizedOperatingAddress,
+      serviceAreas: normalizedServiceAreas.length ? normalizedServiceAreas : existingProfile.serviceAreas || [],
+      vehicleType: String(vehicleType || existingProfile.vehicleType || '').trim(),
+      fleetSize: Math.max(1, Number(fleetSize || existingProfile.fleetSize || 1)),
       vehiclePlate: String(vehiclePlate).trim().toUpperCase(),
       cargoCapacityKg: Number(cargoCapacityKg),
       driverMode,
@@ -380,6 +806,7 @@ exports.applyAsLogistics = async (req, res, next) => {
       currentLocation: geocodedLocation || existingProfile.currentLocation,
       isOnline: true,
       applicationSubmittedAt: new Date(),
+      reviewDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       reviewedAt: null,
       reviewedBy: null,
       reviewNotes: '',
@@ -403,8 +830,18 @@ exports.applyAsLogistics = async (req, res, next) => {
       data: {
         verificationStatus: user.logisticsProfile.verificationStatus,
         applicationSubmittedAt: user.logisticsProfile.applicationSubmittedAt,
+        reviewDueAt: user.logisticsProfile.reviewDueAt,
+        reviewSlaHours: 24,
         driverMode: user.logisticsProfile.driverMode,
+        businessName: user.businessName,
+        baseHub: user.logisticsProfile.baseHub,
+        locationHub: user.logisticsProfile.locationHub,
+        operatingAddress: user.logisticsProfile.operatingAddress,
+        serviceAreas: user.logisticsProfile.serviceAreas || [],
+        vehicleType: user.logisticsProfile.vehicleType,
+        fleetSize: user.logisticsProfile.fleetSize,
         vehiclePlate: user.logisticsProfile.vehiclePlate,
+        documents: user.logisticsProfile.documents || [],
         currentLocation: geocodedLocation,
       },
     });
@@ -429,6 +866,7 @@ exports.getMyLogisticsApplication = async (req, res, next) => {
         businessType: user.businessType,
         subscriptionTier: user.subscriptionTier,
         logisticsProfile: user.logisticsProfile || { verificationStatus: 'unverified' },
+        reviewSlaHours: 24,
       },
     });
   } catch (err) {
@@ -439,6 +877,381 @@ exports.getMyLogisticsApplication = async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // CREATE LOGISTICS WITH GPS & DRIVER MATCHING
 // ─────────────────────────────────────────────────────────────────────────────
+
+exports.getLogisticsDashboard = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const role = String(req.user.role || '').toLowerCase();
+    const userPhone = req.user.phone;
+    const numericLimit = Math.min(150, Math.max(20, Number(req.query.limit) || 80));
+
+    const user = await User.findById(userId).select(
+      'role businessType logisticsProfile subscriptionTier name fullName businessName phone'
+    ).lean();
+
+    const baseQuery = role === 'admin'
+      ? {}
+      : {
+        $or: [
+          { driver: userId },
+          { fleetOwner: userId },
+          ...(userPhone ? [{ driverPhone: userPhone }] : []),
+          { status: 'pending', driver: { $exists: false } },
+          { status: 'pending', driver: null },
+        ],
+      };
+
+    const trips = await Logistics.find(baseQuery)
+      .populate('order', 'orderNumber total status paymentStatus paidAt deliveredAt createdAt')
+      .populate('seller', 'name fullName businessName phone')
+      .populate('buyer', 'name fullName businessName phone')
+      .populate('driver', 'name fullName phone logisticsProfile.currentLocation')
+      .populate('fleetOwner', 'name fullName businessName phone')
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .limit(numericLimit)
+      .lean({ virtuals: true });
+
+    const orderIds = trips.map((trip) => trip.order?._id || trip.order).filter(Boolean);
+    const logisticsIds = trips.map((trip) => trip._id).filter(Boolean);
+
+    const [escrows, walletBalance, walletTransactions, sinkingFund] = await Promise.all([
+      Escrow.find({
+        $or: [
+          { order: { $in: orderIds } },
+          { logistics: { $in: logisticsIds } },
+          { 'payouts.recipient': userId },
+        ],
+      }).lean(),
+      walletService.getBalance(userId),
+      Transaction.find({
+        user: userId,
+        type: { $in: ['payout', 'escrow_release', 'withdrawal', 'sinking_fund', 'refund'] },
+      })
+        .sort({ createdAt: -1 })
+        .limit(12)
+        .lean(),
+      SinkingFund.getOrCreateFund(userId).catch(() => null),
+    ]);
+
+    const escrowByOrder = new Map(escrows.filter((escrow) => escrow.order).map((escrow) => [String(escrow.order), escrow]));
+    const escrowByLogistics = new Map(escrows.filter((escrow) => escrow.logistics).map((escrow) => [String(escrow.logistics), escrow]));
+    const dashboardTrips = trips.map((trip) => serializeDashboardTrip(
+      trip,
+      getEscrowForTrip(trip, escrowByOrder, escrowByLogistics),
+      userId
+    ));
+
+    const assignedTrips = dashboardTrips.filter((trip) => (
+      sameId(trip.driver, userId) || sameId(trip.fleetOwner, userId) || Boolean(userPhone && trip.driverPhone === userPhone)
+    ));
+    const activeTrips = dashboardTrips.filter((trip) => ACTIVE_TRIP_STATUSES.includes(trip.status));
+    const qrQueue = dashboardTrips.filter((trip) => (
+      sameId(trip.driver, userId) &&
+      ['driver_assigned', 'en_route_to_pickup', 'picked_up', 'in_transit', 'out_for_delivery'].includes(trip.status) &&
+      trip.qr.nextStep !== 'complete'
+    ));
+    const releaseQueue = dashboardTrips.filter((trip) => (
+      trip.status === 'delivered' &&
+      trip.escrow &&
+      !['RELEASED', 'REFUNDED'].includes(trip.escrow.status)
+    ));
+    const payoutRows = dashboardTrips
+      .filter((trip) => trip.payout.role !== 'available_driver')
+      .map((trip) => ({
+        logisticsId: trip._id,
+        orderNumber: trip.orderNumber,
+        route: trip.route,
+        status: trip.payout.status,
+        expectedAmount: trip.payout.expectedAmount,
+        releasedAt: trip.payout.releasedAt,
+        escrowStatus: trip.escrow?.status || 'AWAITING_PAYMENT',
+        cargoType: trip.cargoType,
+      }));
+    const assignmentAlerts = dashboardTrips
+      .filter((trip) => trip.status === 'pending' && !trip.driver)
+      .map((trip) => ({
+        logisticsId: trip._id,
+        orderNumber: trip.orderNumber,
+        seller: {
+          id: trip.seller?._id || trip.seller,
+          name: trip.seller?.businessName || trip.seller?.fullName || trip.seller?.name || 'Seller',
+          phone: trip.seller?.phone || null,
+        },
+        cargoType: trip.cargoType || 'Cargo',
+        weight: trip.weight,
+        weightUnit: trip.weightUnit,
+        route: trip.route,
+        pickupAddress: trip.pickupAddress,
+        shippingAddress: trip.shippingAddress,
+        shippingCost: trip.shippingCost,
+        createdAt: trip.createdAt,
+      }))
+      .slice(0, 12);
+    const routeZonesMap = dashboardTrips.reduce((acc, trip) => {
+      const label = trip.route?.delivery || trip.route?.pickup || 'Unmapped route';
+      const current = acc.get(label) || {
+        label,
+        count: 0,
+        active: 0,
+        delivered: 0,
+        totalDistanceKm: 0,
+      };
+      current.count += 1;
+      if (ACTIVE_TRIP_STATUSES.includes(trip.status)) current.active += 1;
+      if (trip.status === 'delivered') current.delivered += 1;
+      current.totalDistanceKm += num(trip.route?.distanceKm);
+      acc.set(label, current);
+      return acc;
+    }, new Map());
+    const routeZones = Array.from(routeZonesMap.values())
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 8);
+    const proofQueue = dashboardTrips
+      .filter((trip) => ['delivered', 'auto_released'].includes(trip.status) || trip.proofOfDelivery?.qrConfirmed)
+      .map((trip) => ({
+        logisticsId: trip._id,
+        orderNumber: trip.orderNumber,
+        cargoType: trip.cargoType,
+        deliveredAt: trip.actualDelivery || trip.proofOfDelivery?.confirmedAt,
+        proofOfDelivery: trip.proofOfDelivery,
+        escrowStatus: trip.escrow?.status || 'AWAITING_PAYMENT',
+      }))
+      .slice(0, 8);
+    const operationalTimeline = dashboardTrips
+      .flatMap((trip) => (trip.timeline || []).map((event) => ({
+        ...event,
+        logisticsId: trip._id,
+        orderNumber: trip.orderNumber,
+        cargoType: trip.cargoType,
+      })))
+      .filter((event) => event.timestamp)
+      .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp))
+      .slice(0, 10);
+
+    const summary = dashboardTrips.reduce((acc, trip) => {
+      const assignedToUser = trip.payout.role !== 'available_driver';
+      if (assignedToUser) acc.assignedTrips += 1;
+      if (ACTIVE_TRIP_STATUSES.includes(trip.status)) acc.activeTrips += 1;
+      if (trip.status === 'pending') acc.availableTrips += 1;
+      if (['driver_assigned', 'en_route_to_pickup'].includes(trip.status)) acc.pickupPending += 1;
+      if (['picked_up', 'in_transit', 'out_for_delivery'].includes(trip.status)) acc.deliveryPending += 1;
+      if (trip.status === 'delivered') acc.deliveredTrips += 1;
+      if (trip.status === 'disputed' || trip.escrow?.status === 'DISPUTED') acc.disputedTrips += 1;
+      acc.totalEscrow += num(trip.escrow?.amount);
+      acc.sinkingFundAccrued += num(trip.escrow?.sinkingFundAmount);
+      if (assignedToUser && trip.payout.released) acc.releasedPayout += num(trip.payout.expectedAmount);
+      if (assignedToUser && !trip.payout.released && trip.payout.status !== 'frozen') acc.pendingPayout += num(trip.payout.expectedAmount);
+      if (trip.escrow?.status === 'RELEASED') acc.releasedTrips += 1;
+      if (trip.escrow && trip.escrow.status !== 'RELEASED') acc.releasePending += 1;
+      acc.totalDistanceKm += num(trip.route?.distanceKm);
+      if (trip.proofOfDelivery?.qrConfirmed) acc.proofOfDeliveryCount += 1;
+      if (trip.proofOfDelivery?.gpsVerified) acc.gpsVerifiedDeliveries += 1;
+      const pickupHours = hoursBetween(trip.createdAt, trip.qr?.pickupAt);
+      const deliveryHours = hoursBetween(trip.qr?.pickupAt || trip.createdAt, trip.actualDelivery || trip.qr?.deliveryAt);
+      if (pickupHours !== null) {
+        acc.pickupHoursTotal += pickupHours;
+        acc.pickupHoursCount += 1;
+      }
+      if (deliveryHours !== null) {
+        acc.deliveryHoursTotal += deliveryHours;
+        acc.deliveryHoursCount += 1;
+      }
+      return acc;
+    }, {
+      assignedTrips: 0,
+      activeTrips: 0,
+      availableTrips: 0,
+      pickupPending: 0,
+      deliveryPending: 0,
+      deliveredTrips: 0,
+      releasedTrips: 0,
+      releasePending: 0,
+      disputedTrips: 0,
+      totalEscrow: 0,
+      pendingPayout: 0,
+      releasedPayout: 0,
+      sinkingFundAccrued: 0,
+      totalDistanceKm: 0,
+      proofOfDeliveryCount: 0,
+      gpsVerifiedDeliveries: 0,
+      pickupHoursTotal: 0,
+      pickupHoursCount: 0,
+      deliveryHoursTotal: 0,
+      deliveryHoursCount: 0,
+    });
+    summary.avgPickupHours = summary.pickupHoursCount
+      ? Math.round((summary.pickupHoursTotal / summary.pickupHoursCount) * 10) / 10
+      : null;
+    summary.avgDeliveryHours = summary.deliveryHoursCount
+      ? Math.round((summary.deliveryHoursTotal / summary.deliveryHoursCount) * 10) / 10
+      : null;
+    summary.totalDistanceKm = Math.round(summary.totalDistanceKm * 10) / 10;
+    summary.proofOfDeliveryRate = summary.deliveredTrips
+      ? Math.round((summary.proofOfDeliveryCount / summary.deliveredTrips) * 100)
+      : 0;
+    summary.gpsVerificationRate = summary.deliveredTrips
+      ? Math.round((summary.gpsVerifiedDeliveries / summary.deliveredTrips) * 100)
+      : 0;
+    summary.sellerAssignmentRequests = assignmentAlerts.length;
+    delete summary.pickupHoursTotal;
+    delete summary.pickupHoursCount;
+    delete summary.deliveryHoursTotal;
+    delete summary.deliveryHoursCount;
+
+    const nextActions = [];
+    if ((user?.logisticsProfile?.verificationStatus || 'unverified') !== 'verified') {
+      nextActions.push({
+        type: 'verification',
+        label: 'Complete logistics verification',
+        detail: 'Upload documents and wait for admin approval before accepting trips.',
+        href: '/logistics/apply',
+      });
+    } else if (summary.availableTrips > 0) {
+      nextActions.push({
+        type: 'dispatch',
+        label: 'Accept available trips',
+        detail: `${summary.availableTrips} pending shipment${summary.availableTrips === 1 ? '' : 's'} can be accepted.`,
+      });
+    }
+    if (qrQueue.length > 0) {
+      nextActions.push({
+        type: 'qr',
+        label: 'Complete QR handoff',
+        detail: `${qrQueue.length} trip${qrQueue.length === 1 ? '' : 's'} need pickup or delivery scan.`,
+      });
+    }
+    if (releaseQueue.length > 0) {
+      nextActions.push({
+        type: 'escrow',
+        label: 'Monitor escrow release',
+        detail: `${releaseQueue.length} delivered trip${releaseQueue.length === 1 ? '' : 's'} are inside the release window.`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        application: {
+          role: user?.role || role,
+          businessType: user?.businessType,
+          subscriptionTier: user?.subscriptionTier,
+          logisticsProfile: user?.logisticsProfile || { verificationStatus: 'unverified' },
+        },
+        summary,
+        wallet: {
+          balance: walletBalance,
+          transactions: walletTransactions,
+          sinkingFund: sinkingFund ? {
+            balance: num(sinkingFund.balance),
+            totalContributed: num(sinkingFund.totalContributed),
+            totalWithdrawn: num(sinkingFund.totalWithdrawn),
+          } : null,
+        },
+        trips: dashboardTrips,
+        assignedTrips,
+        activeTrips,
+        qrQueue,
+        releaseQueue,
+        payoutRows,
+        assignmentAlerts,
+        routeZones,
+        proofQueue,
+        operationalTimeline,
+        nextActions,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getOperationsOverview = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const role = String(req.user.role || '').toLowerCase();
+    const userPhone = req.user.phone;
+    const isAdmin = role === 'admin';
+    const visibilityQuery = isAdmin
+      ? {}
+      : {
+        $or: [
+          { driver: userId },
+          { fleetOwner: userId },
+          ...(userPhone ? [{ driverPhone: userPhone }] : []),
+          { status: 'pending', driver: { $exists: false } },
+          { status: 'pending', driver: null },
+        ],
+      };
+    const activeStatuses = [
+      'pending',
+      'driver_assigned',
+      'en_route_to_pickup',
+      'picked_up',
+      'in_transit',
+      'out_for_delivery',
+    ];
+
+    const [statusRows, liveGpsCount, deliveryProofCount, escrowRows] = await Promise.all([
+      Logistics.aggregate([
+        { $match: visibilityQuery },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      Logistics.countDocuments({
+        ...visibilityQuery,
+        'gpsTracking.current.lat': { $ne: null },
+        'gpsTracking.current.lng': { $ne: null },
+      }),
+      Logistics.countDocuments({
+        ...visibilityQuery,
+        qrScans: { $elemMatch: { step: 'delivery', verified: { $ne: false } } },
+      }),
+      Escrow.aggregate([
+        { $match: { status: { $in: ['HELD', 'IN_TRANSIT', 'DELIVERED', 'DISPUTED'] } } },
+        { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+      ]),
+    ]);
+
+    const byStatus = statusRows.reduce((acc, row) => {
+      acc[row._id || 'unknown'] = row.count;
+      return acc;
+    }, {});
+    const escrowByStatus = escrowRows.reduce((acc, row) => {
+      acc[row._id || 'unknown'] = {
+        count: row.count,
+        amount: row.amount,
+      };
+      return acc;
+    }, {});
+    const activeTrips = activeStatuses.reduce((total, status) => total + Number(byStatus[status] || 0), 0);
+    const escrowHeldAmount = escrowRows.reduce((total, row) => total + Number(row.amount || 0), 0);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        title: isAdmin ? 'Admin Logistics Command Center' : 'Logistics Command Center',
+        subtitle: 'Manage routing, QR proof, escrow readiness, and driver operations with verified backend data.',
+        generatedAt: new Date(),
+        metrics: {
+          totalTrips: Object.values(byStatus).reduce((total, value) => total + Number(value || 0), 0),
+          activeTrips,
+          liveGpsCount,
+          deliveryProofCount,
+          escrowHeldAmount,
+        },
+        byStatus,
+        escrowByStatus,
+        actions: [
+          { key: 'routes', label: 'Route planning', status: 'available' },
+          { key: 'qr', label: 'QR delivery proof', status: 'available' },
+          { key: 'escrow', label: 'Escrow controls', status: 'available' },
+          { key: 'bulk', label: 'Bulk status updates', status: isAdmin ? 'available' : 'admin_only' },
+        ],
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 exports.geocodeAddress = async (req, res, next) => {
   try {
@@ -493,6 +1306,87 @@ exports.getNearbyDrivers = async (req, res, next) => {
   }
 };
 
+exports.getVerifiedProviders = async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const hasReferencePoint = Number.isFinite(lat) && Number.isFinite(lng);
+
+    const providers = await User.find({
+      role: 'logistics',
+      $or: [
+        { 'logisticsProfile.verificationStatus': 'verified' },
+        { verificationStatus: { $in: ['verified', 'gold'] } },
+      ],
+    })
+      .select('fullName name businessName phone email locationHub city address logisticsProfile subscriptionTier')
+      .sort({
+        'logisticsProfile.isOnline': -1,
+        'logisticsProfile.verifiedAt': -1,
+        createdAt: -1,
+      })
+      .limit(limit)
+      .lean();
+
+    const normalizedProviders = providers.map((provider) => {
+      const currentLocation = provider.logisticsProfile?.currentLocation || {};
+      const providerLat = Number(currentLocation.lat);
+      const providerLng = Number(currentLocation.lng);
+      const hasProviderPoint = Number.isFinite(providerLat) && Number.isFinite(providerLng);
+      const providerVerificationStatus = provider.logisticsProfile?.verificationStatus === 'verified' || ['verified', 'gold'].includes(provider.verificationStatus)
+        ? 'verified'
+        : provider.logisticsProfile?.verificationStatus || provider.verificationStatus || 'unverified';
+      const distanceKm = hasReferencePoint && hasProviderPoint
+        ? Number(calculateDistance(lat, lng, providerLat, providerLng).toFixed(1))
+        : null;
+
+      return {
+        id: provider._id,
+        _id: provider._id,
+        name: provider.businessName || provider.fullName || provider.name || 'Verified logistics provider',
+        phone: provider.phone || '',
+        email: provider.email || '',
+        hub: provider.logisticsProfile?.baseHub || provider.logisticsProfile?.locationHub || provider.locationHub || provider.city || provider.address || 'Hub not set',
+        operatingAddress: provider.logisticsProfile?.operatingAddress || provider.address || '',
+        serviceAreas: provider.logisticsProfile?.serviceAreas || [],
+        verificationStatus: providerVerificationStatus,
+        isOnline: Boolean(provider.logisticsProfile?.isOnline),
+        vehiclePlate: provider.logisticsProfile?.vehiclePlate || '',
+        cargoCapacityKg: provider.logisticsProfile?.cargoCapacityKg || 0,
+        driverMode: provider.logisticsProfile?.driverMode || '',
+        vehicleType: provider.logisticsProfile?.vehicleType || '',
+        fleetSize: provider.logisticsProfile?.fleetSize || 1,
+        currentLocation: hasProviderPoint
+          ? {
+              lat: providerLat,
+              lng: providerLng,
+              updatedAt: currentLocation.updatedAt,
+            }
+          : null,
+        distanceKm,
+        subscriptionTier: provider.subscriptionTier || null,
+      };
+    }).sort((a, b) => {
+      if (a.distanceKm === null && b.distanceKm !== null) return 1;
+      if (a.distanceKm !== null && b.distanceKm === null) return -1;
+      if (a.distanceKm !== null && b.distanceKm !== null) return a.distanceKm - b.distanceKm;
+      return Number(b.isOnline) - Number(a.isOnline);
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        providers: normalizedProviders,
+        total: normalizedProviders.length,
+      },
+      providers: normalizedProviders,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.calculateRoute = async (req, res, next) => {
   try {
     const route = await routeOptimizer.calculateRoute(req.params.id);
@@ -510,7 +1404,7 @@ exports.calculateRoute = async (req, res, next) => {
 exports.getRoute = async (req, res, next) => {
   try {
     const logistics = await Logistics.findById(req.params.id)
-      .populate('driver', 'name phone logisticsProfile.currentLocation')
+      .populate('driver', 'fullName name phone logisticsProfile.currentLocation')
       .select('seller buyer driver orderNumber status pickupAddress shippingAddress routeInfo metadata estimatedDelivery actualDelivery shippingCost gpsTracking');
 
     if (!logistics) {
@@ -962,6 +1856,21 @@ exports.getLogisticsByOrder = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'No logistics record found for this order.' });
     }
 
+    const userId = String(req.user._id || req.user.id);
+    const role = String(req.user.role || '').toLowerCase();
+    const allowed = role === 'admin' ||
+      role === 'logistics' ||
+      String(logistics.seller?._id || logistics.seller) === userId ||
+      String(logistics.buyer?._id || logistics.buyer) === userId ||
+      String(logistics.driver?._id || logistics.driver) === userId;
+
+    if (!allowed) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to view logistics for this order.',
+      });
+    }
+
     return res.status(200).json({ success: true, data: logistics });
   } catch (err) {
     next(err);
@@ -1046,6 +1955,22 @@ exports.updateDriverLocation = async (req, res, next) => {
         updatedBy: userId,
         timestamp: new Date(),
       });
+      logistics.gpsTracking = logistics.gpsTracking || {};
+      logistics.gpsTracking.current = {
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+        accuracy: req.body.accuracy,
+        lastUpdate: new Date(),
+      };
+      logistics.gpsTracking.history = logistics.gpsTracking.history || [];
+      logistics.gpsTracking.history.push({
+        location: { lat: parseFloat(lat), lng: parseFloat(lng) },
+        accuracy: req.body.accuracy,
+        speed: speed || 0,
+        heading: heading || 0,
+        recordedBy: userId,
+        timestamp: new Date(),
+      });
       await logistics.save();
     }
 
@@ -1084,14 +2009,37 @@ exports.getTrackingMapData = async (req, res, next) => {
 
     // Check authorization
     const userId = req.user._id || req.user.id;
-    const isSeller = logistics.seller._id.toString() === userId.toString();
-    const isBuyer = logistics.buyer._id.toString() === userId.toString();
+    const isSeller = logistics.seller?._id?.toString() === userId.toString();
+    const isBuyer = logistics.buyer?._id?.toString() === userId.toString();
     const isDriver = logistics.driver && logistics.driver._id.toString() === userId.toString();
     const isAdmin = req.user.role === 'admin';
 
     if (!isSeller && !isBuyer && !isDriver && !isAdmin) {
       return res.status(403).json({ success: false, message: 'Not authorized.' });
     }
+
+    const pickupCoords = getCoordinatePair(logistics.pickupAddress);
+    const deliveryCoords = getCoordinatePair(logistics.shippingAddress);
+    const driverCurrentLocation = getCoordinatePair(logistics.gpsTracking?.current)
+      || getCoordinatePair(logistics.driver?.logisticsProfile?.currentLocation);
+    const gpsHistory = (logistics.gpsTracking?.history || [])
+      .slice(-50)
+      .map((entry) => ({
+        lat: Number(entry.location?.lat),
+        lng: Number(entry.location?.lng),
+        accuracy: entry.accuracy,
+        speed: entry.speed,
+        heading: entry.heading,
+        timestamp: entry.timestamp,
+        label: 'history',
+      }))
+      .filter((entry) => Number.isFinite(entry.lat) && Number.isFinite(entry.lng));
+    const liveRoutePoints = [
+      pickupCoords ? { ...pickupCoords, label: 'pickup' } : null,
+      ...gpsHistory,
+      driverCurrentLocation ? { ...driverCurrentLocation, label: 'driver' } : null,
+      deliveryCoords ? { ...deliveryCoords, label: 'delivery' } : null,
+    ].filter(Boolean);
 
     const mapData = {
       logisticsId: logistics._id,
@@ -1100,8 +2048,8 @@ exports.getTrackingMapData = async (req, res, next) => {
       
       // Pickup location
       pickup: {
-        lat: logistics.pickupAddress?.gpsLat,
-        lng: logistics.pickupAddress?.gpsLng,
+        lat: pickupCoords?.lat,
+        lng: pickupCoords?.lng,
         address: logistics.pickupAddress?.label || `${logistics.pickupAddress?.town}, ${logistics.pickupAddress?.county}`,
         confirmed: logistics.pickupQrConfirmed,
         confirmedAt: logistics.qrScans.find(s => s.step === 'pickup')?.scannedAt,
@@ -1109,8 +2057,8 @@ exports.getTrackingMapData = async (req, res, next) => {
       
       // Delivery location
       delivery: {
-        lat: logistics.shippingAddress?.gpsLat,
-        lng: logistics.shippingAddress?.gpsLng,
+        lat: deliveryCoords?.lat,
+        lng: deliveryCoords?.lng,
         address: logistics.shippingAddress?.label || `${logistics.shippingAddress?.town}, ${logistics.shippingAddress?.county}`,
         confirmed: logistics.deliveryQrConfirmed,
         confirmedAt: logistics.qrScans.find(s => s.step === 'delivery')?.scannedAt,
@@ -1119,10 +2067,10 @@ exports.getTrackingMapData = async (req, res, next) => {
       // Driver current location (if available)
       driver: logistics.driver ? {
         id: logistics.driver._id,
-        name: logistics.driver.name,
+        name: logistics.driver.fullName || logistics.driver.name,
         phone: logistics.driver.phone,
-        currentLocation: logistics.driver.logisticsProfile?.currentLocation || null,
-        lastUpdated: logistics.driver.logisticsProfile?.currentLocation?.updatedAt,
+        currentLocation: driverCurrentLocation,
+        lastUpdated: logistics.gpsTracking?.current?.lastUpdate || logistics.driver.logisticsProfile?.currentLocation?.updatedAt,
       } : null,
       
       // Route information
@@ -1140,6 +2088,16 @@ exports.getTrackingMapData = async (req, res, next) => {
         timestamp: t.timestamp,
         gpsCoords: t.gpsCoords,
       })),
+      liveTracking: {
+        pickup: pickupCoords,
+        delivery: deliveryCoords,
+        driver: driverCurrentLocation,
+        history: gpsHistory,
+        routePath: liveRoutePoints,
+        lastUpdate: logistics.gpsTracking?.current?.lastUpdate || gpsHistory[gpsHistory.length - 1]?.timestamp || logistics.updatedAt,
+        googleMapsUrl: buildGoogleMapsUrl(liveRoutePoints.length ? liveRoutePoints : [pickupCoords, deliveryCoords]),
+        embedUrl: buildGoogleMapsEmbedUrl(liveRoutePoints.length ? liveRoutePoints : [pickupCoords, deliveryCoords]),
+      },
       
       // Expose configuration state only. The server-side API key must never leave the backend.
       googleMapsApiKey: GOOGLE_MAPS_API_KEY ? 'configured' : null,
@@ -1204,10 +2162,36 @@ exports.updateLogisticsStatus = async (req, res, next) => {
       }
     }
 
+    if (status === 'delivered') {
+      if (escrowService?.markDelivered) {
+        try {
+          await escrowService.markDelivered(logistics.order, req.user._id, gpsCoords);
+        } catch (escrowError) {
+          return res.status(409).json({
+            success: false,
+            message: escrowError.message || 'Escrow must be in transit before delivery can be confirmed.',
+            code: 'ESCROW_TRANSITION_FAILED',
+          });
+        }
+      }
+    } else if (status === 'in_transit') {
+      if (escrowService?.markInTransit) {
+        try {
+          await escrowService.markInTransit(logistics.order, req.user._id, gpsCoords);
+        } catch (escrowError) {
+          return res.status(409).json({
+            success: false,
+            message: escrowError.message || 'Payment must be held in escrow before pickup can be confirmed.',
+            code: 'ESCROW_TRANSITION_FAILED',
+          });
+        }
+      }
+    }
+
     await logistics.updateStatus(status, { location, notes, gpsCoords, updatedBy: req.user._id });
 
     if (status === 'delivered') {
-      await Order.findByIdAndUpdate(logistics.order, { status: 'delivered', deliveredAt: new Date() });
+      await Order.findByIdAndUpdate(logistics.order, { status: 'DELIVERED', deliveredAt: new Date() });
       
       // Deduct sinking fund from driver payout (10%)
       if (logistics.driver && logistics.shippingCost) {
@@ -1232,7 +2216,7 @@ exports.updateLogisticsStatus = async (req, res, next) => {
         data: { logisticsId: logistics._id.toString(), status: 'delivered' },
       });
     } else if (status === 'in_transit') {
-      await Order.findByIdAndUpdate(logistics.order, { status: 'dispatched' });
+      await Order.findByIdAndUpdate(logistics.order, { status: 'IN_TRANSIT' });
     } else if (status === 'disputed') {
       await Order.findByIdAndUpdate(logistics.order, { status: 'disputed' });
     }
@@ -1373,6 +2357,18 @@ exports.assignDriver = async (req, res, next) => {
 
     const assignedDriverId = logistics.driver?.toString();
     const currentUserId = userId.toString();
+    const requesterRole = String(req.user.role || '').toLowerCase();
+    const isAdmin = requesterRole === 'admin';
+    const isLogisticsUser = requesterRole === 'logistics';
+    const isShipmentSeller = String(logistics.seller) === currentUserId;
+
+    if (!isAdmin && !isLogisticsUser && !isShipmentSeller) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only admins, logistics users, or the seller that owns this shipment can assign a driver.',
+      });
+    }
+
     const requestedDriverId = driverId || (!driverName && !driverPhone && req.user.role === 'logistics' ? currentUserId : null);
     const activeStatuses = [
       'driver_assigned',
@@ -1579,7 +2575,9 @@ exports.generateQrTokens = async (req, res, next) => {
 
 exports.getQrTokens = async (req, res, next) => {
   try {
-    const logistics = await Logistics.findById(req.params.id);
+    const logistics = await Logistics.findById(req.params.id)
+      .populate('seller buyer driver', 'name fullName businessName phone role')
+      .populate('qrScans.scannedBy', 'name fullName phone role');
     
     if (!logistics) {
       return res.status(404).json({ 
@@ -1589,9 +2587,12 @@ exports.getQrTokens = async (req, res, next) => {
     }
 
     const userId = req.user._id || req.user.id;
-    const isSeller = logistics.seller.toString() === userId.toString();
-    const isBuyer = logistics.buyer.toString() === userId.toString();
-    const isDriver = logistics.driver && logistics.driver.toString() === userId.toString();
+    const sellerId = logistics.seller?._id || logistics.seller;
+    const buyerId = logistics.buyer?._id || logistics.buyer;
+    const driverId = logistics.driver?._id || logistics.driver;
+    const isSeller = sellerId?.toString() === userId.toString();
+    const isBuyer = buyerId?.toString() === userId.toString();
+    const isDriver = driverId && driverId.toString() === userId.toString();
     const isAdmin = req.user.role === 'admin';
     
     if (!isSeller && !isBuyer && !isDriver && !isAdmin) {
@@ -1601,10 +2602,37 @@ exports.getQrTokens = async (req, res, next) => {
       });
     }
 
-    const qrTokens = await QRToken.find({
-      logistics: logistics._id,
-      isUsed: false,
-      $or: [{ expiresAt: { $exists: false } }, { expiresAt: { $gt: new Date() } }]
+    const qrTokens = await QRToken.find({ logistics: logistics._id })
+      .populate('holder scannedBy', 'name fullName phone role')
+      .sort({ type: 1, createdAt: -1 });
+
+    const now = Date.now();
+    const scanAudit = (logistics.qrScans || []).map((scan) => ({
+      id: scan._id,
+      step: scan.step,
+      scannedAt: scan.scannedAt,
+      scannedBy: scan.scannedBy,
+      gpsCoords: scan.gpsCoords,
+      verified: scan.verified !== false,
+    })).sort((a, b) => new Date(b.scannedAt || 0) - new Date(a.scannedAt || 0));
+
+    const tokenPayload = qrTokens.map((t) => {
+      const expired = Boolean(t.expiresAt && t.expiresAt.getTime() <= now);
+      return {
+        id: t._id,
+        type: t.type,
+        token: t.token,
+        qrImage: t.qrImage,
+        holder: t.holder,
+        isUsed: t.isUsed,
+        status: t.isUsed ? 'used' : expired ? 'expired' : 'active',
+        usedAt: t.usedAt,
+        scannedBy: t.scannedBy,
+        gpsAtScan: t.gpsAtScan,
+        expiresAt: t.expiresAt,
+        createdAt: t.createdAt,
+        secondsUntilExpiry: t.expiresAt ? Math.max(0, Math.floor((t.expiresAt.getTime() - now) / 1000)) : null,
+      };
     });
 
     return res.status(200).json({
@@ -1613,11 +2641,12 @@ exports.getQrTokens = async (req, res, next) => {
         logisticsId: logistics._id,
         pickupQrConfirmed: logistics.pickupQrConfirmed || false,
         deliveryQrConfirmed: logistics.deliveryQrConfirmed || false,
-        availableTokens: qrTokens.map(t => ({
-          type: t.type,
-          token: t.token,
-          expiresAt: t.expiresAt
-        }))
+        nextStep: logistics.pickupQrConfirmed ? (logistics.deliveryQrConfirmed ? 'complete' : 'delivery') : 'pickup',
+        activeTokens: tokenPayload.filter((token) => token.status === 'active'),
+        availableTokens: tokenPayload.filter((token) => token.status === 'active'),
+        tokens: tokenPayload,
+        scanAudit,
+        lastGpsScan: scanAudit.find((scan) => scan.gpsCoords?.lat && scan.gpsCoords?.lng) || null,
       }
     });
   } catch (err) {
@@ -1833,6 +2862,46 @@ exports.processQrScan = async (req, res, next) => {
       }
     }
 
+    if (escrowService?.getEscrowByOrder) {
+      try {
+        const escrow = await escrowService.getEscrowByOrder(logistics.order._id || logistics.order);
+        const expectedEscrowStatus = step === 'pickup' ? 'HELD' : 'IN_TRANSIT';
+        if (escrow.status !== expectedEscrowStatus) {
+          return res.status(409).json({
+            success: false,
+            message: step === 'pickup'
+              ? 'Payment must be held in escrow before pickup QR can be scanned.'
+              : 'Pickup escrow handoff must be completed before delivery QR can be scanned.',
+            code: 'ESCROW_NOT_READY',
+            errors: [{
+              message: `Escrow status must be ${expectedEscrowStatus}. Current status: ${escrow.status}.`,
+              details: {
+                step,
+                escrowStatus: escrow.status,
+                expectedEscrowStatus,
+                logisticsId: logistics._id,
+                orderId: logistics.order?._id || logistics.order,
+              },
+            }],
+          });
+        }
+      } catch (escrowError) {
+        return res.status(409).json({
+          success: false,
+          message: escrowError.message || 'Escrow record is required before QR handoff.',
+          code: 'ESCROW_NOT_READY',
+          errors: [{
+            message: 'Complete buyer payment and escrow hold before scanning logistics QR codes.',
+            details: {
+              step,
+              logisticsId: logistics._id,
+              orderId: logistics.order?._id || logistics.order,
+            },
+          }],
+        });
+      }
+    }
+
     let verificationResult;
     try {
       if (step === 'delivery') {
@@ -1927,20 +2996,29 @@ exports.processQrScan = async (req, res, next) => {
     if (step === 'pickup') {
       logistics.status = 'in_transit';
       logistics.pickupTime = new Date();
-      await logistics.save();
 
       if (escrowService && escrowService.markInTransit) {
         try {
           await escrowService.markInTransit(logistics.order._id || logistics.order, userId, gpsCoords);
         } catch (escrowError) {
           logger.warn('Escrow update failed:', escrowError);
+          return res.status(409).json({
+            success: false,
+            message: escrowError.message || 'Pickup QR accepted, but escrow could not move to in-transit.',
+            code: 'ESCROW_TRANSITION_FAILED',
+            errors: [{
+              message: 'Payment must be held in escrow before pickup can be confirmed.',
+              details: {
+                step,
+                logisticsId: logistics._id,
+                orderId: logistics.order?._id || logistics.order,
+              },
+            }],
+          });
         }
       }
 
-      await Order.findByIdAndUpdate(logistics.order, { 
-        status: 'dispatched',
-        dispatchedAt: new Date()
-      });
+      await logistics.save();
 
       if (dispatchSvc && logistics.seller) {
         await dispatchSvc.dispatch({
@@ -1960,18 +3038,32 @@ exports.processQrScan = async (req, res, next) => {
       logistics.status = 'delivered';
       logistics.actualDelivery = new Date();
       logistics.escrowReleaseDue = new Date(Date.now() + 72 * 60 * 60 * 1000);
-      await logistics.save();
 
       if (escrowService && escrowService.markDelivered) {
         try {
           await escrowService.markDelivered(logistics.order._id || logistics.order, userId, gpsCoords);
         } catch (escrowError) {
           logger.warn('Escrow update failed:', escrowError);
+          return res.status(409).json({
+            success: false,
+            message: escrowError.message || 'Delivery QR accepted, but escrow could not enter the delivery release window.',
+            code: 'ESCROW_TRANSITION_FAILED',
+            errors: [{
+              message: 'Escrow must be in transit before delivery can be confirmed.',
+              details: {
+                step,
+                logisticsId: logistics._id,
+                orderId: logistics.order?._id || logistics.order,
+              },
+            }],
+          });
         }
       }
 
+      await logistics.save();
+
       await Order.findByIdAndUpdate(logistics.order, { 
-        status: 'delivered', 
+        status: 'DELIVERED',
         deliveredAt: new Date() 
       });
 
@@ -2009,6 +3101,13 @@ exports.processQrScan = async (req, res, next) => {
         qrConfirmed: step === 'pickup' ? logistics.pickupQrConfirmed : logistics.deliveryQrConfirmed,
         timestamp: new Date().toISOString(),
         gpsVerified: step === 'delivery' ? true : null,
+        gpsAtScan: verificationResult?.gpsAtScan || null,
+        tokenStatus: {
+          id: verificationResult?._id,
+          type: verificationResult?.type,
+          usedAt: verificationResult?.usedAt,
+          expiresAt: verificationResult?.expiresAt,
+        },
       }
     });
   } catch (err) {
@@ -2191,6 +3290,181 @@ exports.getDeliveryStats = async (req, res, next) => {
 // GROUP TRIP / SHARED LOGISTICS
 // ─────────────────────────────────────────────────────────────────────────────
 
+exports.getGroupTripRoutes = async (req, res, next) => {
+  try {
+    await ensureDefaultGroupTripRoutes();
+    const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true';
+    const query = includeInactive ? {} : { isActive: true };
+    const routes = await GroupTripRoute.find(query).sort({ isDefault: -1, label: 1 });
+
+    return res.status(200).json({
+      success: true,
+      data: routes.map(serializeGroupTripRoute),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.createGroupTripRoute = async (req, res, next) => {
+  try {
+    const {
+      label,
+      originName,
+      destinationName,
+      originLat,
+      originLng,
+      destinationLat,
+      destinationLng,
+      cargoType,
+      routeCode,
+      stops,
+    } = req.body;
+
+    const resolvedLabel = String(label || `${originName} to ${destinationName}`).trim();
+    const routeId = buildRouteId(resolvedLabel);
+    const normalizedStops = Array.isArray(stops)
+      ? stops.map((stop) => String(stop).trim()).filter(Boolean)
+      : String(stops || '')
+        .split(',')
+        .map((stop) => stop.trim())
+        .filter(Boolean);
+
+    if (!routeId) {
+      return res.status(400).json({ success: false, message: 'Route label is required.' });
+    }
+
+    const existing = await GroupTripRoute.findOne({ routeId });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: 'A route with this name already exists.',
+      });
+    }
+
+    const route = await GroupTripRoute.create({
+      routeId,
+      label: resolvedLabel,
+      originName,
+      destinationName,
+      origin: { lat: Number(originLat), lng: Number(originLng) },
+      destination: { lat: Number(destinationLat), lng: Number(destinationLng) },
+      routeCode: routeCode ? String(routeCode).trim().toUpperCase() : undefined,
+      stops: normalizedStops.length ? normalizedStops : [originName, destinationName],
+      cargoType: cargoType || `Mixed ${resolvedLabel} cargo`,
+      createdBy: req.user._id || req.user.id,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Group trip route created successfully.',
+      data: serializeGroupTripRoute(route),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.deleteGroupTripRoute = async (req, res, next) => {
+  try {
+    const route = await GroupTripRoute.findOne({
+      $or: [
+        { routeId: req.params.routeId },
+        { _id: req.params.routeId.match(/^[0-9a-fA-F]{24}$/) ? req.params.routeId : undefined },
+      ].filter((condition) => Object.values(condition)[0]),
+    });
+
+    if (!route) {
+      return res.status(404).json({ success: false, message: 'Group trip route not found.' });
+    }
+
+    if (route.isDefault) {
+      route.isActive = false;
+      await route.save();
+    } else {
+      await route.deleteOne();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Group trip route deleted successfully.',
+      data: { routeId: route.routeId },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getOpenGroupTrips = async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 50);
+    const originLat = Number(req.query.originLat);
+    const originLng = Number(req.query.originLng);
+    const destinationLat = Number(req.query.destinationLat);
+    const destinationLng = Number(req.query.destinationLng);
+    const maxDistanceKm = Math.min(Math.max(Number(req.query.maxDistanceKm || 25), 1), 500);
+    const hasOrigin = Number.isFinite(originLat) && Number.isFinite(originLng);
+    const hasDestination = Number.isFinite(destinationLat) && Number.isFinite(destinationLng);
+
+    await GroupTrip.updateMany(
+      { status: 'open', deadline: { $lt: new Date() } },
+      { $set: { status: 'expired' } }
+    );
+
+    const trips = await GroupTrip.find({
+      status: 'open',
+      deadline: { $gte: new Date() },
+    })
+      .populate('initiator', 'fullName name businessName phone role')
+      .populate('participants.user', 'fullName name businessName phone role')
+      .sort({ deadline: 1, createdAt: -1 })
+      .limit(100);
+
+    const filtered = trips
+      .map((trip) => {
+        const originDistanceKm = hasOrigin
+          ? calculateDistance(originLat, originLng, trip.origin.lat, trip.origin.lng)
+          : null;
+        const destinationDistanceKm = hasDestination
+          ? calculateDistance(destinationLat, destinationLng, trip.destination.lat, trip.destination.lng)
+          : null;
+
+        return {
+          trip,
+          originDistanceKm,
+          destinationDistanceKm,
+        };
+      })
+      .filter(({ originDistanceKm, destinationDistanceKm }) => (
+        (!hasOrigin || originDistanceKm <= maxDistanceKm) &&
+        (!hasDestination || destinationDistanceKm <= maxDistanceKm)
+      ))
+      .sort((left, right) => {
+        if (hasOrigin) return left.originDistanceKm - right.originDistanceKm;
+        return new Date(left.trip.deadline).getTime() - new Date(right.trip.deadline).getTime();
+      })
+      .slice(0, limit)
+      .map(({ trip, originDistanceKm, destinationDistanceKm }) => ({
+        ...summarizeGroupTrip(trip, req.user._id || req.user.id),
+        originDistanceKm,
+        destinationDistanceKm,
+      }));
+
+    return res.status(200).json({
+      success: true,
+      data: filtered,
+      meta: {
+        count: filtered.length,
+        maxDistanceKm,
+        origin: hasOrigin ? { lat: originLat, lng: originLng } : null,
+        destination: hasDestination ? { lat: destinationLat, lng: destinationLng } : null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.createGroupTrip = async (req, res, next) => {
   try {
     const { 
@@ -2199,7 +3473,10 @@ exports.createGroupTrip = async (req, res, next) => {
       maxCapacityKg,
       deadlineHours,
       cargoType,
-      notes 
+      notes,
+      routeCode,
+      routeLabel,
+      stops,
     } = req.body;
 
     const userId = req.user._id || req.user.id;
@@ -2215,12 +3492,21 @@ exports.createGroupTrip = async (req, res, next) => {
     const baseFare = calculateShippingCost(distance, 100, false);
     const eta = await getETA(originLat, originLng, destinationLat, destinationLng);
     const tripId = `GROUP-${Date.now().toString(36).toUpperCase()}`;
+    const normalizedStops = Array.isArray(stops)
+      ? stops.map((stop) => String(stop).trim()).filter(Boolean)
+      : String(stops || '')
+        .split(',')
+        .map((stop) => stop.trim())
+        .filter(Boolean);
 
     const groupTrip = await GroupTrip.create({
       tripId,
       initiator: userId,
       origin: { lat: originLat, lng: originLng },
       destination: { lat: destinationLat, lng: destinationLng },
+      routeCode: routeCode ? String(routeCode).trim().toUpperCase() : undefined,
+      routeLabel: routeLabel || undefined,
+      stops: normalizedStops,
       distanceKm: distance,
       baseFare,
       maxCapacityKg: maxCapacityKg || 3000,
@@ -2303,7 +3589,6 @@ exports.joinGroupTrip = async (req, res, next) => {
       });
     }
 
-    const user = await User.findById(userId);
     const weightShare = weightKg / newTotalWeight;
     const costShare = groupTrip.baseFare * weightShare;
 
@@ -2311,6 +3596,9 @@ exports.joinGroupTrip = async (req, res, next) => {
       user: userId,
       weightKg,
       share: costShare,
+      paymentStatus: 'unpaid',
+      paymentMethod: 'mpesa',
+      paymentAmount: costShare,
       joinedAt: new Date(),
     });
     groupTrip.currentCapacityKg = newTotalWeight;
@@ -2321,6 +3609,9 @@ exports.joinGroupTrip = async (req, res, next) => {
         ? participant.weightKg / groupTrip.currentCapacityKg
         : 0;
       participant.share = Math.round(groupTrip.baseFare * participantWeightShare);
+      if (!['paid', 'refunded'].includes(participant.paymentStatus)) {
+        participant.paymentAmount = participant.share;
+      }
     }
 
     await groupTrip.save();
@@ -2341,7 +3632,8 @@ exports.joinGroupTrip = async (req, res, next) => {
       message: 'Joined group trip successfully',
       data: {
         groupTripId: groupTrip.tripId,
-        yourShare: costShare,
+        yourShare: groupTrip.participants.find((participant) => sameId(participant.user, userId))?.share || costShare,
+        paymentStatus: 'unpaid',
         totalParticipants: groupTrip.participants.length,
         fillPercentage: (groupTrip.currentCapacityKg / groupTrip.maxCapacityKg) * 100,
       },
@@ -2354,6 +3646,141 @@ exports.joinGroupTrip = async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // BULK
 // ─────────────────────────────────────────────────────────────────────────────
+
+exports.recordGroupTripPayment = async (req, res, next) => {
+  try {
+    const {
+      participantUserId,
+      paymentStatus,
+      paymentMethod = 'mpesa',
+      paymentReference = '',
+      paymentPhone = '',
+      amount,
+      notes = '',
+    } = req.body;
+    const currentUserId = req.user._id || req.user.id;
+    const role = String(req.user.role || '').toLowerCase();
+    const canManagePayment = ['admin', 'logistics'].includes(role);
+    const targetUserId = canManagePayment && participantUserId ? participantUserId : currentUserId;
+    const requestedStatus = String(paymentStatus || (canManagePayment ? 'paid' : 'pending')).toLowerCase();
+    const normalizedStatus = canManagePayment
+      ? requestedStatus
+      : (requestedStatus === 'failed' ? 'failed' : 'pending');
+    const normalizedMethod = String(paymentMethod || 'mpesa').toLowerCase();
+    const allowedStatuses = ['unpaid', 'pending', 'paid', 'failed', 'refunded'];
+    const allowedMethods = ['mpesa', 'cash', 'wallet', 'bank_transfer', 'card'];
+
+    if (!allowedStatuses.includes(normalizedStatus)) {
+      return res.status(400).json({ success: false, message: 'Invalid group trip payment status.' });
+    }
+
+    if (!allowedMethods.includes(normalizedMethod)) {
+      return res.status(400).json({ success: false, message: 'Invalid group trip payment method.' });
+    }
+
+    const tripIdentifier = String(req.params.tripId || '').trim();
+    const tripQuery = /^[0-9a-fA-F]{24}$/.test(tripIdentifier)
+      ? { $or: [{ _id: tripIdentifier }, { tripId: tripIdentifier }] }
+      : { tripId: tripIdentifier };
+
+    const groupTrip = await GroupTrip.findOne(tripQuery);
+    if (!groupTrip) {
+      return res.status(404).json({ success: false, message: 'Group trip not found.' });
+    }
+
+    const participant = groupTrip.participants.find((item) => sameId(item.user, targetUserId));
+    if (!participant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Participant is not part of this group trip.',
+      });
+    }
+
+    if (!canManagePayment && !sameId(participant.user, currentUserId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update your own group trip payment.',
+      });
+    }
+
+    const paymentAmount = Number.isFinite(Number(amount)) && Number(amount) > 0
+      ? Number(amount)
+      : Number(participant.share || 0);
+    const now = new Date();
+
+    participant.paymentStatus = normalizedStatus;
+    participant.paymentMethod = normalizedMethod;
+    participant.paymentReference = String(paymentReference || '').trim();
+    participant.paymentPhone = String(paymentPhone || '').trim();
+    participant.paymentAmount = paymentAmount;
+    participant.paymentNotes = String(notes || '').trim();
+    participant.paidAt = normalizedStatus === 'paid' ? now : undefined;
+    participant.paymentConfirmedBy = normalizedStatus === 'paid' ? currentUserId : undefined;
+
+    await groupTrip.save();
+
+    let payment = null;
+    if (['pending', 'paid'].includes(normalizedStatus) && paymentAmount > 0) {
+      payment = await Payment.create({
+        user: participant.user,
+        amount: paymentAmount,
+        currency: 'KES',
+        paymentMethod: normalizedMethod,
+        status: normalizedStatus === 'paid' ? 'completed' : 'pending',
+        transactionId: `GT-${groupTrip.tripId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        phoneNumber: participant.paymentPhone || undefined,
+        mpesaReceiptNumber: normalizedMethod === 'mpesa' && participant.paymentReference ? participant.paymentReference : undefined,
+        description: `Group trip payment for ${groupTrip.routeLabel || groupTrip.tripId}`,
+        paidAt: normalizedStatus === 'paid' ? now : undefined,
+        metadata: {
+          purpose: 'group_trip_logistics',
+          groupTripId: groupTrip.tripId,
+          participantUserId: String(participant.user),
+          confirmedBy: String(currentUserId),
+          paymentReference: participant.paymentReference,
+        },
+      });
+    }
+
+    try {
+      await dispatchSvc.dispatch({
+        userIds: [participant.user],
+        channels: ['push'],
+        title: normalizedStatus === 'paid' ? 'Group trip payment confirmed' : 'Group trip payment updated',
+        body: normalizedStatus === 'paid'
+          ? `Your ${groupTrip.tripId} logistics payment of KES ${Math.round(paymentAmount).toLocaleString()} has been confirmed.`
+          : `Your ${groupTrip.tripId} logistics payment is marked ${normalizedStatus}.`,
+        data: {
+          groupTripId: groupTrip.tripId,
+          paymentStatus: normalizedStatus,
+          paymentId: payment?._id?.toString(),
+        },
+      });
+    } catch (notifyError) {
+      logger.warn('Group trip payment notification failed', {
+        error: notifyError.message,
+        groupTripId: groupTrip.tripId,
+        participantUserId: String(participant.user),
+      });
+    }
+
+    await groupTrip.populate('initiator', 'fullName name businessName phone role');
+    await groupTrip.populate('participants.user', 'fullName name businessName phone role');
+
+    return res.status(200).json({
+      success: true,
+      message: normalizedStatus === 'paid'
+        ? 'Group trip payment confirmed successfully.'
+        : 'Group trip payment updated successfully.',
+      data: {
+        groupTrip: summarizeGroupTrip(groupTrip, currentUserId),
+        payment,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
 
 exports.bulkUpdateStatus = async (req, res, next) => {
   try {

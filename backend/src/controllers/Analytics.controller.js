@@ -174,8 +174,16 @@ exports.generateDailyAnalytics = async (req, res, next) => {
     // Product Analytics
     const totalProducts = await Product.countDocuments();
     const activeProducts = await Product.countDocuments({ isActive: true });
-    const outOfStock = await Product.countDocuments({ stock: 0 });
-    const lowStock = await Product.countDocuments({ stock: { $lt: 10, $gt: 0 } });
+    const outOfStock = await Product.countDocuments({ quantityAvailable: 0 });
+    const lowStock = await Product.countDocuments({
+      quantityAvailable: { $gt: 0 },
+      $expr: {
+        $and: [
+          { $gt: [{ $ifNull: ['$minThreshold', 10] }, 0] },
+          { $lte: ['$quantityAvailable', { $ifNull: ['$minThreshold', 10] }] },
+        ],
+      },
+    });
     
     // Top Selling Products
     const topProducts = await Order.aggregate([
@@ -462,7 +470,15 @@ exports.getDashboardOverview = async (req, res, next) => {
     const [pendingOrders, activeUsers, lowStockProducts, inTransitDeliveries, farmersOnline] = await Promise.all([
       Order.countDocuments({ status: 'pending' }),
       User.countDocuments({ isActive: true, lastLogin: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } }),
-      Product.countDocuments({ stock: { $lt: 10, $gt: 0 } }),
+      Product.countDocuments({
+        quantityAvailable: { $gt: 0 },
+        $expr: {
+          $and: [
+            { $gt: [{ $ifNull: ['$minThreshold', 10] }, 0] },
+            { $lte: ['$quantityAvailable', { $ifNull: ['$minThreshold', 10] }] },
+          ],
+        },
+      }),
       Logistics.countDocuments({ status: 'in_transit' }),
       User.countDocuments({ role: 'farmer', isActive: true, lastLogin: { $gte: new Date(Date.now() - 60 * 60 * 1000) } })
     ]);

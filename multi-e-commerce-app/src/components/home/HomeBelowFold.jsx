@@ -15,7 +15,7 @@ const HomeBelowFold = ({ categories = [], businessPartners = [], loading = false
     }) === index;
   });
   const features = [
-    { icon: FaTruck, title: 'Free Shipping', desc: 'On orders over KSh 50', color: '#F97316' },
+    { icon: FaTruck, title: 'Delivery Support', desc: 'Flexible delivery options for every order', color: '#F97316' },
     { icon: FaShieldAlt, title: 'Secure Payment', desc: '100% secure transactions', color: '#FB923C' },
     { icon: FaMoneyBillWave, title: 'Money Back', desc: '30 days guarantee', color: '#16A34A' },
     { icon: FaHeadset, title: '24/7 Support', desc: 'Dedicated support team', color: '#F97316' }

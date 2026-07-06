@@ -11,7 +11,11 @@ router.use(authMiddleware);
 // M-Pesa
 router.post('/mpesa/stkpush', requireVerified, [
   body('orderId').notEmpty().withMessage('Order ID or order number required'),
-  body('phoneNumber').optional().matches(/^(\+?254|0)?[71][0-9]{8}$/).withMessage('Invalid phone number format'),
+  body('phoneNumber')
+    .notEmpty()
+    .withMessage('Enter the buyer M-Pesa phone number')
+    .matches(/^(\+?254|0)?[71][0-9]{8}$/)
+    .withMessage('Enter a valid Kenya M-Pesa number, for example 0712345678 or 254712345678'),
 ], paymentController.initiateMpesaPayment);
 
 router.get('/mpesa/status/:checkoutRequestId', paymentController.checkMpesaStatus);

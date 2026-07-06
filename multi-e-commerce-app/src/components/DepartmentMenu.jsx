@@ -31,7 +31,7 @@ const DepartmentsMenu = ({ onClose }) => {
   const quickLinks = [
     { name: 'Cart', link: '/cart' },
     { name: 'Wishlist', link: '/wishlist' },
-    { name: 'My Orders', link: '/orders' },
+    { name: 'My Orders', link: '/buyer/orders' },
     { name: 'Profile', link: '/profile' },
   ];
 

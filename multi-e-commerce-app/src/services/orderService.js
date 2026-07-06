@@ -17,8 +17,8 @@ export const orderService = {
     return response.data;
   },
 
-  cancel: async (id) => {
-    const response = await api.put(`/v1/orders/${id}/cancel`);
+  cancel: async (id, reason = '') => {
+    const response = await api.put(`/v1/orders/${id}/cancel`, { reason });
     return response.data;
   },
 
@@ -27,8 +27,35 @@ export const orderService = {
     return response.data;
   },
 
+  raiseDispute: async (id, payload) => {
+    const response = await api.post(`/v1/orders/${id}/dispute`, payload);
+    return response.data;
+  },
+
+  confirmDelivery: async (id) => {
+    const response = await api.post(`/v1/orders/${id}/confirm-delivery`);
+    return response.data;
+  },
+
   getTracking: async (id) => {
     const response = await api.get(`/v1/orders/${id}/tracking`);
+    return response.data;
+  },
+
+  getLiveTracking: async (id) => {
+    const response = await api.get(`/v1/orders/${id}/tracking`, {
+      params: { live: true },
+    });
+    return response.data;
+  },
+
+  getBuyerSellers: async () => {
+    const response = await api.get('/v1/orders/buyer/sellers');
+    return response.data;
+  },
+
+  getBuyerReviewQueue: async () => {
+    const response = await api.get('/v1/orders/buyer/review-queue');
     return response.data;
   },
 };

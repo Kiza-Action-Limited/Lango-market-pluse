@@ -1,12 +1,16 @@
-/* eslint-disable react-hooks/rules-of-hooks */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FaCheckCircle, FaCreditCard, FaMobileAlt, FaSyncAlt } from 'react-icons/fa';
-import { ALL_PLANS } from '../config/subscriptionPlans';
+import { FaBuilding, FaCheckCircle, FaCreditCard, FaMobileAlt, FaSyncAlt } from 'react-icons/fa';
+import { ALL_PLANS, PLAN_IDS } from '../config/subscriptionPlans';
 import { useAuth } from '../context/AuthContext';
 import { getPremiumProfileForUser } from '../utils/premiumSellerProfile';
 import { paymentService } from '../services/paymentService';
+import {
+  clearPendingSubscriptionPayment,
+  loadPendingSubscriptionPayment,
+  savePendingSubscriptionPayment,
+} from '../utils/subscriptionPaymentRecovery';
 
 const SellerPremiumPayment = () => {
   const { user, refreshUser, isSeller } = useAuth();
@@ -17,14 +21,21 @@ const SellerPremiumPayment = () => {
   const [checkoutRequestId, setCheckoutRequestId] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [mpesaPhone, setMpesaPhone] = useState(user?.phone || '');
+  const [statusPollingPaused, setStatusPollingPaused] = useState(false);
+  const [payeeAccount, setPayeeAccount] = useState({
+    name: 'Lango Market Pulse',
+    type: 'platform',
+  });
 
   const planId = searchParams.get('plan') || '';
   const selectedPlan = useMemo(() => ALL_PLANS.find((plan) => plan.id === planId) || null, [planId]);
   const profile = useMemo(() => getPremiumProfileForUser(user), [user]);
+  const requiresPremiumVerification = selectedPlan?.id === PLAN_IDS.SMART || selectedPlan?.id === PLAN_IDS.GROWTH;
 
   const completeActivation = async (statusPayload) => {
     if (!selectedPlan || (!statusPayload?.activated && statusPayload?.status !== 'completed')) return false;
 
+    clearPendingSubscriptionPayment(user, selectedPlan.id);
     await refreshUser?.();
     toast.success(`${selectedPlan.name} activated successfully`);
     navigate(`/seller/subscription-plans?plan=${encodeURIComponent(selectedPlan.id)}`);
@@ -36,7 +47,23 @@ const SellerPremiumPayment = () => {
     setChecking(true);
     try {
       const result = await paymentService.checkSubscriptionMpesaStatus(requestId);
+      if (result?.payeeAccount) {
+        setPayeeAccount(result.payeeAccount);
+      }
       setPaymentStatus(result?.message || result?.status || 'Waiting for M-Pesa confirmation');
+      if (result?.code === 'MPESA_ACCESS_TOKEN_BLOCKED') {
+        setStatusPollingPaused(true);
+      }
+      if (selectedPlan && requestId) {
+        savePendingSubscriptionPayment(user, selectedPlan.id, {
+          checkoutRequestId: requestId,
+          phoneNumber: mpesaPhone,
+          status: result?.status || 'pending',
+          message: result?.message || 'Waiting for M-Pesa confirmation',
+          statusPollingPaused: result?.code === 'MPESA_ACCESS_TOKEN_BLOCKED',
+          payeeAccount: result?.payeeAccount,
+        });
+      }
 
       const activated = await completeActivation(result);
       if (!activated && !silent && result?.status === 'failed') {
@@ -52,20 +79,34 @@ const SellerPremiumPayment = () => {
   };
 
   useEffect(() => {
-    if (selectedPlan && !profile) {
+    if (selectedPlan && requiresPremiumVerification && !profile) {
       navigate(`/seller/premium-verification?plan=${encodeURIComponent(planId)}`, { replace: true });
     }
-  }, [profile, navigate, planId, selectedPlan]);
+  }, [profile, navigate, planId, requiresPremiumVerification, selectedPlan]);
 
   useEffect(() => {
-    if (!checkoutRequestId) return undefined;
+    if (!selectedPlan) return;
+    const pendingPayment = loadPendingSubscriptionPayment(user, selectedPlan.id);
+    if (!pendingPayment?.checkoutRequestId) return;
+
+    setCheckoutRequestId(pendingPayment.checkoutRequestId);
+    setMpesaPhone(pendingPayment.phoneNumber || user?.phone || '');
+    setPaymentStatus(pendingPayment.message || 'You have a pending M-Pesa payment. Check status after completing the prompt on your phone.');
+    setStatusPollingPaused(Boolean(pendingPayment.statusPollingPaused));
+    if (pendingPayment.payeeAccount) {
+      setPayeeAccount(pendingPayment.payeeAccount);
+    }
+  }, [selectedPlan, user]);
+
+  useEffect(() => {
+    if (!checkoutRequestId || statusPollingPaused) return undefined;
 
     const timer = setInterval(() => {
       checkPaymentStatus(checkoutRequestId, { silent: true });
     }, 6000);
 
     return () => clearInterval(timer);
-  }, [checkoutRequestId]);
+  }, [checkoutRequestId, statusPollingPaused]);
 
   if (!selectedPlan) {
     return (
@@ -97,7 +138,7 @@ const SellerPremiumPayment = () => {
     );
   }
 
-  if (!profile) return null;
+  if (requiresPremiumVerification && !profile) return null;
 
   const activatePlan = async () => {
     if (!mpesaPhone.trim()) {
@@ -114,8 +155,19 @@ const SellerPremiumPayment = () => {
       });
 
       if (result?.checkoutRequestId) {
+        if (result?.payeeAccount) {
+          setPayeeAccount(result.payeeAccount);
+        }
         setCheckoutRequestId(result.checkoutRequestId);
+        setStatusPollingPaused(false);
         setPaymentStatus('STK Push sent. Enter your M-Pesa PIN on your phone to complete payment.');
+        savePendingSubscriptionPayment(user, selectedPlan.id, {
+          checkoutRequestId: result.checkoutRequestId,
+          phoneNumber: mpesaPhone.trim(),
+          status: result?.status || 'pending',
+          message: 'STK Push sent. Enter your M-Pesa PIN on your phone to complete payment.',
+          payeeAccount: result?.payeeAccount,
+        });
         toast.success('M-Pesa STK Push sent to your phone');
       } else {
         setPaymentStatus(result?.message || 'M-Pesa payment request sent');
@@ -125,6 +177,14 @@ const SellerPremiumPayment = () => {
     } finally {
       setActivating(false);
     }
+  };
+
+  const clearPendingPayment = () => {
+    clearPendingSubscriptionPayment(user, selectedPlan.id);
+    setCheckoutRequestId('');
+    setPaymentStatus('');
+    setStatusPollingPaused(false);
+    toast.success('Pending subscription payment cleared');
   };
 
   return (
@@ -141,15 +201,45 @@ const SellerPremiumPayment = () => {
             </p>
           </div>
 
-          <div className="mt-4 rounded-lg bg-white border border-gray-200 p-4">
-            <h2 className="font-semibold text-[#111827] mb-2">Verified Business Information</h2>
-            <ul className="space-y-1 text-sm text-[#374151]">
-              <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> Storefront: {profile.storefrontName}</li>
-              <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> Registered Name: {profile.governmentBusinessName}</li>
-              <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> Email: {profile.businessEmail}</li>
-              <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> License: {profile.licenseFileName}</li>
-            </ul>
+          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+            <div className="flex items-start gap-3">
+              <FaBuilding className="mt-1 text-[#F97316]" />
+              <div>
+                <h2 className="font-semibold text-[#111827]">Subscription payee account</h2>
+                <p className="mt-1 text-sm text-[#374151]">
+                  Your subscription payment goes to <span className="font-semibold">{payeeAccount?.name || 'Lango Market Pulse'}</span>.
+                </p>
+                {(payeeAccount?.mpesaShortCode || payeeAccount?.accountReference) && (
+                  <p className="mt-1 text-xs text-[#6B7280]">
+                    {payeeAccount?.mpesaShortCode ? `M-Pesa business account: ${payeeAccount.mpesaShortCode}` : ''}
+                    {payeeAccount?.mpesaShortCode && payeeAccount?.accountReference ? ' | ' : ''}
+                    {payeeAccount?.accountReference ? `Reference: ${payeeAccount.accountReference}` : ''}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
+
+          {profile && (
+            <div className="mt-4 rounded-lg bg-white border border-gray-200 p-4">
+              <h2 className="font-semibold text-[#111827] mb-2">Verified Business Information</h2>
+              <ul className="space-y-1 text-sm text-[#374151]">
+                <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> Storefront: {profile.storefrontName}</li>
+                <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> Registered Name: {profile.governmentBusinessName}</li>
+                <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> Email: {profile.businessEmail}</li>
+                <li className="inline-flex items-center gap-2"><FaCheckCircle className="text-[#16A34A]" /> License: {profile.licenseFileName}</li>
+              </ul>
+            </div>
+          )}
+
+          {checkoutRequestId && (
+            <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+              <p className="font-semibold">Pending M-Pesa checkout</p>
+              <p className="mt-1">
+                Request #{String(checkoutRequestId).slice(-10)} is saved on this device. Complete the STK prompt, then use I Have Paid to activate the plan.
+              </p>
+            </div>
+          )}
 
           <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
             <label className="block text-sm font-semibold text-[#111827]" htmlFor="mpesaPhone">
@@ -197,6 +287,17 @@ const SellerPremiumPayment = () => {
               >
                 <FaSyncAlt className={checking ? 'animate-spin' : ''} />
                 {checking ? 'Checking...' : 'I Have Paid'}
+              </button>
+            )}
+
+            {checkoutRequestId && (
+              <button
+                type="button"
+                onClick={clearPendingPayment}
+                disabled={activating || checking}
+                className="rounded-lg border border-red-200 bg-white px-5 py-2.5 font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+              >
+                Clear Pending
               </button>
             )}
           </div>

@@ -7,6 +7,42 @@ const participantSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     weightKg: { type: Number, required: true, min: 0 },
     share: { type: Number, required: true, min: 0 },
+    paymentStatus: {
+      type: String,
+      enum: ['unpaid', 'pending', 'paid', 'failed', 'refunded'],
+      default: 'unpaid',
+      index: true,
+    },
+    paymentMethod: {
+      type: String,
+      enum: ['mpesa', 'cash', 'wallet', 'bank_transfer', 'card'],
+      default: 'mpesa',
+    },
+    paymentReference: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+    },
+    paymentPhone: {
+      type: String,
+      trim: true,
+      maxlength: 32,
+    },
+    paymentAmount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    paidAt: Date,
+    paymentConfirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    paymentNotes: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+    },
     joinedAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -34,6 +70,22 @@ const GroupTripSchema = new mongoose.Schema(
     destination: {
       lat: { type: Number, required: true },
       lng: { type: Number, required: true },
+    },
+    routeCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 24,
+      index: true,
+    },
+    routeLabel: {
+      type: String,
+      trim: true,
+      maxlength: 160,
+    },
+    stops: {
+      type: [String],
+      default: [],
     },
     distanceKm: { type: Number, required: true, min: 0 },
     baseFare: { type: Number, required: true, min: 0 },

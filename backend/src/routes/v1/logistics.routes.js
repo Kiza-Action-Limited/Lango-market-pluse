@@ -56,17 +56,28 @@ router.post(
   uploadDocuments.fields([
     { name: 'nationalIdImage', maxCount: 1 },
     { name: 'businessPermitImage', maxCount: 1 },
+    { name: 'driverLicenseImage', maxCount: 1 },
+    { name: 'vehicleLogbookImage', maxCount: 1 },
+    { name: 'insuranceCertificateImage', maxCount: 1 },
+    { name: 'kraPinCertificateImage', maxCount: 1 },
   ]),
   handleUploadError,
   [
     body('driverMode').optional().isIn(['owner_operator', 'hired_driver']),
+    body('businessName').optional({ checkFalsy: true }).isString().trim().isLength({ max: 120 }),
+    body('baseHub').optional({ checkFalsy: true }).isString().trim().isLength({ max: 120 }),
+    body('locationHub').optional({ checkFalsy: true }).isString().trim().isLength({ max: 120 }),
+    body('operatingAddress').optional({ checkFalsy: true }).isString().trim().isLength({ max: 240 }),
+    body('serviceAreas').optional({ checkFalsy: true }).isString().trim().isLength({ max: 500 }),
+    body('vehicleType').optional({ checkFalsy: true }).isString().trim().isLength({ max: 80 }),
+    body('fleetSize').optional({ checkFalsy: true }).isInt({ min: 1, max: 500 }),
     body('vehiclePlate').notEmpty().withMessage('vehiclePlate is required'),
     body('cargoCapacityKg').isFloat({ min: 1 }).withMessage('cargoCapacityKg must be greater than 0'),
-    body('documentType').isIn(['national_id', 'business_permit']).withMessage('Invalid documentType'),
+    body('documentType').isIn(['national_id', 'business_permit', 'driver_license', 'vehicle_logbook', 'insurance_certificate', 'kra_pin_certificate', 'tax_certificate', 'other']).withMessage('Invalid documentType'),
     body('documentNumber').notEmpty().withMessage('documentNumber is required'),
     body('fleetOwnerId').optional().isMongoId(),
-    body('gpsLat').optional().isFloat(),
-    body('gpsLng').optional().isFloat(),
+    body('gpsLat').isFloat({ min: -90, max: 90 }).withMessage('GPS latitude is required'),
+    body('gpsLng').isFloat({ min: -180, max: 180 }).withMessage('GPS longitude is required'),
   ],
   validate,
   ctrl.applyAsLogistics
@@ -74,6 +85,22 @@ router.post(
 
 router.get('/me/application', ctrl.getMyLogisticsApplication);
 router.get('/my-application', ctrl.getMyLogisticsApplication);
+router.get(
+  '/dashboard',
+  authorize('admin', 'logistics'),
+  [
+    query('limit').optional().isInt({ min: 20, max: 150 }),
+  ],
+  validate,
+  ctrl.getLogisticsDashboard
+);
+
+router.get(
+  '/operations/overview',
+  authorize('admin', 'logistics'),
+  validate,
+  ctrl.getOperationsOverview
+);
 
 // ─── GPS & Location Tracking ───────────────────────────────────────────────────
 router.post(
@@ -112,6 +139,18 @@ router.get(
   ctrl.getNearbyDrivers
 );
 
+router.get(
+  ['/providers', '/providers/verified', '/verified-providers'],
+  authorize('admin', 'seller', 'farmer', 'buyer', 'logistics', 'wholesaler', 'manufacturer', 'retailer'),
+  [
+    query('limit').optional().isInt({ min: 1, max: 100 }),
+    query('lat').optional().isFloat({ min: -90, max: 90 }),
+    query('lng').optional().isFloat({ min: -180, max: 180 }),
+  ],
+  validate,
+  ctrl.getVerifiedProviders
+);
+
 router.put(
   ['/location', '/driver/location'],
   authorize('logistics'),
@@ -127,7 +166,7 @@ router.put(
 
 router.get(
   '/:id/map',
-  authorize('admin', 'logistics', 'farmer', 'wholesaler', 'manufacturer', 'retailer'),
+  authorize('admin', 'logistics', 'buyer', 'seller', 'farmer', 'wholesaler', 'manufacturer', 'retailer'),
   [
     param('id').isMongoId(),
   ],
@@ -210,8 +249,8 @@ router.post(
 router
   .route('/')
   .post(
-    authorize('admin', 'wholesaler', 'manufacturer', 'farmer'),
-    subscriptionGate(['growth', 'mizigo']),
+    authorize('admin', 'seller', 'wholesaler', 'manufacturer', 'farmer'),
+    subscriptionGate('growth'),
     [
       body('orderId').isMongoId().withMessage('Valid order ID required.'),
       body('carrier').optional().isIn(['solo_owner_operator', 'fleet_managed', 'third_party', 'other']),
@@ -233,7 +272,7 @@ router
   )
   .get(
     authorize('admin', 'logistics'),
-    subscriptionGate(['growth', 'mizigo']),
+    subscriptionGate('growth'),
     [
       query('page').optional().isInt({ min: 1 }),
       query('limit').optional().isInt({ min: 1, max: 100 }),
@@ -250,7 +289,7 @@ router
 router.get(
   '/stats/delivery',
   authorize('admin', 'logistics'),
-  subscriptionGate(['growth', 'mizigo']),
+  subscriptionGate('growth'),
   [
     query('startDate').optional().isISO8601(),
     query('endDate').optional().isISO8601(),
@@ -260,9 +299,63 @@ router.get(
 );
 
 // ─── Group Trips / Shared Logistics ───────────────────────────────────────────
+router.get(
+  '/group-trip/routes',
+  authorize('admin', 'logistics', 'buyer', 'seller', 'farmer', 'wholesaler', 'retailer', 'manufacturer'),
+  [
+    query('includeInactive').optional().isBoolean(),
+  ],
+  validate,
+  ctrl.getGroupTripRoutes
+);
+
+router.post(
+  '/group-trip/routes',
+  authorize('admin'),
+  [
+    body('label').optional({ checkFalsy: true }).isString().trim().isLength({ min: 3, max: 120 }),
+    body('originName').isString().trim().isLength({ min: 2, max: 80 }),
+    body('destinationName').isString().trim().isLength({ min: 2, max: 80 }),
+    body('originLat').isFloat({ min: -90, max: 90 }),
+    body('originLng').isFloat({ min: -180, max: 180 }),
+    body('destinationLat').isFloat({ min: -90, max: 90 }),
+    body('destinationLng').isFloat({ min: -180, max: 180 }),
+    body('cargoType').optional({ checkFalsy: true }).isString().trim().isLength({ max: 120 }),
+    body('routeCode').optional({ checkFalsy: true }).isString().trim().isLength({ max: 24 }),
+    body('stops').optional({ checkFalsy: true }).custom((value) => Array.isArray(value) || typeof value === 'string').withMessage('Stops must be an array or comma-separated string'),
+  ],
+  validate,
+  ctrl.createGroupTripRoute
+);
+
+router.delete(
+  '/group-trip/routes/:routeId',
+  authorize('admin'),
+  [
+    param('routeId').isString().trim().notEmpty(),
+  ],
+  validate,
+  ctrl.deleteGroupTripRoute
+);
+
+router.get(
+  '/group-trip/open',
+  authorize('admin', 'logistics', 'buyer', 'seller', 'farmer', 'wholesaler', 'retailer', 'manufacturer'),
+  [
+    query('originLat').optional().isFloat({ min: -90, max: 90 }),
+    query('originLng').optional().isFloat({ min: -180, max: 180 }),
+    query('destinationLat').optional().isFloat({ min: -90, max: 90 }),
+    query('destinationLng').optional().isFloat({ min: -180, max: 180 }),
+    query('maxDistanceKm').optional().isFloat({ min: 1, max: 500 }),
+    query('limit').optional().isInt({ min: 1, max: 50 }),
+  ],
+  validate,
+  ctrl.getOpenGroupTrips
+);
+
 router.post(
   '/group-trip',
-  authorize('admin', 'logistics', 'wholesaler', 'manufacturer', 'farmer'),
+  authorize('admin', 'logistics', 'seller', 'wholesaler', 'retailer', 'manufacturer', 'farmer'),
   [
     body('originLat').isFloat({ min: -90, max: 90 }),
     body('originLng').isFloat({ min: -180, max: 180 }),
@@ -271,6 +364,9 @@ router.post(
     body('maxCapacityKg').optional().isFloat({ min: 100 }),
     body('deadlineHours').optional().isInt({ min: 1, max: 24 }),
     body('cargoType').optional().isString(),
+    body('routeCode').optional({ checkFalsy: true }).isString().trim().isLength({ max: 24 }),
+    body('routeLabel').optional({ checkFalsy: true }).isString().trim().isLength({ max: 160 }),
+    body('stops').optional({ checkFalsy: true }).custom((value) => Array.isArray(value) || typeof value === 'string').withMessage('Stops must be an array or comma-separated string'),
   ],
   validate,
   ctrl.createGroupTrip
@@ -278,7 +374,7 @@ router.post(
 
 router.post(
   '/group-trip/join',
-  authorize('admin', 'logistics', 'wholesaler', 'retailer', 'manufacturer', 'farmer'),
+  authorize('admin', 'logistics', 'buyer', 'seller', 'wholesaler', 'retailer', 'manufacturer', 'farmer'),
   [
     body('groupTripId').notEmpty().withMessage('Group trip ID required'),
     body('weightKg').isFloat({ min: 1 }).withMessage('Weight in kg required'),
@@ -290,6 +386,23 @@ router.post(
 // ─────────────────────────────────────────────────────────────────────────────
 // BULK UPDATE (admin only)
 // ─────────────────────────────────────────────────────────────────────────────
+
+router.post(
+  '/group-trip/:tripId/payment',
+  authorize('admin', 'logistics', 'buyer', 'seller', 'wholesaler', 'retailer', 'manufacturer', 'farmer'),
+  [
+    param('tripId').isString().trim().notEmpty(),
+    body('participantUserId').optional({ checkFalsy: true }).isMongoId(),
+    body('paymentStatus').optional({ checkFalsy: true }).isIn(['unpaid', 'pending', 'paid', 'failed', 'refunded']),
+    body('paymentMethod').optional({ checkFalsy: true }).isIn(['mpesa', 'cash', 'wallet', 'bank_transfer', 'card']),
+    body('paymentReference').optional({ checkFalsy: true }).isString().trim().isLength({ max: 120 }),
+    body('paymentPhone').optional({ checkFalsy: true }).isString().trim().isLength({ max: 32 }),
+    body('amount').optional({ checkFalsy: true }).isFloat({ min: 0 }),
+    body('notes').optional({ checkFalsy: true }).isString().trim().isLength({ max: 500 }),
+  ],
+  validate,
+  ctrl.recordGroupTripPayment
+);
 
 router.post(
   '/bulk-update',
@@ -353,6 +466,13 @@ router.get(
 // SINGLE RECORD ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
 
+router.get(
+  '/order/:orderId',
+  param('orderId').isMongoId(),
+  validate,
+  ctrl.getLogisticsByOrder
+);
+
 router
   .route('/:id')
   .get(
@@ -360,13 +480,6 @@ router
     validate,
     ctrl.getLogisticsById
   );
-
-router.get(
-  '/order/:orderId',
-  param('orderId').isMongoId(),
-  validate,
-  ctrl.getLogisticsByOrder
-);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STATUS UPDATE WITH GPS VERIFICATION
@@ -408,8 +521,7 @@ router.put(
 
 router.put(
   '/:id/assign-driver',
-  authorize('admin', 'logistics'),
-  subscriptionGate('mizigo'),
+  authorize('admin', 'logistics', 'seller', 'farmer', 'wholesaler', 'manufacturer', 'retailer'),
   [
     param('id').isMongoId(),
     body('driverId')
@@ -456,7 +568,7 @@ router.put(
 
 router.post(
   '/:id/qr-scan',
-  authorize('admin', 'logistics', 'buyer', 'farmer', 'wholesaler', 'manufacturer', 'retailer'),
+  authorize('admin', 'logistics', 'buyer', 'seller', 'farmer', 'wholesaler', 'manufacturer', 'retailer'),
   [
     param('id').isMongoId(),
     body('step').optional().isIn(['pickup', 'delivery']).withMessage('step must be "pickup" or "delivery".'),

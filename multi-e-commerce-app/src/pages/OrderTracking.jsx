@@ -1,45 +1,114 @@
 // src/pages/OrderTracking.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   FaCheckCircle, FaTruck, FaBox, FaHourglassHalf, FaMapMarkerAlt, 
-  FaClock, FaPhone, FaBrain, FaArrowLeft, FaCreditCard, FaMobileAlt, FaSyncAlt
+  FaClock, FaPhone, FaBrain, FaArrowLeft, FaCreditCard, FaMobileAlt, FaSyncAlt,
+  FaShieldAlt, FaExclamationTriangle, FaMoneyBillWave, FaStore, FaRoute,
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import { orderService } from '../services/orderService';
 import { paymentService } from '../services/paymentService';
+import { logisticsService } from '../services/logisticsService';
 import { normalizeOrder, normalizeTracking } from '../utils/orderAdapter';
+import LogisticsEscrowFlow from '../components/logistics/LogisticsEscrowFlow';
+import QrHandshakePanel, { QrAuditTrail, QrTokenStatus } from '../components/logistics/QrHandshakePanel';
+
+const LIVE_GPS_ORDER_STATUSES = new Set([
+  'processing',
+  'payment_escrowed',
+  'FUNDS_HELD',
+  'shipped',
+  'dispatched',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'delivered',
+]);
+
+const LIVE_GPS_LOGISTICS_STATUSES = new Set([
+  'pending',
+  'driver_assigned',
+  'en_route_to_pickup',
+  'picked_up',
+  'in_transit',
+  'out_for_delivery',
+  'delivered',
+]);
+
+const hasCoordinatePair = (coords) => (
+  Number.isFinite(Number(coords?.lat)) && Number.isFinite(Number(coords?.lng))
+);
+
+const buildGoogleMapsSearchUrl = (coords) => (
+  hasCoordinatePair(coords)
+    ? `https://www.google.com/maps/search/?api=1&query=${coords.lat},${coords.lng}`
+    : null
+);
+
+const buildGoogleMapsEmbedUrl = (coords) => (
+  hasCoordinatePair(coords)
+    ? `https://maps.google.com/maps?q=${coords.lat},${coords.lng}&z=13&output=embed`
+    : null
+);
 
 const OrderTracking = () => {
   const { id } = useParams();
   const [order, setOrder] = useState(null);
   const [tracking, setTracking] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [liveRefreshing, setLiveRefreshing] = useState(false);
+  const [lastGpsRefreshAt, setLastGpsRefreshAt] = useState('');
   const [mpesaPhone, setMpesaPhone] = useState('');
   const [checkoutRequestId, setCheckoutRequestId] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [sendingPayment, setSendingPayment] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
+  const [actionLoading, setActionLoading] = useState('');
+  const [qrState, setQrState] = useState(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrScanning, setQrScanning] = useState(false);
 
-  useEffect(() => {
-    fetchOrderDetails();
-  }, [id]);
+  const applyTrackingPayload = useCallback((payload) => {
+    const normalizedOrder = normalizeOrder({
+      ...(payload.order || payload),
+      escrow: payload.escrow || payload.order?.escrow,
+      logistics: payload.logistics || payload.order?.logistics,
+    });
+    const normalizedTracking = normalizeTracking({
+      ...payload,
+      liveTracking: payload.liveTracking || payload.logistics?.liveTracking,
+      timeline: payload.timeline || payload.order?.timeline || [],
+      logistics: payload.logistics,
+      escrow: payload.escrow,
+    });
 
-  const fetchOrderDetails = async () => {
+    setOrder(normalizedOrder);
+    setTracking(normalizedTracking);
+    setMpesaPhone((previous) => previous || normalizedOrder.shippingAddress?.phone || '');
+
+    return normalizedOrder;
+  }, []);
+
+  const fetchOrderDetails = useCallback(async ({ silent = false, live = false, showError = false } = {}) => {
+    if (!silent) setLoading(true);
+    if (live) setLiveRefreshing(true);
+
     try {
-      const response = await orderService.getById(id);
-      const normalizedOrder = normalizeOrder(response.data || response.order || response);
-      setOrder(normalizedOrder);
-      setTracking(normalizeTracking(normalizedOrder));
-      setMpesaPhone((previous) => previous || normalizedOrder.shippingAddress?.phone || '');
+      const response = live ? await orderService.getLiveTracking(id) : await orderService.getTracking(id);
+      const payload = response.data || response;
+      const normalizedOrder = applyTrackingPayload(payload);
+      setLastGpsRefreshAt(new Date().toISOString());
+      return normalizedOrder;
     } catch (error) {
       console.error('Error fetching order details:', error);
-      toast.error('Failed to load order details');
+      if (!silent || showError) toast.error('Failed to load order details');
+      return null;
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
+      if (live) setLiveRefreshing(false);
     }
-  };
+  }, [applyTrackingPayload, id]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -75,12 +144,110 @@ const OrderTracking = () => {
 
   const isAwaitingPayment = (status) => ['pending', 'pending_payment', 'AWAITING_PAYMENT'].includes(status);
 
+  useEffect(() => {
+    fetchOrderDetails();
+  }, [fetchOrderDetails]);
+
+  const logisticsIdForQr = tracking?.logistics?._id || tracking?.logistics?.id || order?.logistics?._id || order?.logistics?.id;
+
+  const fetchQrState = useCallback(async (logisticsId = logisticsIdForQr) => {
+    if (!logisticsId) {
+      setQrState(null);
+      return null;
+    }
+    setQrLoading(true);
+    try {
+      const result = await logisticsService.listTripQrTokens(logisticsId);
+      setQrState(result);
+      return result;
+    } catch (error) {
+      console.error('Unable to load QR state:', error);
+      return null;
+    } finally {
+      setQrLoading(false);
+    }
+  }, [logisticsIdForQr]);
+
+  useEffect(() => {
+    fetchQrState();
+  }, [fetchQrState]);
+
+  useEffect(() => {
+    if (!order || isAwaitingPayment(order.status)) return undefined;
+
+    const logisticsStatus = tracking?.logistics?.status || order.logistics?.status;
+    const shouldPoll = LIVE_GPS_ORDER_STATUSES.has(order.status) ||
+      LIVE_GPS_LOGISTICS_STATUSES.has(logisticsStatus);
+
+    if (!shouldPoll) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== 'hidden') {
+        fetchOrderDetails({ silent: true, live: true });
+      }
+    }, 15000);
+
+    return () => window.clearInterval(intervalId);
+  }, [fetchOrderDetails, order, tracking?.logistics?.status]);
+
   const refreshOrderAfterPayment = async () => {
-    const response = await orderService.getById(id);
-    const normalizedOrder = normalizeOrder(response.data || response.order || response);
-    setOrder(normalizedOrder);
-    setTracking(normalizeTracking(normalizedOrder));
-    return normalizedOrder;
+    const response = await orderService.getTracking(id);
+    const payload = response.data || response;
+    setLastGpsRefreshAt(new Date().toISOString());
+    return applyTrackingPayload(payload);
+  };
+
+  const refreshLiveGps = async () => {
+    const refreshed = await fetchOrderDetails({ silent: true, live: true, showError: true });
+    if (refreshed) toast.success('Live GPS refreshed');
+  };
+
+  const confirmDelivery = async () => {
+    setActionLoading('confirm');
+    try {
+      await orderService.confirmDelivery(order.id);
+      await refreshOrderAfterPayment();
+      toast.success('Delivery confirmed. Escrow payout has been released to wallets.');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message || 'Unable to confirm delivery');
+    } finally {
+      setActionLoading('');
+    }
+  };
+
+  const submitBuyerDeliveryQr = async ({ token, gpsCoords }) => {
+    if (!logisticsIdForQr) throw new Error('Delivery logistics record is not ready yet.');
+    setQrScanning(true);
+    try {
+      const result = await logisticsService.scanDelivery(logisticsIdForQr, { token, gpsCoords });
+      await Promise.all([
+        fetchOrderDetails({ silent: true, live: true }),
+        fetchQrState(logisticsIdForQr),
+      ]);
+      toast.success('Delivery QR confirmed with GPS proof');
+      return result;
+    } finally {
+      setQrScanning(false);
+    }
+  };
+
+  const openDispute = async () => {
+    const reason = window.prompt('What is the issue with this order?', 'Delivery or product issue');
+    if (!reason) return;
+
+    setActionLoading('dispute');
+    try {
+      await orderService.raiseDispute(order.id, {
+        reason,
+        description: reason,
+      });
+      await refreshOrderAfterPayment();
+      toast.success('Dispute opened. Escrow is frozen for review.');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message || 'Unable to open dispute');
+    } finally {
+      setActionLoading('');
+    }
   };
 
   const sendMpesaPrompt = async () => {
@@ -165,7 +332,7 @@ const OrderTracking = () => {
             <div className="text-6xl mb-4">🔍</div>
             <h2 className="text-2xl font-bold text-[#F97316] mb-4">Order Not Found</h2>
             <p className="text-[#6B7280] mb-6">The order you're looking for doesn't exist or has been removed.</p>
-            <Link to="/orders" className="inline-block px-6 py-3 bg-[#F97316] text-white rounded-lg font-semibold hover:bg-[#F97316]/90 transition-colors">
+            <Link to="/buyer/orders" className="inline-block px-6 py-3 bg-[#F97316] text-white rounded-lg font-semibold hover:bg-[#F97316]/90 transition-colors">
               View My Orders
             </Link>
           </div>
@@ -176,6 +343,14 @@ const OrderTracking = () => {
 
   const currentStep = getStatusStep(order.status);
   const awaitingPayment = isAwaitingPayment(order.status);
+  const escrow = tracking?.escrow || order.escrow;
+  const logistics = tracking?.logistics || order.logistics;
+  const seller = tracking?.seller || order.seller;
+  const escrowStatus = escrow?.status || escrow?.escrowStatus || 'AWAITING_PAYMENT';
+  const releaseDate = escrow?.autoReleaseAt || escrow?.expectedReleaseDate || order.escrowReleaseDate;
+  const releaseHours = releaseDate ? Math.max(0, Math.ceil((new Date(releaseDate).getTime() - Date.now()) / 3600000)) : null;
+  const canConfirmDelivery = ['delivered', 'DELIVERED'].includes(order.status) && !['RELEASED', 'completed'].includes(order.status);
+  const canDispute = ['FUNDS_HELD', 'IN_TRANSIT', 'DELIVERED', 'payment_escrowed', 'processing', 'dispatched', 'delivered'].includes(order.status);
   const steps = [
     { label: 'Order Placed', icon: FaBox, status: 'pending', description: 'Your order has been received' },
     { label: 'Processing', icon: FaHourglassHalf, status: 'processing', description: 'Seller is preparing your order' },
@@ -188,6 +363,214 @@ const OrderTracking = () => {
     if (['shipped', 'dispatched', 'IN_TRANSIT'].includes(order.status)) return 'Estimated: 2-5 business days';
     if (['processing', 'payment_escrowed', 'FUNDS_HELD'].includes(order.status)) return 'Estimated: 3-7 business days';
     return 'Processing will begin shortly';
+  };
+
+  const formatTrackingDate = (value) => (value ? new Date(value).toLocaleString() : 'Pending');
+
+  const lastSellerUpdate = tracking?.sellerTracking?.slice(-1)?.[0];
+  const lastLogisticsUpdate = tracking?.logisticsTracking?.slice(-1)?.[0];
+  const liveTracking = tracking?.liveTracking || logistics?.liveTracking || {};
+  const driverCoords = liveTracking.driver || logistics?.gpsTracking?.current || logistics?.driver?.logisticsProfile?.currentLocation || null;
+  const deliveryCoords = liveTracking.delivery || logistics?.shippingAddress || null;
+  const liveGpsActive = hasCoordinatePair(driverCoords);
+  const mapEmbedUrl = liveTracking.embedUrl || buildGoogleMapsEmbedUrl(driverCoords) || buildGoogleMapsEmbedUrl(deliveryCoords);
+  const mapOpenUrl = liveTracking.googleMapsUrl || buildGoogleMapsSearchUrl(driverCoords) || buildGoogleMapsSearchUrl(deliveryCoords);
+  const lastGpsUpdate = liveTracking.lastUpdate || driverCoords?.lastUpdate || driverCoords?.updatedAt || lastGpsRefreshAt || lastLogisticsUpdate?.timestamp;
+
+  const FulfillmentOverview = () => (
+    <section className="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-md">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase text-[#F97316]">Seller + logistics tracking</p>
+          <h2 className="mt-1 text-xl font-bold text-[#111827]">Fulfillment Overview</h2>
+          <p className="mt-2 text-sm text-[#6B7280]">
+            Seller preparation and logistics movement are combined here so the buyer can follow the full chain.
+          </p>
+        </div>
+        <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-700">
+          {logistics?.trackingNumber || logistics?.bookingReference || 'Tracking pending'}
+        </span>
+      </div>
+
+      {tracking?.milestones?.length > 0 && (
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          {tracking.milestones.map((milestone) => (
+            <div key={milestone.key || milestone.label} className="rounded-lg border border-gray-200 p-3">
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${milestone.complete ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                  <FaCheckCircle />
+                </span>
+                <p className="text-sm font-semibold text-[#111827]">{milestone.label}</p>
+              </div>
+              <p className="mt-2 text-xs uppercase text-gray-500">{milestone.source}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex items-center gap-2">
+            <FaStore className="text-[#F97316]" />
+            <h3 className="font-semibold text-[#111827]">Seller Progress</h3>
+          </div>
+          <div className="mt-4 space-y-2 text-sm">
+            <p className="flex justify-between gap-3">
+              <span className="text-[#6B7280]">Seller</span>
+              <span className="text-right font-semibold text-[#111827]">{seller?.name || seller?.businessName || seller?.fullName || 'Assigned seller'}</span>
+            </p>
+            <p className="flex justify-between gap-3">
+              <span className="text-[#6B7280]">Order status</span>
+              <span className="text-right font-semibold capitalize text-[#111827]">{String(order.status).replace(/_/g, ' ')}</span>
+            </p>
+            <p className="flex justify-between gap-3">
+              <span className="text-[#6B7280]">Last update</span>
+              <span className="text-right font-semibold text-[#111827]">{formatTrackingDate(lastSellerUpdate?.timestamp || order.updatedAt)}</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex items-center gap-2">
+            <FaRoute className="text-[#16A34A]" />
+            <h3 className="font-semibold text-[#111827]">Logistics Progress</h3>
+          </div>
+          <div className="mt-4 space-y-2 text-sm">
+            <p className="flex justify-between gap-3">
+              <span className="text-[#6B7280]">Driver</span>
+              <span className="text-right font-semibold text-[#111827]">{logistics?.driverName || logistics?.driver?.fullName || logistics?.driver?.name || 'Not assigned yet'}</span>
+            </p>
+            <p className="flex justify-between gap-3">
+              <span className="text-[#6B7280]">Location</span>
+              <span className="text-right font-semibold text-[#111827]">{lastLogisticsUpdate?.location || logistics?.currentLocation || 'Awaiting dispatch'}</span>
+            </p>
+            <p className="flex justify-between gap-3">
+              <span className="text-[#6B7280]">ETA</span>
+              <span className="text-right font-semibold text-[#111827]">{logistics?.estimatedDelivery ? new Date(logistics.estimatedDelivery).toLocaleDateString() : estimatedDelivery()}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const LiveGpsMapPanel = () => (
+    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-md">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase text-[#16A34A]">Google GPS tracking</p>
+          <h2 className="mt-1 text-xl font-bold text-[#111827]">Live Delivery Map</h2>
+          <p className="mt-2 text-sm text-[#6B7280]">
+            Follow seller pickup, driver movement, and delivery destination when logistics shares live GPS.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={refreshLiveGps}
+            disabled={liveRefreshing}
+            className="inline-flex items-center gap-2 rounded-lg border border-[#16A34A] bg-white px-4 py-2 text-sm font-semibold text-[#15803D] hover:bg-[#F0FDF4] disabled:opacity-60"
+          >
+            <FaSyncAlt className={liveRefreshing ? 'animate-spin' : ''} />
+            {liveRefreshing ? 'Refreshing...' : 'Refresh GPS'}
+          </button>
+          {mapOpenUrl && (
+            <a
+              href={mapOpenUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#0B2D55] px-4 py-2 text-sm font-semibold text-white hover:bg-[#123B6D]"
+            >
+              <FaMapMarkerAlt /> Open Google Maps
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+          {mapEmbedUrl ? (
+            <iframe
+              title="Buyer live delivery GPS map"
+              src={mapEmbedUrl}
+              className="h-80 w-full"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          ) : (
+            <div className="flex h-80 items-center justify-center p-6 text-center">
+              <div>
+                <FaRoute className="mx-auto text-3xl text-[#F97316]" />
+                <h3 className="mt-3 font-semibold text-[#111827]">GPS map pending</h3>
+                <p className="mt-1 text-sm text-[#6B7280]">The map appears after the driver or logistics team shares a live GPS location.</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <div className={`rounded-lg border p-4 ${liveGpsActive ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+            <p className={`text-xs font-semibold uppercase ${liveGpsActive ? 'text-green-700' : 'text-amber-700'}`}>
+              {liveGpsActive ? 'Live GPS active' : 'Waiting for live GPS'}
+            </p>
+            <p className="mt-1 text-sm text-[#374151]">
+              {liveGpsActive ? 'Driver location is updating from logistics.' : 'Ask logistics to start live GPS sharing from their dashboard.'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Driver GPS</p>
+            <p className="mt-1 font-semibold text-[#111827]">
+              {liveGpsActive ? `${driverCoords.lat}, ${driverCoords.lng}` : 'Not shared yet'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Delivery GPS</p>
+            <p className="mt-1 font-semibold text-[#111827]">
+              {hasCoordinatePair(deliveryCoords)
+                ? `${deliveryCoords.lat ?? deliveryCoords.gpsLat}, ${deliveryCoords.lng ?? deliveryCoords.gpsLng}`
+                : 'Destination address only'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-semibold uppercase text-gray-500">Last GPS update</p>
+            <p className="mt-1 font-semibold text-[#111827]">{formatTrackingDate(lastGpsUpdate)}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const ReceiverQrConfirmationPanel = () => {
+    if (!logistics) return null;
+
+    const deliveryDone = Boolean(
+      qrState?.deliveryQrConfirmed ||
+      logistics.deliveryQrConfirmed ||
+      logistics.qrScans?.some((scan) => scan.step === 'delivery' && scan.verified !== false)
+    );
+
+    return (
+      <section className="mb-6 space-y-4">
+        <QrHandshakePanel
+          title={deliveryDone ? 'Delivery QR already confirmed' : 'Buyer delivery QR confirmation'}
+          subtitle={deliveryDone
+            ? 'The final receiver handoff is already recorded in the audit trail.'
+            : 'Scan the driver delivery QR at your location. GPS proof is required before escrow can move toward payout.'}
+          defaultStep="delivery"
+          allowedSteps={['delivery']}
+          qrState={qrState}
+          logistics={logistics}
+          loading={qrLoading}
+          scanning={qrScanning}
+          showTokenGallery
+          onScan={submitBuyerDeliveryQr}
+        />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <QrTokenStatus qrState={qrState} logistics={logistics} showImages={false} />
+          <QrAuditTrail scans={qrState?.scanAudit || logistics?.qrScans || []} title="Receiver QR proof trail" />
+        </div>
+      </section>
+    );
   };
 
   const PaymentRequiredCard = () => (
@@ -267,12 +650,85 @@ const OrderTracking = () => {
     </div>
   );
 
+  const EscrowStatusCard = () => (
+    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-md">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <FaShieldAlt className="text-[#16A34A]" />
+            <h2 className="text-xl font-bold text-[#111827]">Escrow Payment Protection</h2>
+          </div>
+          <p className="mt-2 text-sm text-[#6B7280]">
+            Buyer payment is held until delivery is confirmed. Seller and logistics payouts are credited to wallets after release.
+          </p>
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+          ['RELEASED', 'completed'].includes(escrowStatus) ? 'bg-green-100 text-green-800' :
+            escrowStatus === 'DISPUTED' ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'
+        }`}>
+          {String(escrowStatus).replace(/_/g, ' ')}
+        </span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="rounded-lg bg-gray-50 p-3">
+          <p className="text-xs font-semibold uppercase text-gray-500">Held amount</p>
+          <p className="mt-1 font-bold text-[#111827]">{formatCurrency(escrow?.amount || escrow?.escrowAmount || order.total)}</p>
+        </div>
+        <div className="rounded-lg bg-gray-50 p-3">
+          <p className="text-xs font-semibold uppercase text-gray-500">Seller payout</p>
+          <p className="mt-1 font-bold text-[#111827]">{escrow?.sellerPayout ? formatCurrency(escrow.sellerPayout) : 'Pending'}</p>
+        </div>
+        <div className="rounded-lg bg-gray-50 p-3">
+          <p className="text-xs font-semibold uppercase text-gray-500">Logistics payout</p>
+          <p className="mt-1 font-bold text-[#111827]">{escrow?.driverPayout ? formatCurrency(escrow.driverPayout) : 'Pending'}</p>
+        </div>
+        <div className="rounded-lg bg-gray-50 p-3">
+          <p className="text-xs font-semibold uppercase text-gray-500">Release window</p>
+          <p className="mt-1 font-bold text-[#111827]">{releaseHours === null ? 'After delivery' : `${releaseHours}h`}</p>
+        </div>
+      </div>
+
+      {escrowStatus === 'DISPUTED' && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <FaExclamationTriangle className="mr-2 inline" />
+          Escrow is frozen while admin reviews the dispute.
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        {canConfirmDelivery && (
+          <button
+            type="button"
+            onClick={confirmDelivery}
+            disabled={actionLoading === 'confirm'}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-60"
+          >
+            <FaMoneyBillWave />
+            {actionLoading === 'confirm' ? 'Releasing...' : 'Confirm Delivery & Release'}
+          </button>
+        )}
+        {canDispute && escrowStatus !== 'DISPUTED' && !['RELEASED', 'REFUNDED'].includes(escrowStatus) && (
+          <button
+            type="button"
+            onClick={openDispute}
+            disabled={actionLoading === 'dispute'}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+          >
+            <FaExclamationTriangle />
+            {actionLoading === 'dispute' ? 'Freezing...' : 'Open Dispute'}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+
   return (
     <div className="bg-[#F9FAFB] min-h-screen py-8">
       <div className="container mx-auto px-4 max-w-4xl">
         {/* Header with Back Button */}
         <div className="mb-6">
-          <Link to="/orders" className="inline-flex items-center gap-2 text-[#F97316] hover:text-[#FB923C] transition-colors mb-4">
+          <Link to="/buyer/orders" className="inline-flex items-center gap-2 text-[#F97316] hover:text-[#FB923C] transition-colors mb-4">
             <FaArrowLeft size={14} />
             <span className="text-sm font-medium">Back to Orders</span>
           </Link>
@@ -286,6 +742,7 @@ const OrderTracking = () => {
         {awaitingPayment && (
           <>
             <PaymentRequiredCard />
+            <LogisticsEscrowFlow order={order} tracking={tracking} trip={logistics} className="mt-6" />
             <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-md">
               <h2 className="text-xl font-semibold text-[#111827]">Order Summary</h2>
               <div className="mt-4 space-y-3">
@@ -307,6 +764,16 @@ const OrderTracking = () => {
           </>
         )}
         
+        {!awaitingPayment && (
+          <>
+            <FulfillmentOverview />
+            <LiveGpsMapPanel />
+            <ReceiverQrConfirmationPanel />
+            <LogisticsEscrowFlow order={order} tracking={tracking} trip={logistics} className="mb-6" />
+            <EscrowStatusCard />
+          </>
+        )}
+
         {/* Order Status Timeline */}
         {!awaitingPayment && <div className="bg-white rounded-xl shadow-md p-6 mb-6 border-l-4 border-[#F97316]">
           <div className="flex justify-between items-center mb-6">
@@ -377,7 +844,20 @@ const OrderTracking = () => {
                   <div className="w-2 h-2 rounded-full bg-[#F97316] mt-1.5 -ml-[1.1rem]"></div>
                   <div className="flex-1">
                     <div className="flex flex-wrap justify-between items-start gap-2">
-                      <p className="font-semibold text-[#111827] capitalize">{update.status}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-[#111827] capitalize">{String(update.status).replace(/_/g, ' ')}</p>
+                        {update.source && (
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase ${
+                            update.source === 'logistics'
+                              ? 'bg-green-100 text-green-700'
+                              : update.source === 'seller'
+                                ? 'bg-orange-100 text-orange-700'
+                                : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {update.source}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-[#6B7280]">{new Date(update.timestamp).toLocaleString()}</p>
                     </div>
                     {update.location && (

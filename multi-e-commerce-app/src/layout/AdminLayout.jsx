@@ -1,5 +1,5 @@
 // src/layouts/AdminLayout.jsx
-import React, { Suspense } from 'react';
+import React, { Suspense, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   FaTachometerAlt,
@@ -14,9 +14,13 @@ import {
   FaBalanceScale,
   FaUserCircle,
   FaSignOutAlt,
-  FaUser,
   FaIdBadge,
   FaCrown,
+  FaBars,
+  FaAngleDoubleLeft,
+  FaAngleDoubleRight,
+  FaTimes,
+  FaShieldAlt,
 } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/NotificationBell';
@@ -25,22 +29,39 @@ const AdminLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const profileKey = `marketpulse_admin_profile_image_${user?._id || user?.id || 'default'}`;
   const profileImage = localStorage.getItem(profileKey);
 
-  const navItems = [
-    { path: '/admin', label: 'Dashboard', icon: FaTachometerAlt },
-    { path: '/admin/users', label: 'Users', icon: FaUsers },
-    { path: '/admin/subscriptions', label: 'Subscriptions', icon: FaCrown },
-    { path: '/admin/products', label: 'Products', icon: FaBox },
-    { path: '/admin/orders', label: 'Orders', icon: FaShoppingCart },
-    { path: '/admin/analytics', label: 'Analytics', icon: FaChartLine },
-    { path: '/admin/logistics', label: 'Logistics', icon: FaTruck },
-    { path: '/admin/logistics-tools', label: 'Logistics Tools', icon: FaLayerGroup },
-    { path: '/admin/finance-audit', label: 'Finance & Audit', icon: FaBalanceScale },
-    { path: '/admin/profile', label: 'Profile', icon: FaIdBadge },
-    { path: '/admin/categories', label: 'Categories', icon: FaTags },
-    { path: '/admin/contact-queue', label: 'Contact Queue', icon: FaEnvelopeOpenText },
+  const navSections = [
+    {
+      title: 'Command',
+      items: [
+        { path: '/admin/dashboard', label: 'Dashboard', icon: FaTachometerAlt, hint: 'Platform overview' },
+        { path: '/admin/analytics', label: 'Analytics', icon: FaChartLine, hint: 'Revenue and trends' },
+        { path: '/admin/finance-audit', label: 'Finance & Audit', icon: FaBalanceScale, hint: 'Escrow and reports' },
+      ],
+    },
+    {
+      title: 'Marketplace',
+      items: [
+        { path: '/admin/users', label: 'Users', icon: FaUsers, hint: 'KYC and documents' },
+        { path: '/admin/products', label: 'Products', icon: FaBox, hint: 'Active and inactive' },
+        { path: '/admin/orders', label: 'Orders', icon: FaShoppingCart, hint: 'Order operations' },
+        { path: '/admin/categories', label: 'Categories', icon: FaTags, hint: 'Catalog structure' },
+        { path: '/admin/subscriptions', label: 'Subscriptions', icon: FaCrown, hint: 'Seller plans' },
+      ],
+    },
+    {
+      title: 'Operations',
+      items: [
+        { path: '/admin/logistics', label: 'Logistics Hub', icon: FaTruck, hint: 'Trips and GPS' },
+        { path: '/admin/logistics-tools', label: 'Logistics Tools', icon: FaLayerGroup, hint: 'QR and routing' },
+        { path: '/admin/contact-queue', label: 'Contact Queue', icon: FaEnvelopeOpenText, hint: 'Messages and SMS' },
+        { path: '/admin/profile', label: 'Admin Profile', icon: FaIdBadge, hint: 'Account settings' },
+      ],
+    },
   ];
 
   const handleLogout = () => {
@@ -48,92 +69,163 @@ const AdminLayout = () => {
     navigate('/admin');
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <aside className="group fixed inset-y-0 left-0 z-40 hidden w-20 overflow-hidden bg-primary text-white transition-all duration-200 hover:w-64 md:flex md:flex-col">
-        <div className="border-b border-white/15 p-4">
-          <h2 className="flex h-8 items-center justify-center whitespace-nowrap text-xl font-bold group-hover:justify-start">
-            <span className="group-hover:hidden">MP</span>
-            <span className="hidden group-hover:inline">Admin Panel</span>
-          </h2>
-          <p className="mt-1 max-w-0 overflow-hidden whitespace-nowrap text-xs text-white/70 opacity-0 transition-all duration-200 group-hover:max-w-56 group-hover:opacity-100">
-            Lango MarketPulse OS
-          </p>
+  const showSidebarLabels = isSidebarOpen || isMobileSidebarOpen;
+  const sidebarWidthClass = isSidebarOpen ? 'md:w-72' : 'md:w-20';
+  const contentOffsetClass = isSidebarOpen ? 'md:ml-72' : 'md:ml-20';
+  const labelClass = showSidebarLabels ? 'max-w-44 opacity-100' : 'max-w-0 opacity-0';
+  const detailClass = showSidebarLabels ? 'max-w-44 opacity-100' : 'max-w-0 opacity-0';
+  const itemJustifyClass = showSidebarLabels ? 'justify-start' : 'justify-center';
+  const adminName = user?.name || user?.fullName || user?.businessName || 'Admin User';
+
+  const renderNavItem = (item) => {
+    const Icon = item.icon;
+    const isActive = location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+
+    return (
+      <Link
+        key={item.path}
+        to={item.path}
+        title={item.label}
+        onClick={() => setIsMobileSidebarOpen(false)}
+        className={`group/item flex min-h-12 items-center rounded-md px-3 py-2.5 transition ${itemJustifyClass} ${
+              isActive
+                ? 'bg-[#F97316] text-white shadow-sm'
+                : 'text-white hover:bg-white/10 hover:text-white'
+            }`}
+      >
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${isActive ? 'text-white' : 'text-white/80 group-hover/item:text-white'}`}>
+          <Icon className="text-base" />
+        </span>
+        <span className={`ml-3 min-w-0 overflow-hidden transition-all duration-200 ${labelClass}`}>
+          <span className="block truncate text-sm font-semibold">{item.label}</span>
+          <span className={`block truncate text-[11px] ${isActive ? 'text-gray-500' : 'text-gray-400'} transition-all duration-200 ${detailClass}`}>
+            {item.hint}
+          </span>
+        </span>
+      </Link>
+    );
+  };
+
+  const sidebarContent = (
+    <>
+      <div className="border-b border-white/10 p-4">
+        <div className={`flex items-center gap-3 ${showSidebarLabels ? 'justify-between' : 'justify-center'}`}>
+          <Link to="/admin/dashboard" onClick={() => setIsMobileSidebarOpen(false)} className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-[#F97316] text-base font-bold text-white shadow-sm">
+              LM
+            </div>
+            <div className={`min-w-0 overflow-hidden transition-all duration-200 ${labelClass}`}>
+              <p className="truncate text-sm font-bold text-white">Lango Market</p>
+              <p className="truncate text-xs text-white/80">Admin Command</p>
+            </div>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen((current) => !current)}
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/10 text-gray-300 hover:bg-white/10 hover:text-white md:flex"
+            aria-label={isSidebarOpen ? 'Collapse admin sidebar' : 'Expand admin sidebar'}
+            title={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            {isSidebarOpen ? <FaAngleDoubleLeft /> : <FaAngleDoubleRight />}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsMobileSidebarOpen(false)}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/10 text-gray-300 hover:bg-white/10 hover:text-white md:hidden"
+            aria-label="Close admin sidebar"
+          >
+            <FaTimes />
+          </button>
         </div>
 
-        <nav className="mt-4 flex-1 space-y-1 px-3">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                title={item.label}
-                className={`flex items-center justify-center rounded-lg px-3 py-2.5 transition group-hover:justify-start ${
-                  isActive ? 'bg-primary-dark' : 'hover:bg-primary-dark/80'
-                }`}
-              >
-                <Icon className="shrink-0 text-lg group-hover:mr-3" />
-                <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 group-hover:max-w-44 group-hover:opacity-100">
-                  {item.label}
-                </span>
-              </Link>
-            );
-          })}
-          <button
-            onClick={handleLogout}
-            title="Logout"
-            className="mt-2 flex w-full items-center justify-center rounded-lg px-3 py-2.5 text-left transition hover:bg-primary-dark/80 group-hover:justify-start"
-          >
-            <FaSignOutAlt className="shrink-0 text-lg group-hover:mr-3" />
-            <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-200 group-hover:max-w-44 group-hover:opacity-100">
-              Logout
-            </span>
-          </button>
-        </nav>
+        <div className={`mt-4 overflow-hidden rounded-md border border-white/10 bg-white/5 p-3 transition-all duration-200 ${showSidebarLabels ? 'opacity-100' : 'h-0 border-0 p-0 opacity-0'}`}>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase text-white">
+            <FaShieldAlt className="text-white" />
+            Secure Admin
+          </div>
+          <p className="mt-1 text-xs text-gray-400">Live marketplace operations, finance, documents, and logistics.</p>
+        </div>
+      </div>
 
-        <div className="border-t border-white/15 p-4">
-          <div className="mb-3 rounded-lg bg-white/10 p-3">
-            <div className="flex items-center justify-center gap-3 group-hover:justify-start">
-              {profileImage ? (
-                <img src={profileImage} alt="Admin profile" className="h-10 w-10 shrink-0 rounded-full object-cover border border-white/20" />
-              ) : (
-                <FaUserCircle className="shrink-0 text-3xl text-white/90" />
-              )}
-              <div className="min-w-0 max-w-0 overflow-hidden opacity-0 transition-all duration-200 group-hover:max-w-40 group-hover:opacity-100">
-                <p className="truncate text-sm font-semibold">{user?.name || user?.fullName || 'Admin User'}</p>
-                <p className="truncate text-xs text-white/70">{user?.email || 'admin@marketpulse.local'}</p>
+      <nav className="flex-1 overflow-y-auto px-3 py-4">
+        <div className="space-y-5">
+          {navSections.map((section) => (
+            <div key={section.title}>
+              <p className={`mb-2 overflow-hidden px-3 text-[11px] font-bold uppercase tracking-wide text-gray-500 transition-all duration-200 ${labelClass}`}>
+                {section.title}
+              </p>
+              <div className="space-y-1">
+                {section.items.map(renderNavItem)}
               </div>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <Link
-              to="/admin/profile"
-              title="Profile"
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-sm hover:bg-white/10"
-            >
-              <FaUser />
-              <span className="hidden group-hover:inline">Profile</span>
-            </Link>
-            <button
-              onClick={handleLogout}
-              title="Logout"
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#F97316] px-3 py-2 text-sm font-medium hover:bg-[#FB923C]"
-            >
-              <FaSignOutAlt />
-              <span className="hidden group-hover:inline">Logout</span>
-            </button>
-          </div>
+          ))}
         </div>
+      </nav>
+
+      <div className="border-t border-white/10 p-4">
+        <Link
+          to="/admin/profile"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className={`mb-3 flex items-center rounded-md border border-white/10 bg-white/5 p-3 transition hover:bg-white/10 ${itemJustifyClass}`}
+        >
+          {profileImage ? (
+            <img src={profileImage} alt="Admin profile" className="h-10 w-10 shrink-0 rounded-full border border-white/20 object-cover" />
+          ) : (
+            <FaUserCircle className="shrink-0 text-3xl text-gray-300" />
+          )}
+          <div className={`ml-3 min-w-0 overflow-hidden transition-all duration-200 ${labelClass}`}>
+            <p className="truncate text-sm font-semibold text-white">{adminName}</p>
+            <p className="truncate text-xs text-gray-400">{user?.email || 'admin@lango.local'}</p>
+          </div>
+        </Link>
+        <button
+          type="button"
+          onClick={handleLogout}
+          title="Logout"
+          className={`flex w-full items-center rounded-md border border-red-400/20 bg-red-500/10 px-3 py-2.5 text-left text-red-100 transition hover:bg-red-500/20 ${itemJustifyClass}`}
+        >
+          <FaSignOutAlt className="shrink-0 text-base" />
+          <span className={`ml-3 overflow-hidden whitespace-nowrap text-sm font-semibold transition-all duration-200 ${labelClass}`}>
+            Logout
+          </span>
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {isMobileSidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close admin menu overlay"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+        />
+      )}
+
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col overflow-hidden bg-[#0B2D55] text-white shadow-xl transition-transform duration-200 md:z-40 ${sidebarWidthClass} ${
+        isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
+        {sidebarContent}
       </aside>
 
-      <div className="md:ml-20">
-        <header className="fixed left-0 right-0 top-0 z-30 border-b border-gray-200 bg-white/95 backdrop-blur md:left-20">
+      <div className={contentOffsetClass}>
+        <header className={`fixed left-0 right-0 top-0 z-30 border-b border-gray-200 bg-white/95 backdrop-blur transition-all duration-200 ${isSidebarOpen ? 'md:left-72' : 'md:left-20'}`}>
           <div className="flex h-16 items-center justify-between px-4 sm:px-6">
-            <div>
-              <p className="text-sm text-gray-500">Admin Workspace</p>
-              <h1 className="text-lg font-semibold text-[#111827]">Lango MarketPulse</h1>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 md:hidden"
+                aria-label="Open admin sidebar"
+              >
+                <FaBars />
+              </button>
+              <div>
+                <p className="text-sm text-gray-500">Admin Workspace</p>
+                <h1 className="text-lg font-semibold text-[#111827]">Lango MarketPulse</h1>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <NotificationBell />
@@ -144,7 +236,7 @@ const AdminLayout = () => {
                   <FaUserCircle className="text-2xl text-[#6B7280]" />
                 )}
                 <div className="hidden text-right sm:block">
-                  <p className="text-sm font-medium text-[#111827]">Admin</p>
+                  <p className="text-sm font-medium text-[#111827]">{adminName}</p>
                   <p className="text-xs text-gray-500">Administrator</p>
                 </div>
               </Link>

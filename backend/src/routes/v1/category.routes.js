@@ -3,6 +3,7 @@ const router = express.Router();
 
 const {
   getAllCategories,
+  getAdminCategories,
   createCategory,
   updateCategory,
   deleteCategory,
@@ -10,8 +11,12 @@ const {
 } = require('../../controllers/category.controller');
 
 const {
-  protect
+  protect,
+  admin
 } = require('../../middleware/auth');
+
+// ADMIN
+router.get('/admin/manage', protect, admin, getAdminCategories);
 
 // PUBLIC
 router.get('/', getAllCategories);

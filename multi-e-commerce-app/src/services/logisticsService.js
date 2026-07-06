@@ -28,9 +28,44 @@ export const logisticsService = {
     return unwrap(response);
   },
 
+  getDashboard: async (params = {}) => {
+    const response = await api.get('/v1/logistics/dashboard', { params });
+    return unwrap(response);
+  },
+
+  getOperationsOverview: async () => {
+    const response = await api.get('/v1/logistics/operations/overview');
+    return unwrap(response);
+  },
+
+  updateDriverLocation: async (payload) => {
+    const response = await api.put('/v1/logistics/location', payload);
+    return unwrap(response);
+  },
+
+  updateTripLocation: async (logisticsId, payload) => {
+    const response = await api.put(`/v1/logistics/${logisticsId}/location`, payload);
+    return unwrap(response);
+  },
+
+  getMapData: async (logisticsId) => {
+    const response = await api.get(`/v1/logistics/${logisticsId}/map`);
+    return unwrap(response);
+  },
+
   getDriverTrips: async (params = {}) => {
     const response = await api.get('/v1/logistics', { params });
     return response?.data || { data: [], pagination: null };
+  },
+
+  createShipment: async (payload) => {
+    const response = await api.post('/v1/logistics', payload);
+    return unwrap(response);
+  },
+
+  getByOrder: async (orderId) => {
+    const response = await api.get(`/v1/logistics/order/${orderId}`);
+    return unwrap(response);
   },
 
   getNearbyDrivers: async (params = {}) => {
@@ -81,6 +116,11 @@ export const logisticsService = {
     return unwrap(response);
   },
 
+  assignDriver: async (logisticsId, payload = {}) => {
+    const response = await api.put(`/v1/logistics/${logisticsId}/assign-driver`, payload);
+    return unwrap(response);
+  },
+
   scanPickup: async (logisticsId, payload) => {
     const qrPayload = parseQrPayload(payload);
     if (qrPayload.type && String(qrPayload.type).toUpperCase() !== 'PICKUP') {
@@ -120,13 +160,58 @@ export const logisticsService = {
     return response?.data || { logistics: [], pagination: null };
   },
 
+  getAdminLogisticsLive: async (logisticsId) => {
+    const response = await api.get(`/v1/admin/logistics/${logisticsId}/live`);
+    return unwrap(response);
+  },
+
+  adminScanTripQr: async (logisticsId, payload) => {
+    const response = await api.post(`/v1/admin/logistics/${logisticsId}/qr-scan`, payload);
+    return unwrap(response);
+  },
+
+  adminReleaseLogisticsEscrow: async (logisticsId, payload = {}) => {
+    const response = await api.post(`/v1/admin/logistics/${logisticsId}/escrow/release`, payload);
+    return unwrap(response);
+  },
+
+  updateAdminLogisticsTracking: async (logisticsId, payload = {}) => {
+    const response = await api.put(`/v1/admin/logistics/${logisticsId}/tracking`, payload);
+    return unwrap(response);
+  },
+
   createGroupTrip: async (payload) => {
     const response = await api.post('/v1/logistics/group-trip', payload);
     return unwrap(response);
   },
 
+  getOpenGroupTrips: async (params = {}) => {
+    const response = await api.get('/v1/logistics/group-trip/open', { params });
+    return unwrap(response) || [];
+  },
+
+  getGroupTripRoutes: async (params = {}) => {
+    const response = await api.get('/v1/logistics/group-trip/routes', { params });
+    return unwrap(response) || [];
+  },
+
+  createGroupTripRoute: async (payload) => {
+    const response = await api.post('/v1/logistics/group-trip/routes', payload);
+    return unwrap(response);
+  },
+
+  deleteGroupTripRoute: async (routeId) => {
+    const response = await api.delete(`/v1/logistics/group-trip/routes/${encodeURIComponent(routeId)}`);
+    return unwrap(response);
+  },
+
   joinGroupTrip: async (payload) => {
     const response = await api.post('/v1/logistics/group-trip/join', payload);
+    return unwrap(response);
+  },
+
+  recordGroupTripPayment: async (groupTripId, payload = {}) => {
+    const response = await api.post(`/v1/logistics/group-trip/${encodeURIComponent(groupTripId)}/payment`, payload);
     return unwrap(response);
   },
 
@@ -182,6 +267,16 @@ export const logisticsService = {
 
   getQrTokenStats: async () => {
     const response = await api.get('/v1/qr-tokens/stats');
+    return unwrap(response);
+  },
+
+  generateTripQrTokens: async (logisticsId) => {
+    const response = await api.post(`/v1/logistics/${logisticsId}/qr-tokens`);
+    return unwrap(response);
+  },
+
+  listTripQrTokens: async (logisticsId) => {
+    const response = await api.get(`/v1/logistics/${logisticsId}/qr-tokens`);
     return unwrap(response);
   },
 

@@ -3,6 +3,11 @@ const QRToken = require('../../models/QRToken.model');
 const { generateQR } = require('../../utils/qrGenerator');
 const { distanceBetween } = require('../../utils/geofence');
 
+const tokenTtlMinutes = () => {
+  const configured = Number(process.env.QR_TOKEN_TTL_MINUTES || 360);
+  return Number.isFinite(configured) && configured > 0 ? configured : 360;
+};
+
 class QRChainService {
   normalizeToken(rawToken) {
     if (rawToken && typeof rawToken === 'object') {
@@ -28,11 +33,13 @@ class QRChainService {
 
   async createToken(logistics, type, holder) {
     const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + tokenTtlMinutes() * 60 * 1000);
     const payload = {
       token,
       type,
       orderId: logistics.order.toString(),
       logisticsId: logistics._id.toString(),
+      expiresAt: expiresAt.toISOString(),
     };
 
     return QRToken.create({
@@ -42,6 +49,7 @@ class QRChainService {
       logistics: logistics._id,
       holder,
       qrImage: await generateQR(payload),
+      expiresAt,
     });
   }
 

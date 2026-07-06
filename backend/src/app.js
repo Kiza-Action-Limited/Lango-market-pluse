@@ -1,10 +1,8 @@
 require('dotenv').config();
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
-const connectDB = require('./config/db');
 
 // Import routes
 const authRoutes = require('./routes/v1/auth.routes');
@@ -25,11 +23,14 @@ const escrowRoutes = require('./routes/v1/escrow.routes');
 const disputeRoutes = require('./routes/v1/disputes.routes');
 const transactionRoutes = require('./routes/v1/transactions.routes');
 const reviewRoutes = require('./routes/v1/reviews.routes');
+const rfqRoutes = require('./routes/v1/rfqs.routes');
 const qrtokenRoutes = require('./routes/v1/qrtokens.routes');
 const sinkingfundRoutes = require('./routes/v1/sinkingfund.routes');
 const auditRoutes = require('./routes/v1/audit.routes');
+const supportRoutes = require('./routes/v1/support.routes');
 const mpesaWebhookRoutes = require('./routes/webhooks/mpesa.webhook');
 const errorHandler = require('./middleware/errorHandler');
+const requestLogger = require('./middleware/requestLogger');
 
 const app = express();
 
@@ -61,11 +62,12 @@ const corsOptions = {
 };
 
 // Middleware
+app.use(requestLogger);
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // Serve static files (for local uploads if needed)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -78,22 +80,6 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development'
   });
 });
-
-// Database connection
-mongoose.set('strictQuery', false);
-connectDB()
-  .then((connected) => {
-    if (connected) {
-      console.log('MongoDB connected successfully');
-      console.log('Database:', mongoose.connection.name);
-    } else {
-      console.warn('MongoDB is unavailable. Server is starting in fallback mode. Database-backed routes may fail.');
-    }
-  })
-  .catch((err) => {
-    console.error('MongoDB connection error:', err);
-    console.warn(' Continuing without MongoDB. Start MongoDB or set MONGO_URI / MONGODB_URI to a reachable instance.');
-  });
 
 // Route mounts
 console.log(' Mounting routes...');
@@ -120,6 +106,7 @@ app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/wallet', walletRoutes);
 app.use('/api/v1/transactions', transactionRoutes);
 app.use('/api/v1/reviews', reviewRoutes);
+app.use('/api/v1/rfqs', rfqRoutes);
 app.use('/api/v1/groupbuy', groupBuyRoutes);
 app.use('/api/v1/escrow', escrowRoutes);
 app.use('/api/v1/disputes', disputeRoutes);
@@ -130,6 +117,8 @@ app.use('/api/v1/sinking-fund', sinkingfundRoutes);
 app.use('/api/sinking-fund', sinkingfundRoutes);
 app.use('/api/v1/audit', auditRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/v1/support', supportRoutes);
+app.use('/api/support', supportRoutes);
 app.use('/webhooks/mpesa', mpesaWebhookRoutes);
 app.use('/api/mpesa', mpesaWebhookRoutes);
 
@@ -156,12 +145,14 @@ app.get('/api/test', (req, res) => {
       wallet: '/api/v1/wallet',
       transactions: '/api/v1/transactions',
       reviews: '/api/v1/reviews',
+      rfqs: '/api/v1/rfqs',
       groupbuy: '/api/v1/groupbuy',
       escrow: '/api/v1/escrow',
       disputes: '/api/v1/disputes',
       qrTokens: '/api/v1/qr-tokens',
       sinkingFund: '/api/v1/sinking-fund',
       audit: '/api/v1/audit',
+      support: '/api/v1/support',
       webhooks: '/webhooks/mpesa'
     }
   });

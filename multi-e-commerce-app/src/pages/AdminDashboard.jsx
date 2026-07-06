@@ -14,7 +14,8 @@ import {
   FaBoxOpen, FaUndo, FaCheckDouble, FaTimesCircle,
   FaSpinner, FaSync, FaUserCheck, FaUserTimes,
   FaClipboardList, FaMoneyBillWave, FaTruckMoving,
-  FaChartPie, FaCalendarAlt, FaFileExport, FaBellSlash
+  FaChartPie, FaCalendarAlt, FaFileExport, FaBellSlash,
+  FaFileAlt, FaExternalLinkAlt
 } from 'react-icons/fa';
 import { formatCurrency, formatDate, formatDateTime } from '../utils/formatters';
 import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill, StoreVisitsBySourcePanel } from '../components/dashboard/DashboardWidgets';
@@ -22,6 +23,89 @@ import NotificationPreferencesCard from '../components/NotificationPreferencesCa
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { buildReviewSummary, buildSalesByLocation, buildStoreVisitSources, isPaidOrder } from '../utils/dashboardMetrics';
 import UserDetailsModal from '../components/admin/UserDetailsModal';
+import LiveLogisticsMapPanel from '../components/logistics/LiveLogisticsMapPanel';
+import SharedGroupTripPanel from '../components/logistics/SharedGroupTripPanel';
+
+const getAdminProductStock = (product) => Number(product?.stock ?? product?.quantityAvailable ?? product?.quantity ?? product?.inventory ?? 0);
+const getAdminProductSku = (product) => product?.sku || product?.trackingSku || product?.SKU || product?.stockKeepingUnit || 'SKU pending';
+const getAdminProductThreshold = (product) => Number(product?.minThreshold ?? product?.lowStockThreshold ?? 10);
+const formatAdminLabel = (value) => String(value || 'record')
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+const hasAdminGps = (trip) => (
+  Number.isFinite(Number(trip?.liveTracking?.driver?.lat ?? trip?.gpsTracking?.current?.lat)) &&
+  Number.isFinite(Number(trip?.liveTracking?.driver?.lng ?? trip?.gpsTracking?.current?.lng))
+);
+const pickAdminLiveTrip = (items = []) => {
+  const activeStatuses = ['driver_assigned', 'en_route_to_pickup', 'picked_up', 'in_transit', 'out_for_delivery'];
+  const activeTrips = items.filter((item) => activeStatuses.includes(item?.status));
+  return activeTrips.find(hasAdminGps) || activeTrips[0] || items.find(hasAdminGps) || items[0] || null;
+};
+const formatAdminFileSize = (size) => {
+  const bytes = Number(size || 0);
+  if (!bytes) return '';
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+const getAdminDocumentUserName = (document) => (
+  document?.user?.businessName ||
+  document?.user?.fullName ||
+  document?.user?.name ||
+  document?.user?.email ||
+  'User record'
+);
+const getAdminInventoryGraph = (product) => {
+  const graph = Array.isArray(product?.inventoryGraph)
+    ? product.inventoryGraph
+    : Array.isArray(product?.inventoryHistory)
+      ? product.inventoryHistory
+      : [];
+
+  if (graph.length > 0) {
+    return graph.map((point) => ({
+      onHand: Number(point.onHand ?? point.quantityAvailable ?? point.quantity ?? 0),
+      available: Number(point.available ?? point.availableQuantity ?? point.onHand ?? 0),
+      reserved: Number(point.reserved ?? point.reservedQuantity ?? 0),
+      recordedAt: point.recordedAt || point.createdAt,
+    })).slice(-12);
+  }
+
+  const stock = getAdminProductStock(product);
+  return [{ onHand: stock, available: stock, reserved: Number(product?.reservedQuantity || 0) }];
+};
+
+const AdminInventoryQuantityGraph = ({ product, compact = false }) => {
+  const points = getAdminInventoryGraph(product);
+  const maxValue = Math.max(...points.map((point) => point.onHand), 1);
+
+  return (
+    <div className={compact ? '' : 'rounded-md border border-gray-100 bg-gray-50 p-3'}>
+      {!compact && (
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inventory graph</p>
+          <p className="text-xs font-medium text-[#111827]">{getAdminProductStock(product)} {product?.unit || 'units'}</p>
+        </div>
+      )}
+      <div className={`${compact ? 'h-10' : 'h-16'} flex items-end gap-1`}>
+        {points.map((point, index) => (
+          <div
+            key={`${point.recordedAt || 'inventory'}-${index}`}
+            title={`${point.onHand} on hand, ${point.available} available, ${point.reserved} reserved`}
+            className="min-w-1 flex-1 rounded-t bg-[#F97316]"
+            style={{ height: `${Math.max(6, (point.onHand / maxValue) * 100)}%` }}
+          />
+        ))}
+      </div>
+      {!compact && (
+        <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
+          <span>Oldest</span>
+          <span>Quantity, not percentage</span>
+          <span>Latest</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const AdminDashboard = ({ section = 'dashboard' }) => {
   const { token, user } = useAuth();
@@ -30,11 +114,18 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   // State Management
   const [stats, setStats] = useState({
     users: { total: 0, farmers: 0, wholesalers: 0, retailers: 0, consumers: 0, logistics: 0 },
-    products: { total: 0, active: 0, outOfStock: 0 },
-    orders: { total: 0, pending: 0, processing: 0, shipped: 0, delivered: 0, cancelled: 0 },
+    products: { total: 0, active: 0, inactive: 0, outOfStock: 0, lowStock: 0 },
+    categories: { total: 0, active: 0, inactive: 0 },
+    orders: { total: 0, pending: 0, processing: 0, shipped: 0, delivered: 0, cancelled: 0, disputed: 0 },
     revenue: { total: 0, averageOrderValue: 0 },
     payments: [],
-    logistics: { activeDeliveries: 0, completedDeliveries: 0 },
+    logistics: { total: 0, activeDeliveries: 0, completedDeliveries: 0, needsQr: 0, gpsTracked: 0 },
+    finance: {},
+    platform: {},
+    subscriptions: {},
+    support: {},
+    documents: { documents: 0, usersWithDocuments: 0 },
+    adminOverview: { workQueues: [], health: {}, modules: {} },
     recentActivity: []
   });
   
@@ -44,6 +135,11 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   const [products, setProducts] = useState([]);
   const [logistics, setLogistics] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [userDocuments, setUserDocuments] = useState([]);
+  const [documentSummary, setDocumentSummary] = useState({ totalDocuments: 0, usersWithDocuments: 0, fileBackedDocuments: 0, metadataRecords: 0 });
+  const [documentFilters, setDocumentFilters] = useState({ search: '', source: 'all', documentType: 'all' });
+  const [documentPagination, setDocumentPagination] = useState({ page: 1, limit: 8, total: 0, pages: 1 });
+  const [documentLoading, setDocumentLoading] = useState(false);
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -88,12 +184,13 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   // Form states
   const [newCategory, setNewCategory] = useState({ name: '', description: '' });
   const [broadcastData, setBroadcastData] = useState({
-    type: 'email',
+    type: 'all',
     title: '',
     message: '',
     targetRole: 'all',
     targetUserType: 'all'
   });
+  const [broadcastResult, setBroadcastResult] = useState(null);
   const [logisticsUpdate, setLogisticsUpdate] = useState({
     status: '',
     location: '',
@@ -118,6 +215,27 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     fetchData();
   }, [section, selectedRole, selectedUserType, dateRange, currentPage]);
 
+  const loadDashboardDocuments = async ({ page = 1, filters = documentFilters, silent = false } = {}) => {
+    if (!silent) setDocumentLoading(true);
+    try {
+      const documentsResponse = await api.get('/v1/admin/documents', {
+        params: {
+          page,
+          limit: documentPagination.limit || 8,
+          search: filters.search?.trim() || undefined,
+          source: filters.source || 'all',
+          documentType: filters.documentType || 'all',
+        },
+      });
+      setUserDocuments(Array.isArray(documentsResponse.data?.data) ? documentsResponse.data.data : []);
+      setDocumentSummary(documentsResponse.data?.summary || { totalDocuments: 0, usersWithDocuments: 0, fileBackedDocuments: 0, metadataRecords: 0 });
+      setDocumentPagination(documentsResponse.data?.pagination || { page, limit: documentPagination.limit || 8, total: 0, pages: 1 });
+      return documentsResponse;
+    } finally {
+      if (!silent) setDocumentLoading(false);
+    }
+  };
+
   const fetchData = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
@@ -128,7 +246,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             analyticsParams.startDate = dateRange.start;
             analyticsParams.endDate = dateRange.end;
           }
-          const [statsRes, analyticsRes, dashboardOrdersRes, dashboardProductsRes, dashboardLogisticsRes] = await Promise.all([
+          const [statsRes, analyticsRes, dashboardOrdersRes, dashboardProductsRes, dashboardLogisticsRes, dashboardDocumentsRes] = await Promise.all([
             api.get('/v1/admin/stats'),
             api.get('/v1/admin/analytics', { params: analyticsParams }),
             api.get('/v1/admin/orders', {
@@ -142,12 +260,24 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             }),
             api.get('/v1/admin/products', { params: { page: 1, limit: 50 } }),
             api.get('/v1/admin/logistics', { params: { page: 1, limit: 50 } }),
+            api.get('/v1/admin/documents', {
+              params: {
+                page: documentPagination.page || 1,
+                limit: documentPagination.limit || 8,
+                search: documentFilters.search?.trim() || undefined,
+                source: documentFilters.source || 'all',
+                documentType: documentFilters.documentType || 'all',
+              },
+            }),
           ]);
           setStats(statsRes.data.data);
           setAnalytics(analyticsRes.data.data);
           setOrders(dashboardOrdersRes.data.orders || []);
           setProducts(dashboardProductsRes.data.products || []);
           setLogistics(dashboardLogisticsRes.data.logistics || []);
+          setUserDocuments(Array.isArray(dashboardDocumentsRes.data?.data) ? dashboardDocumentsRes.data.data : []);
+          setDocumentSummary(dashboardDocumentsRes.data?.summary || { totalDocuments: 0, usersWithDocuments: 0, fileBackedDocuments: 0, metadataRecords: 0 });
+          setDocumentPagination(dashboardDocumentsRes.data?.pagination || { page: 1, limit: 8, total: 0, pages: 1 });
           break;
           
         case 'users':
@@ -294,13 +424,55 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     setUserDetailsLoading(true);
 
     try {
-      const response = await api.get(`/v1/admin/users/${userId}`);
-      setSelectedUserDetails(response.data);
+      const [detailsResponse, documentsResponse] = await Promise.all([
+        api.get(`/v1/admin/users/${userId}`),
+        api.get(`/v1/admin/users/${userId}/documents`),
+      ]);
+      setSelectedUserDetails({
+        ...detailsResponse.data,
+        documents: Array.isArray(documentsResponse.data?.data)
+          ? documentsResponse.data.data
+          : detailsResponse.data?.documents || [],
+      });
     } catch (error) {
       console.error('Error loading user details:', error);
       alert(error.response?.data?.message || 'Failed to load user details');
     } finally {
       setUserDetailsLoading(false);
+    }
+  };
+
+  const uploadUserDocument = async (userId, formData) => {
+    try {
+      const response = await api.post(`/v1/admin/users/${userId}/documents`, formData);
+      const updatedUser = response.data?.user;
+      if (updatedUser) {
+        setUsers((currentUsers) => currentUsers.map((item) => (
+          String(item?._id || item?.id || item?.userId || '') === String(userId)
+            ? { ...item, ...updatedUser }
+            : item
+        )));
+        setSelectedUser((currentUser) => (
+          String(currentUser?._id || currentUser?.id || currentUser?.userId || '') === String(userId)
+            ? { ...currentUser, ...updatedUser }
+            : currentUser
+        ));
+      }
+      setSelectedUserDetails((currentDetails) => (
+        currentDetails
+          ? {
+              ...currentDetails,
+              user: updatedUser || currentDetails.user,
+              documents: response.data?.documents || currentDetails.documents || [],
+            }
+          : currentDetails
+      ));
+      await loadDashboardDocuments({ page: 1, silent: true });
+      return response.data;
+    } catch (error) {
+      console.error('Error saving user document:', error);
+      alert(error.response?.data?.message || 'Failed to save document');
+      throw error;
     }
   };
 
@@ -387,17 +559,17 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   // Broadcast Functions
   const handleBroadcast = async () => {
     try {
-      await api.post('/v1/admin/broadcast', broadcastData, {
+      const response = await api.post('/v1/admin/broadcast', broadcastData, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`
         }
       });
-      alert('Broadcast sent successfully!');
-      setShowBroadcastModal(false);
-      setBroadcastData({ type: 'email', title: '', message: '', targetRole: 'all', targetUserType: 'all' });
+      setBroadcastResult(response.data?.results || response.data || null);
+      alert(response.data?.message || 'Broadcast processed successfully!');
+      setBroadcastData({ type: 'all', title: '', message: '', targetRole: 'all', targetUserType: 'all' });
     } catch (error) {
       console.error('Error sending broadcast:', error);
-      alert('Failed to send broadcast');
+      alert(error.response?.data?.message || 'Failed to send broadcast');
     }
   };
 
@@ -437,7 +609,6 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     const activeProducts = Number(stats.products.active || 0);
     const totalOrders = Number(stats.orders.total || 0);
     const deliveredOrders = Number(stats.orders.delivered || 0);
-    const inventoryHealth = totalProducts ? Math.round((activeProducts / totalProducts) * 100) : 0;
     const fulfillmentRate = totalOrders ? Math.round((deliveredOrders / totalOrders) * 100) : 0;
     const buyerIds = orders.map((order) => order.customer?._id || order.customer || order.buyer?._id || order.buyer).filter(Boolean).map(String);
     const uniqueBuyerCount = new Set(buyerIds).size;
@@ -466,10 +637,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
       usersTotal: totalUsers,
       productsTotal: totalProducts,
     });
-    const lowStockCount = products.filter((product) => Number(product.stock ?? product.quantityAvailable ?? 0) > 0 && Number(product.stock ?? product.quantityAvailable ?? 0) <= 10).length;
-    const outOfStockProducts = products.filter((product) => Number(product.stock ?? product.quantityAvailable ?? 0) <= 0).length;
+    const lowStockCount = products.filter((product) => {
+      const threshold = getAdminProductThreshold(product);
+      const stock = getAdminProductStock(product);
+      return threshold > 0 && stock > 0 && stock <= threshold;
+    }).length;
+    const outOfStockProducts = products.filter((product) => getAdminProductStock(product) <= 0).length;
     const topStockProducts = [...products]
-      .sort((a, b) => Number(b.stock ?? b.quantityAvailable ?? 0) - Number(a.stock ?? a.quantityAvailable ?? 0))
+      .sort((a, b) => getAdminProductStock(b) - getAdminProductStock(a))
       .slice(0, 5);
     const activeLogistics = logistics.filter((item) => ['in_transit', 'picked_up', 'out_for_delivery'].includes(item.status)).length;
     const completedLogistics = logistics.filter((item) => item.status === 'delivered').length;
@@ -512,15 +687,115 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
       { label: 'Delivered', value: stats.orders.delivered, color: '#16A34A' },
       { label: 'Cancelled', value: stats.orders.cancelled, color: '#DC2626' },
     ];
+    const adminOverview = stats.adminOverview || {};
+    const overviewHealth = adminOverview.health || {};
+    const platformSummary = adminOverview.platformSummary || stats.platform || {};
+    const platformUpdates = Array.isArray(adminOverview.platformUpdates) && adminOverview.platformUpdates.length
+      ? adminOverview.platformUpdates
+      : [
+          {
+            key: 'marketplace_revenue',
+            label: 'Marketplace revenue',
+            displayValue: formatCurrency(stats.revenue.total || 0),
+            detail: `${totalOrders} orders on Lango Market`,
+            tone: 'green',
+          },
+          {
+            key: 'escrow_control',
+            label: 'Escrow control',
+            displayValue: formatCurrency(Number(stats.finance?.escrow?.totalAmount || 0)),
+            detail: `${formatCurrency(Number(stats.finance?.heldEscrow?.amount || 0))} held in escrow`,
+            tone: 'amber',
+          },
+        ];
+    const supportOpen = Number(stats.support?.open || 0);
+    const escrowReleaseCount = Number(stats.finance?.releaseEscrow?.count || 0);
+    const escrowReleaseAmount = Number(stats.finance?.releaseEscrow?.amount || 0);
+    const heldEscrowAmount = Number(stats.finance?.heldEscrow?.amount || 0);
+    const marketplaceRevenue = Number(platformSummary.marketplaceRevenue ?? stats.revenue.total ?? 0);
+    const totalPlatformRevenue = Number(platformSummary.totalPlatformRevenue ?? marketplaceRevenue);
+    const subscriptionRevenue = Number(platformSummary.subscriptionRevenue ?? stats.subscriptions?.revenue ?? 0);
+    const platformFeeRevenue = Number(platformSummary.platformFeeRevenue ?? stats.finance?.escrow?.platformFees ?? 0);
+    const activeSubscriptions = Number(stats.subscriptions?.active || 0);
+    const activeFeatures = Number(stats.subscriptions?.activeFeatures || 0);
+    const savedDocuments = Number(documentSummary.totalDocuments || stats.documents?.documents || 0);
+    const usersWithDocuments = Number(documentSummary.usersWithDocuments || stats.documents?.usersWithDocuments || 0);
+    const fileBackedDocuments = Number(documentSummary.fileBackedDocuments || 0);
+    const metadataRecords = Number(documentSummary.metadataRecords || 0);
+    const filteredDocuments = Number(documentSummary.filteredDocuments ?? documentPagination.total ?? savedDocuments);
+    const filteredUsersWithDocuments = Number(documentSummary.filteredUsersWithDocuments ?? usersWithDocuments);
+    const sourceBreakdown = documentSummary.sourceBreakdown || {};
+    const documentTypeBreakdown = documentSummary.documentTypeBreakdown || {};
+    const recentUserDocuments = Array.isArray(userDocuments) ? userDocuments : [];
+    const commandQueues = Array.isArray(adminOverview.workQueues) && adminOverview.workQueues.length
+      ? adminOverview.workQueues
+      : [
+          {
+            key: 'verification',
+            label: 'KYC and phone verification',
+            value: Number(stats.users.kycPending || 0) + Number(stats.users.phoneUnverified || 0),
+            detail: `${stats.users.kycPending || 0} KYC pending, ${stats.users.phoneUnverified || 0} phone unverified`,
+            route: '/admin/users',
+            tone: 'amber',
+          },
+          {
+            key: 'support',
+            label: 'Admin messages',
+            value: supportOpen,
+            detail: `${stats.support?.urgent || 0} high priority conversations`,
+            route: '/admin/contact-queue',
+            tone: 'blue',
+          },
+          {
+            key: 'logistics',
+            label: 'Logistics action',
+            value: Number(stats.logistics.activeDeliveries || 0) + Number(stats.logistics.needsQr || 0),
+            detail: `${stats.logistics.activeDeliveries || 0} active trips, ${stats.logistics.needsQr || 0} QR checks`,
+            route: '/admin/logistics',
+            tone: 'cyan',
+          },
+        ];
+    const toneStyles = {
+      amber: 'border-amber-200 bg-amber-50 text-amber-800',
+      blue: 'border-blue-200 bg-blue-50 text-blue-800',
+      cyan: 'border-cyan-200 bg-cyan-50 text-cyan-800',
+      green: 'border-green-200 bg-green-50 text-green-800',
+      orange: 'border-orange-200 bg-orange-50 text-orange-800',
+      red: 'border-red-200 bg-red-50 text-red-800',
+    };
+    const healthRows = [
+      { label: 'Fulfillment', value: Number(overviewHealth.fulfillmentRate ?? fulfillmentRate), color: '#16A34A' },
+      { label: 'Active products', value: Number(overviewHealth.activeProductRate ?? (totalProducts ? Math.round((activeProducts / totalProducts) * 100) : 0)), color: '#F97316' },
+      { label: 'Verified KYC', value: Number(overviewHealth.kycVerificationRate ?? 0), color: '#3B82F6' },
+      { label: 'GPS coverage', value: Number(overviewHealth.gpsCoverageRate ?? 0), color: '#06B6D4' },
+    ];
+    const moduleActions = [
+      { label: 'Users', icon: FaUsers, value: stats.users.total || 0, detail: `${stats.users.kycPending || 0} KYC pending`, route: '/admin/users', color: '#3B82F6' },
+      { label: 'Products', icon: FaBox, value: stats.products.total || 0, detail: `${stats.products.inactive || 0} inactive`, route: '/admin/products', color: '#F97316' },
+      { label: 'Categories', icon: FaTag, value: stats.categories?.total || 0, detail: `${stats.categories?.inactive || 0} inactive`, route: '/admin/categories', color: '#8B5CF6' },
+      { label: 'Subscriptions', icon: FaCreditCard, value: activeSubscriptions, detail: `${activeFeatures} features`, route: '/admin/subscriptions', color: '#16A34A' },
+      { label: 'Logistics', icon: FaTruckMoving, value: stats.logistics.total || stats.logistics.activeDeliveries || 0, detail: `${stats.logistics.gpsTracked || 0} GPS tracked`, route: '/admin/logistics', color: '#06B6D4' },
+      { label: 'Finance', icon: FaMoneyBillWave, value: formatCurrency(heldEscrowAmount), detail: `${escrowReleaseCount} releases`, route: '/admin/finance-audit', color: '#111827' },
+      { label: 'Messages', icon: FaEnvelope, value: supportOpen, detail: `${stats.support?.urgent || 0} urgent`, route: '/admin/contact-queue', color: '#DC2626' },
+      { label: 'Documents', icon: FaClipboardList, value: savedDocuments, detail: `${usersWithDocuments} users`, route: '/admin/users', color: '#6366F1' },
+    ];
+    const platformUpdateStyles = {
+      amber: 'border-amber-200 bg-amber-50 text-amber-800',
+      blue: 'border-blue-200 bg-blue-50 text-blue-800',
+      green: 'border-green-200 bg-green-50 text-green-800',
+      orange: 'border-orange-200 bg-orange-50 text-orange-800',
+      red: 'border-red-200 bg-red-50 text-red-800',
+    };
+    const adminLiveTrip = pickAdminLiveTrip(logistics);
 
     return (
       <div className="min-h-screen bg-[#F7F8FA] px-4 py-6 sm:px-6">
         <div className="mx-auto max-w-[1600px]">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Admin command center</p>
-              <h1 className="mt-1 text-2xl font-bold text-[#111827]">Platform Performance</h1>
-              <p className="mt-1 text-sm text-gray-500">Overview of marketplace revenue, operations, users, products, and logistics.</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Lango Market admin dashboard</p>
+              <h1 className="mt-1 text-2xl font-bold text-[#111827]">Lango Market Revenue Overview</h1>
+              <p className="mt-1 text-sm text-gray-500">Platform update for revenue, escrow, users, products, logistics, and support operations.</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <div className="inline-flex h-10 items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 text-xs font-medium text-green-700">
@@ -557,6 +832,51 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </div>
           </div>
 
+          <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <section className="rounded-md border border-gray-200 bg-[#111827] p-5 text-white shadow-sm xl:col-span-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#FDBA74]">Platform revenue</p>
+                  <h2 className="mt-2 text-3xl font-bold">{formatCurrency(totalPlatformRevenue)}</h2>
+                  <p className="mt-2 text-sm text-gray-300">
+                    {formatCurrency(marketplaceRevenue)} marketplace revenue with {formatCurrency(subscriptionRevenue)} subscriptions and {formatCurrency(platformFeeRevenue)} platform fees.
+                  </p>
+                </div>
+                <StatusPill tone="green">Live platform update</StatusPill>
+              </div>
+              <div className="mt-5 grid grid-cols-3 gap-3">
+                <div className="rounded-md bg-white/10 p-3">
+                  <p className="text-xs text-gray-300">Orders</p>
+                  <p className="mt-1 text-xl font-bold">{platformSummary.totalOrders ?? totalOrders}</p>
+                </div>
+                <div className="rounded-md bg-white/10 p-3">
+                  <p className="text-xs text-gray-300">Users</p>
+                  <p className="mt-1 text-xl font-bold">{platformSummary.totalUsers ?? totalUsers}</p>
+                </div>
+                <div className="rounded-md bg-white/10 p-3">
+                  <p className="text-xs text-gray-300">Products</p>
+                  <p className="mt-1 text-xl font-bold">{platformSummary.totalProducts ?? totalProducts}</p>
+                </div>
+              </div>
+            </section>
+
+            <Panel
+              title="Platform Update"
+              className="xl:col-span-7"
+              action={<button onClick={() => navigate('/admin/analytics')} className="text-xs font-medium text-[#F97316]">Open analytics</button>}
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {platformUpdates.slice(0, 4).map((update) => (
+                  <div key={update.key || update.label} className={`rounded-md border px-4 py-3 ${platformUpdateStyles[update.tone] || platformUpdateStyles.blue}`}>
+                    <p className="text-xs font-semibold uppercase tracking-wide opacity-75">{update.label}</p>
+                    <p className="mt-1 text-xl font-bold">{update.displayValue ?? update.value}</p>
+                    <p className="mt-1 text-xs opacity-80">{update.detail}</p>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             {isSectionLoading
               ? Array.from({ length: 5 }).map((_, idx) => (
@@ -567,6 +887,307 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   </div>
                 ))
               : dashboardStats.map((stat) => <KpiCard key={stat.label} {...stat} />)}
+          </div>
+
+          <LiveLogisticsMapPanel
+            trip={adminLiveTrip}
+            title="Live Logistics Movement"
+            subtitle="Monitor the latest active delivery with Google GPS, driver position, pickup, and buyer destination."
+            eyebrow="Admin Google GPS command"
+            onRefresh={refreshData}
+            refreshing={refreshing || isRealtimeRefreshing}
+            trackingHref="/admin/logistics"
+            emptyText="No active logistics GPS is available yet. It appears when a driver starts live sharing."
+            className="mt-4"
+          />
+
+          <SharedGroupTripPanel
+            title="Admin Shared Logistics Control"
+            description="Create, monitor, and fill shared trips across Kenya so nearby buyers and sellers can consolidate cargo into one logistics route."
+            canCreate
+            canManageRoutes
+            canManagePayments
+            className="mt-4"
+          />
+
+          <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <Panel
+              title="Admin Work Queues"
+              className="xl:col-span-5"
+              action={<button onClick={() => navigate('/admin/contact-queue')} className="text-xs font-medium text-[#F97316]">Open inbox</button>}
+            >
+              <div className="space-y-3">
+                {commandQueues.slice(0, 5).map((queue) => (
+                  <button
+                    key={queue.key || queue.label}
+                    type="button"
+                    onClick={() => queue.route && navigate(queue.route)}
+                    className={`w-full rounded-md border px-4 py-3 text-left transition hover:shadow-sm ${toneStyles[queue.tone] || toneStyles.blue}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{queue.label}</p>
+                        <p className="mt-1 truncate text-xs opacity-80">{queue.detail}</p>
+                      </div>
+                      <span className="shrink-0 text-2xl font-bold">{queue.value || 0}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="Platform Health" className="xl:col-span-3">
+              <div className="space-y-4">
+                {healthRows.map((row) => (
+                  <ProgressRow
+                    key={row.label}
+                    label={row.label}
+                    value={Math.max(0, Math.min(100, row.value || 0))}
+                    max={100}
+                    color={row.color}
+                    detail={`${Math.max(0, Math.min(100, row.value || 0))}%`}
+                  />
+                ))}
+                <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                  <span className="font-semibold text-[#111827]">{savedDocuments}</span> saved user documents across <span className="font-semibold text-[#111827]">{usersWithDocuments}</span> users.
+                </div>
+              </div>
+            </Panel>
+
+            <Panel
+              title="Escrow And Finance"
+              className="xl:col-span-4"
+              action={<button onClick={() => navigate('/admin/finance-audit')} className="text-xs font-medium text-[#F97316]">Audit</button>}
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-md bg-green-50 p-3">
+                  <p className="text-xs font-semibold uppercase text-green-700">Held escrow</p>
+                  <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(heldEscrowAmount)}</p>
+                </div>
+                <div className="rounded-md bg-amber-50 p-3">
+                  <p className="text-xs font-semibold uppercase text-amber-700">Release queue</p>
+                  <p className="mt-1 text-xl font-bold text-[#111827]">{escrowReleaseCount}</p>
+                </div>
+              </div>
+              <div className="mt-4 rounded-md border border-gray-100 bg-gray-50 px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-gray-600">Ready for escrow review</span>
+                  <span className="text-sm font-semibold text-[#111827]">{formatCurrency(escrowReleaseAmount)}</span>
+                </div>
+              </div>
+            </Panel>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+            {moduleActions.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => navigate(item.route)}
+                  className="rounded-md border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-[#F97316] hover:shadow-md"
+                >
+                  <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md" style={{ backgroundColor: `${item.color}1A`, color: item.color }}>
+                    <Icon />
+                  </div>
+                  <p className="truncate text-xs font-semibold uppercase tracking-wide text-gray-500">{item.label}</p>
+                  <p className="mt-1 truncate text-lg font-bold text-[#111827]">{item.value}</p>
+                  <p className="mt-1 truncate text-xs text-gray-500">{item.detail}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+            <Panel
+              title="User Documents Vault"
+              className="xl:col-span-12"
+              action={
+                <div className="flex items-center gap-3">
+                  <button onClick={() => loadDashboardDocuments({ page: documentPagination.page || 1 })} className="text-xs font-medium text-[#F97316]">
+                    Refresh vault
+                  </button>
+                  <button onClick={() => navigate('/admin/users')} className="text-xs font-medium text-[#F97316]">Open users</button>
+                </div>
+              }
+            >
+              <form
+                className="mb-4 grid gap-3 lg:grid-cols-[1fr_190px_190px_auto]"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  loadDashboardDocuments({ page: 1 });
+                }}
+              >
+                <div className="relative">
+                  <FaSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={documentFilters.search}
+                    onChange={(event) => setDocumentFilters((current) => ({ ...current, search: event.target.value }))}
+                    placeholder="Search documents, user, phone, email, document number..."
+                    className="h-10 w-full rounded-md border border-gray-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                  />
+                </div>
+                <select
+                  value={documentFilters.source}
+                  onChange={(event) => setDocumentFilters((current) => ({ ...current, source: event.target.value }))}
+                  className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
+                >
+                  <option value="all">All sources</option>
+                  <option value="admin_saved">Admin saved</option>
+                  <option value="kyc">KYC</option>
+                  <option value="logistics_application">Logistics application</option>
+                  <option value="logistics_profile">Logistics profile</option>
+                </select>
+                <select
+                  value={documentFilters.documentType}
+                  onChange={(event) => setDocumentFilters((current) => ({ ...current, documentType: event.target.value }))}
+                  className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
+                >
+                  <option value="all">All document types</option>
+                  <option value="national_id">National ID</option>
+                  <option value="business_permit">Business permit</option>
+                  <option value="tax_certificate">Tax certificate</option>
+                  <option value="kyc">KYC</option>
+                  <option value="contract">Contract</option>
+                  <option value="receipt">Receipt</option>
+                  <option value="other">Other</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={documentLoading}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white hover:bg-[#374151] disabled:opacity-60"
+                >
+                  <FaFilter />
+                  {documentLoading ? 'Loading...' : 'Apply'}
+                </button>
+              </form>
+
+              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div className="rounded-md bg-gray-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Saved records</p>
+                  <p className="mt-1 text-2xl font-bold text-[#111827]">{savedDocuments}</p>
+                </div>
+                <div className="rounded-md bg-blue-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Users covered</p>
+                  <p className="mt-1 text-2xl font-bold text-[#111827]">{usersWithDocuments}</p>
+                </div>
+                <div className="rounded-md bg-green-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Files saved</p>
+                  <p className="mt-1 text-2xl font-bold text-[#111827]">{fileBackedDocuments}</p>
+                </div>
+                <div className="rounded-md bg-amber-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">DB records</p>
+                  <p className="mt-1 text-2xl font-bold text-[#111827]">{metadataRecords}</p>
+                </div>
+              </div>
+
+              <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+                <div className="rounded-md border border-gray-100 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Filtered results</p>
+                  <p className="mt-1 text-lg font-bold text-[#111827]">{filteredDocuments} documents across {filteredUsersWithDocuments} users</p>
+                </div>
+                <div className="rounded-md border border-gray-100 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Source breakdown</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {Object.entries(sourceBreakdown).length ? Object.entries(sourceBreakdown).map(([key, value]) => (
+                      <span key={key} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-600">
+                        {formatAdminLabel(key)}: {value}
+                      </span>
+                    )) : <span className="text-xs text-gray-500">No sources yet</span>}
+                  </div>
+                </div>
+                <div className="rounded-md border border-gray-100 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Top type</p>
+                  <p className="mt-1 text-lg font-bold text-[#111827]">
+                    {Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0]
+                      ? `${formatAdminLabel(Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0][0])} (${Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0][1]})`
+                      : 'No type'}
+                  </p>
+                </div>
+              </div>
+
+              {documentLoading ? (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {Array.from({ length: 4 }).map((_, index) => (
+                    <div key={index} className="h-44 rounded-md bg-gray-100 skeleton-shimmer" />
+                  ))}
+                </div>
+              ) : recentUserDocuments.length ? (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {recentUserDocuments.slice(0, 8).map((document, index) => {
+                    const userLabel = getAdminDocumentUserName(document);
+                    const hasFile = Boolean(document.url);
+                    return (
+                      <div key={document._id || document.publicId || `${document.source}-${document.documentNumber}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[#111827]" title={document.title || document.originalName}>{document.title || document.originalName || 'User document'}</p>
+                            <p className="mt-1 truncate text-xs text-gray-500" title={userLabel}>{userLabel}</p>
+                          </div>
+                          <FaFileAlt className="shrink-0 text-[#F97316]" />
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-600">{formatAdminLabel(document.source)}</span>
+                          <span className="rounded-full border border-orange-100 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700">{formatAdminLabel(document.documentType)}</span>
+                          {!hasFile && <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">Database record</span>}
+                        </div>
+                        <p className="mt-3 truncate text-xs text-gray-500">{document.originalName || document.mimeType || document.documentNumber || 'Verification record'} {formatAdminFileSize(document.size)}</p>
+                        <p className="mt-1 text-xs text-gray-400">{formatDateTime(document.uploadedAt)}</p>
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleViewUserDetails(document.user)}
+                            className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                          >
+                            <FaEye /> User
+                          </button>
+                          {hasFile && (
+                            <a
+                              href={document.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-[#374151]"
+                            >
+                              <FaExternalLinkAlt /> File
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-5 text-sm text-gray-500">
+                  No saved user documents match this view. Open a user record to upload documents, or clear the vault filters.
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-gray-500">
+                  Page <span className="font-semibold text-[#111827]">{documentPagination.page || 1}</span> of <span className="font-semibold text-[#111827]">{documentPagination.pages || 1}</span>
+                  {' '}({documentPagination.total || 0} filtered)
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={documentLoading || (documentPagination.page || 1) <= 1}
+                    onClick={() => loadDashboardDocuments({ page: (documentPagination.page || 1) - 1 })}
+                    className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={documentLoading || (documentPagination.page || 1) >= (documentPagination.pages || 1)}
+                    onClick={() => loadDashboardDocuments({ page: (documentPagination.page || 1) + 1 })}
+                    className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </Panel>
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -580,7 +1201,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             <NotificationPreferencesCard
               className="xl:col-span-12"
               title="Notification Preferences"
-              description="Keep notification controls in the admin dashboard so the platform can reach you for order updates, scarcity alerts, and account activity."
+              description="Keep notification controls in the admin dashboard so the platform can reach you for order updates and account activity."
             />
           </div>
 
@@ -611,10 +1232,30 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </Panel>
 
             <Panel title="Inventory Health" className="xl:col-span-3">
-              <DonutGauge value={inventoryHealth} label={`${activeProducts} active products`} color="#16A34A" />
-              <div className="mt-5 space-y-3">
-                <ProgressRow label="Active products" value={activeProducts} max={Math.max(totalProducts, 1)} color="#16A34A" detail={`${activeProducts}`} />
-                <ProgressRow label="Out of stock" value={stats.products.outOfStock || 0} max={Math.max(totalProducts, 1)} color="#DC2626" detail={`${stats.products.outOfStock || 0}`} />
+              <div className="mb-4 grid grid-cols-2 gap-3">
+                <div className="rounded-md bg-green-50 p-3">
+                  <p className="text-xs font-semibold uppercase text-green-700">Active</p>
+                  <p className="mt-1 text-2xl font-bold text-[#111827]">{activeProducts}</p>
+                </div>
+                <div className="rounded-md bg-red-50 p-3">
+                  <p className="text-xs font-semibold uppercase text-red-700">Out</p>
+                  <p className="mt-1 text-2xl font-bold text-[#111827]">{outOfStockProducts}</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {topStockProducts.slice(0, 3).map((product) => (
+                  <div key={product._id || product.id || getAdminProductSku(product)} className="rounded-md border border-gray-100 bg-gray-50 p-2">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold text-[#111827]" title={product.name}>{product.name}</p>
+                        <p className="truncate font-mono text-[11px] text-[#F97316]" title={getAdminProductSku(product)}>{getAdminProductSku(product)}</p>
+                      </div>
+                      <span className="text-xs font-semibold text-gray-700">{getAdminProductStock(product)}</span>
+                    </div>
+                    <AdminInventoryQuantityGraph product={product} compact />
+                  </div>
+                ))}
+                {!topStockProducts.length && <p className="text-sm text-gray-500">No product inventory data yet.</p>}
               </div>
             </Panel>
           </div>
@@ -658,9 +1299,15 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                 <ProgressRow label="Out of stock" value={outOfStockProducts} max={Math.max(products.length, 1)} color="#DC2626" detail={`${outOfStockProducts}`} />
                 <div className="space-y-2 pt-2">
                   {topStockProducts.map((product) => (
-                    <div key={product._id || product.id} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 text-sm">
-                      <span className="truncate text-[#111827]">{product.name}</span>
-                      <span className="font-semibold text-gray-700">{product.stock ?? product.quantityAvailable ?? 0}</span>
+                    <div key={product._id || product.id || getAdminProductSku(product)} className="rounded-md bg-gray-50 px-3 py-2 text-sm">
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <span className="block truncate text-[#111827]">{product.name}</span>
+                          <span className="block truncate font-mono text-xs text-[#F97316]">{getAdminProductSku(product)}</span>
+                        </div>
+                        <span className="font-semibold text-gray-700">{getAdminProductStock(product)}</span>
+                      </div>
+                      <AdminInventoryQuantityGraph product={product} compact />
                     </div>
                   ))}
                 </div>
@@ -1491,10 +2138,13 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           
           {/* Products Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {products.map((product) => (
-              <div key={product._id} className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+            {products.map((product) => {
+              const stock = getAdminProductStock(product);
+              const sku = getAdminProductSku(product);
+              return (
+              <div key={product._id || product.id || sku} className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow">
                 <img
-                  src={product.images?.[0] || 'https://via.placeholder.com/300x200'}
+                  src={product.images?.[0]?.url || product.images?.[0] || 'https://via.placeholder.com/300x200'}
                   alt={product.name}
                   className="w-full h-48 object-cover"
                   onError={(e) => e.target.src = 'https://via.placeholder.com/300x200'}
@@ -1505,10 +2155,20 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-2xl font-bold text-[#16A34A]">{formatCurrency(product.price)}</span>
                     <span className={`px-2 py-1 rounded-full text-xs ${
-                      product.stock > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      stock > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
-                      Stock: {product.stock}
+                      Stock: {stock}
                     </span>
+                  </div>
+                  <div className="mb-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-gray-500">Tracking SKU</p>
+                        <p className="truncate font-mono text-xs font-semibold text-[#111827]" title={sku}>{sku}</p>
+                      </div>
+                      <span className="text-xs font-semibold text-[#F97316]">{stock} {product.unit || ''}</span>
+                    </div>
+                    <AdminInventoryQuantityGraph product={product} compact />
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Seller: {product.seller?.businessName || product.seller?.name}</span>
@@ -1525,7 +2185,8 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   </div>
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
           
           {/* Pagination */}
@@ -1563,6 +2224,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
       delivered: 'bg-green-100 text-green-800',
       failed: 'bg-red-100 text-red-800'
     };
+    const adminLiveTrip = pickAdminLiveTrip(logistics);
 
     return (
       <div className="bg-[#F9FAFB] min-h-screen py-8">
@@ -1574,6 +2236,26 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </div>
             <p className="text-[#6B7280]">Track and manage all deliveries in real-time</p>
           </div>
+
+          <LiveLogisticsMapPanel
+            trip={adminLiveTrip}
+            title="Live Logistics Movement"
+            subtitle="Track the selected active logistics trip with Google Maps, GPS history, and driver position."
+            eyebrow="Admin Google GPS tracking"
+            onRefresh={refreshData}
+            refreshing={refreshing}
+            emptyText="No live GPS is available yet. Ask logistics to start live GPS sharing."
+            className="mb-6"
+          />
+
+          <SharedGroupTripPanel
+            title="Shared Logistics Operations"
+            description="Open Kenya group trips, review available capacity, and join or create consolidated routes for buyers and sellers."
+            canCreate
+            canManageRoutes
+            canManagePayments
+            className="mb-6"
+          />
           
           {/* Logistics Table */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden">
@@ -1751,6 +2433,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           setSelectedUser(null);
           setSelectedUserDetails(null);
         }}
+        onUploadDocument={uploadUserDocument}
       />
     );
   }
@@ -1759,17 +2442,20 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   if (showBroadcastModal) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
-          <h2 className="text-2xl font-bold mb-4">Broadcast Notification</h2>
+        <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4">
+          <h2 className="text-2xl font-bold mb-1 text-[#111827]">Broadcast Notification</h2>
+          <p className="mb-4 text-sm text-[#6B7280]">Send platform alerts to all users, sellers, logistics providers, or a specific role.</p>
           <div className="space-y-4">
             <select
               value={broadcastData.type}
               onChange={(e) => setBroadcastData({...broadcastData, type: e.target.value})}
               className="w-full px-3 py-2 border rounded-lg"
             >
+              <option value="all">All Channels</option>
+              <option value="in_app">In-App Alert</option>
               <option value="email">Email</option>
               <option value="sms">SMS</option>
-              <option value="push">Push Notification</option>
+              <option value="push">Push/In-App Notification</option>
             </select>
             
             <input
@@ -1794,12 +2480,39 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               className="w-full px-3 py-2 border rounded-lg"
             >
               <option value="all">All Roles</option>
+              <option value="seller">All Sellers</option>
+              <option value="brand">Brands Only</option>
               <option value="farmer">Farmers Only</option>
               <option value="wholesaler">Wholesalers Only</option>
+              <option value="manufacturer">Manufacturers Only</option>
               <option value="retailer">Retailers Only</option>
-              <option value="consumer">Consumers Only</option>
+              <option value="consumer">Buyers Only</option>
               <option value="logistics">Logistics Only</option>
             </select>
+
+            {broadcastResult && (
+              <div className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 text-sm">
+                <p className="mb-2 font-semibold text-[#111827]">Last Broadcast Result</p>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-[#6B7280]">Recipients</p>
+                    <p className="font-bold text-[#111827]">{broadcastResult.recipients ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#6B7280]">In-App</p>
+                    <p className="font-bold text-[#111827]">{broadcastResult.inApp?.success ?? 0}/{broadcastResult.inApp?.attempted ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#6B7280]">Email</p>
+                    <p className="font-bold text-[#111827]">{broadcastResult.email?.success ?? 0}/{broadcastResult.email?.attempted ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-[#6B7280]">SMS</p>
+                    <p className="font-bold text-[#111827]">{broadcastResult.sms?.success ?? 0}/{broadcastResult.sms?.attempted ?? 0}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           
           <div className="flex gap-3 mt-6">
@@ -1810,7 +2523,10 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               Send Broadcast
             </button>
             <button
-              onClick={() => setShowBroadcastModal(false)}
+              onClick={() => {
+                setShowBroadcastModal(false);
+                setBroadcastResult(null);
+              }}
               className="flex-1 border border-gray-300 py-2 rounded-lg hover:bg-gray-50"
             >
               Cancel

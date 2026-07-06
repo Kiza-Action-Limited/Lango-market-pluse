@@ -2,6 +2,8 @@
 const subscriptionService = require('../services/subscription/plan.service');
 const billingService = require('../services/subscription/billing.service');
 const { validationResult } = require('express-validator');
+const User = require('../models/User.model');
+const Product = require('../models/Product.model');
 
 const sendValidationErrors = (req, res) => {
   const errors = validationResult(req);
@@ -19,6 +21,164 @@ const getSmsCreditBalance = (subscription) => {
   const allocated = Number(subscription.features?.smsCreditsAllocated || 0);
   const used = Number(subscription.features?.smsCreditsUsed || 0);
   return Math.max(0, allocated - used);
+};
+
+const isSellerAccount = (user) => ['seller', 'farmer'].includes(String(user?.role || '').toLowerCase());
+
+const buildProviderSnapshot = (provider) => {
+  if (!provider) return null;
+  const profile = provider.logisticsProfile || {};
+  return {
+    id: provider._id,
+    name: provider.fullName || provider.name || provider.businessName || 'Registered logistics provider',
+    phone: provider.phone || '',
+    email: provider.email || '',
+    hub: profile.baseHub || profile.locationHub || provider.locationHub || provider.city || '',
+    vehiclePlate: profile.vehiclePlate || provider.vehiclePlate || '',
+    cargoCapacityKg: profile.cargoCapacityKg || provider.cargoCapacityKg || null,
+    verificationStatus: profile.verificationStatus || provider.verificationStatus || 'unverified',
+  };
+};
+
+const defaultSellerLogisticsAddon = (user) => ({
+  active: false,
+  planId: 'mizigo',
+  selectedProviderId: '',
+  selectedProvider: null,
+  sellerHub: user?.locationHub || user?.city || user?.address || '',
+  activatedAt: null,
+  pausedAt: null,
+  updatedAt: null,
+});
+
+const normalizeSellerLogisticsAddon = (user) => {
+  const addon = user?.sellerLogisticsAddon || {};
+  const selectedProvider = addon.selectedProvider && typeof addon.selectedProvider === 'object'
+    ? buildProviderSnapshot(addon.selectedProvider)
+    : addon.selectedProviderSnapshot || null;
+
+  return {
+    ...defaultSellerLogisticsAddon(user),
+    active: Boolean(addon.active),
+    planId: addon.planId || 'mizigo',
+    selectedProviderId: addon.selectedProvider?._id || addon.selectedProvider || '',
+    selectedProvider,
+    sellerHub: addon.sellerHub || user?.locationHub || user?.city || user?.address || '',
+    activatedAt: addon.activatedAt || null,
+    pausedAt: addon.pausedAt || null,
+    updatedAt: addon.updatedAt || null,
+  };
+};
+
+const findVerifiedLogisticsProvider = async (providerId) => {
+  if (!providerId) return null;
+
+  const provider = await User.findOne({
+    _id: providerId,
+    role: 'logistics',
+    $or: [
+      { 'logisticsProfile.verificationStatus': 'verified' },
+      { verificationStatus: { $in: ['verified', 'gold'] } },
+    ],
+  }).select('fullName name businessName phone email city locationHub logisticsProfile verificationStatus subscriptionTier');
+
+  return provider;
+};
+
+const toFiniteLimit = (value) => {
+  if (value === Infinity || value === null || value === undefined) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const daysUntil = (dateValue) => {
+  if (!dateValue) return null;
+  const timestamp = new Date(dateValue).getTime();
+  if (Number.isNaN(timestamp)) return null;
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.ceil((timestamp - Date.now()) / msPerDay);
+};
+
+const buildBillingSnapshot = (subscription, entitlements) => {
+  const daysRemaining = daysUntil(subscription?.endDate);
+  let renewalState = 'inactive';
+
+  if (entitlements.active) {
+    renewalState = daysRemaining !== null && daysRemaining <= 3 ? 'due_soon' : 'active';
+  } else if (subscription?.status && subscription.status !== 'inactive') {
+    renewalState = 'expired';
+  }
+
+  return {
+    status: subscription?.status || 'inactive',
+    billingModel: subscription?.billingModel || entitlements.billingModel || null,
+    price: subscription?.price || 0,
+    currency: subscription?.currency || 'KES',
+    autoRenew: Boolean(subscription?.autoRenew),
+    startDate: subscription?.startDate || null,
+    endDate: subscription?.endDate || null,
+    nextBillingDate: subscription?.nextBillingDate || null,
+    daysRemaining,
+    renewalState,
+    needsPayment: !entitlements.active || renewalState === 'expired' || renewalState === 'due_soon',
+  };
+};
+
+const buildProductUsage = async (userId, entitlements) => {
+  const totalProducts = await Product.countDocuments({ seller: userId });
+  const productLimit = toFiniteLimit(entitlements.maxProducts);
+  const isUnlimited = productLimit === null && entitlements.maxProducts !== 0;
+  const remainingSlots = isUnlimited ? null : Math.max(0, productLimit - totalProducts);
+
+  return {
+    totalProducts,
+    visibleProducts: isUnlimited ? totalProducts : Math.min(totalProducts, productLimit),
+    productLimit,
+    isUnlimited,
+    remainingSlots,
+    upgradeRequired: !isUnlimited && totalProducts >= productLimit,
+  };
+};
+
+const buildPrimaryAction = (entitlements, productUsage, upgradeOptions = []) => {
+  if (!entitlements.active) {
+    return {
+      type: 'activate',
+      label: 'Activate Subscription',
+      planId: 'solo',
+      path: '/seller/subscription-plans?plan=solo',
+      message: 'Activate Solo, Smart, or Growth to unlock more seller tools.',
+    };
+  }
+
+  if (productUsage.upgradeRequired && entitlements.nextPlan?.id) {
+    return {
+      type: 'upgrade',
+      label: `Upgrade to ${entitlements.nextPlan.name}`,
+      planId: entitlements.nextPlan.id,
+      path: `/seller/subscription-plans?plan=${entitlements.nextPlan.id}`,
+      message: `Your catalog has reached the ${entitlements.planName} product limit.`,
+    };
+  }
+
+  const nextOption = upgradeOptions[0];
+  if (nextOption?.id) {
+    return {
+      type: 'upgrade',
+      label: `Upgrade to ${nextOption.name}`,
+      planId: nextOption.id,
+      path: `/seller/subscription-plans?plan=${nextOption.id}`,
+      message: 'Upgrade when you need more automation, SMS, or controls.',
+    };
+  }
+
+  return {
+    type: 'manage',
+    label: 'Manage Subscription',
+    planId: entitlements.planId,
+    path: '/seller/subscription-plans',
+    message: 'Your current subscription is active.',
+  };
 };
 
 /**
@@ -113,9 +273,14 @@ exports.getMyEntitlements = async (req, res, next) => {
 exports.getMySubscription = async (req, res, next) => {
   try {
     const subscription = await subscriptionService.getUserSubscription(req.user.id);
+    const entitlements = await subscriptionService.getEntitlements(req.user.id);
+    subscription.features = {
+      ...(subscription.features?.toObject ? subscription.features.toObject() : subscription.features || {}),
+      maxProducts: entitlements.maxProducts,
+    };
     
-    // Add SMS credit info for Plan 2 and 3
-    if (subscription.plan === 'smart' || subscription.plan === 'growth') {
+    // Add SMS credit info for Solo, Smart, and Growth
+    if (['solo', 'smart', 'growth'].includes(subscription.plan)) {
       const smsBalance = await subscriptionService.getSmsCreditBalance(req.user.id);
       subscription.smsCreditsRemaining = smsBalance;
     }
@@ -129,6 +294,171 @@ exports.getMySubscription = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: subscription,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get a complete subscription account overview for dashboards and plan screens
+ * GET /api/v1/subscriptions/overview
+ */
+exports.getOverview = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const [plans, subscription, entitlements] = await Promise.all([
+      subscriptionService.getPlans(),
+      subscriptionService.getUserSubscription(userId),
+      subscriptionService.getEntitlements(userId),
+    ]);
+
+    const lockPromptPlanId = entitlements.planId || 'solo';
+    const [lockedFeatures, upgradePayload, productUsage] = await Promise.all([
+      subscriptionService.getLockedFeatures(userId, lockPromptPlanId),
+      subscriptionService.getUpgradePaths(entitlements.planId),
+      buildProductUsage(userId, entitlements),
+    ]);
+
+    let sellerLogisticsAddon = null;
+    if (isSellerAccount(req.user)) {
+      const user = await User.findById(userId)
+        .populate('sellerLogisticsAddon.selectedProvider', 'fullName name businessName phone email city locationHub logisticsProfile verificationStatus subscriptionTier');
+      sellerLogisticsAddon = normalizeSellerLogisticsAddon(user);
+    }
+
+    const smsCredits = {
+      ...entitlements.smsCredits,
+      unit: 'credits',
+      rate: '1 credit = 1 SMS',
+    };
+    const upgradeOptions = Array.isArray(upgradePayload) ? upgradePayload : [];
+
+    res.status(200).json({
+      success: true,
+      data: {
+        subscription,
+        entitlements: {
+          ...entitlements,
+          maxProducts: productUsage.isUnlimited ? null : productUsage.productLimit,
+          lockedFeatures,
+        },
+        usage: {
+          products: productUsage,
+          smsCredits,
+        },
+        billing: buildBillingSnapshot(subscription, entitlements),
+        upgradeOptions,
+        plans,
+        sellerLogisticsAddon,
+        primaryAction: buildPrimaryAction(entitlements, productUsage, upgradeOptions),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get seller logistics add-on settings
+ * GET /api/v1/subscriptions/seller-logistics-addon
+ */
+exports.getSellerLogisticsAddon = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id)
+      .populate('sellerLogisticsAddon.selectedProvider', 'fullName name businessName phone email city locationHub logisticsProfile verificationStatus subscriptionTier');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    if (!isSellerAccount(user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only seller accounts can configure the seller logistics add-on.',
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: normalizeSellerLogisticsAddon(user),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Update seller logistics add-on settings
+ * PUT /api/v1/subscriptions/seller-logistics-addon
+ */
+exports.updateSellerLogisticsAddon = async (req, res, next) => {
+  try {
+    if (sendValidationErrors(req, res)) return;
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    if (!isSellerAccount(user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only seller accounts can configure the seller logistics add-on.',
+      });
+    }
+
+    const nextActive = req.body.active !== undefined ? Boolean(req.body.active) : Boolean(user.sellerLogisticsAddon?.active);
+    const sellerHub = req.body.sellerHub !== undefined
+      ? String(req.body.sellerHub || '').trim()
+      : user.sellerLogisticsAddon?.sellerHub || user.locationHub || user.city || user.address || '';
+    const hasProviderUpdate = Object.prototype.hasOwnProperty.call(req.body, 'selectedProviderId');
+
+    let selectedProvider = user.sellerLogisticsAddon?.selectedProvider || null;
+    let selectedProviderSnapshot = user.sellerLogisticsAddon?.selectedProviderSnapshot || null;
+
+    if (hasProviderUpdate) {
+      if (!req.body.selectedProviderId) {
+        selectedProvider = null;
+        selectedProviderSnapshot = null;
+      } else {
+        const provider = await findVerifiedLogisticsProvider(req.body.selectedProviderId);
+        if (!provider) {
+          return res.status(404).json({
+            success: false,
+            message: 'Verified logistics provider not found.',
+          });
+        }
+        selectedProvider = provider._id;
+        selectedProviderSnapshot = buildProviderSnapshot(provider);
+      }
+    }
+
+    user.sellerLogisticsAddon = {
+      ...(user.sellerLogisticsAddon?.toObject ? user.sellerLogisticsAddon.toObject() : user.sellerLogisticsAddon || {}),
+      active: nextActive,
+      planId: 'mizigo',
+      sellerHub,
+      selectedProvider,
+      selectedProviderSnapshot,
+      activatedAt: nextActive && !user.sellerLogisticsAddon?.activatedAt ? new Date() : user.sellerLogisticsAddon?.activatedAt,
+      pausedAt: nextActive ? null : new Date(),
+      updatedAt: new Date(),
+    };
+
+    await user.save();
+    await user.populate('sellerLogisticsAddon.selectedProvider', 'fullName name businessName phone email city locationHub logisticsProfile verificationStatus subscriptionTier');
+
+    return res.status(200).json({
+      success: true,
+      message: nextActive ? 'Seller logistics add-on saved.' : 'Seller logistics add-on paused.',
+      data: normalizeSellerLogisticsAddon(user),
     });
   } catch (error) {
     next(error);
@@ -188,7 +518,7 @@ exports.changePlan = async (req, res, next) => {
 };
 
 /**
- * Top up SMS credits (for Plan 2 and 3 users)
+ * Top up SMS credits (for Solo, Smart, and Growth users)
  * POST /api/v1/subscriptions/topup-sms
  */
 exports.topupSmsCredits = async (req, res, next) => {

@@ -35,6 +35,17 @@ const initialState = {
   },
 };
 
+const stripInlineBusinessLogo = (data = {}) => {
+  if (typeof data.businessLogoUrl === 'string' && data.businessLogoUrl.startsWith('data:')) {
+    return {
+      ...data,
+      businessLogoUrl: '',
+    };
+  }
+
+  return data;
+};
+
 const uiSlice = createSlice({
   name: 'ui',
   initialState,
@@ -90,7 +101,7 @@ const uiSlice = createSlice({
     mergeRegistrationData: (state, action) => {
       state.registrationProgress.data = {
         ...state.registrationProgress.data,
-        ...action.payload,
+        ...stripInlineBusinessLogo(action.payload),
       };
     },
     resetRegistrationProgress: (state) => {

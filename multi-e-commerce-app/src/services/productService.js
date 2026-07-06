@@ -36,6 +36,15 @@ export const productService = {
     return response.data;
   },
 
+  getScarcityBoard: async (params = {}) => {
+    const response = await api.get('/v1/products/scarcity-board', {
+      params: Object.fromEntries(
+        Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
+      ),
+    });
+    return response.data;
+  },
+
   create: async (productData) => {
     const response = await api.post('/v1/products', productData);
     return response.data;

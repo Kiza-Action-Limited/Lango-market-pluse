@@ -6,10 +6,13 @@ const logger = require('../utils/logger');
 
 class AfricaTalkingService {
   constructor() {
-    this.baseURL = 'https://api.sandbox.africastalking.com/version1';
-    this.apiKey = process.env.AFRICASTALKING_API_KEY;
-    this.username = process.env.AFRICASTALKING_USERNAME;
-    this.senderId = process.env.AFRICASTALKING_SENDER_ID || 'LangoMarket';
+    this.environment = process.env.AFRICASTALKING_ENV || process.env.AT_ENV || 'sandbox';
+    this.baseURL = this.environment === 'production'
+      ? 'https://api.africastalking.com/version1'
+      : 'https://api.sandbox.africastalking.com/version1';
+    this.apiKey = process.env.AFRICASTALKING_API_KEY || process.env.AT_API_KEY;
+    this.username = process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME;
+    this.senderId = process.env.AFRICASTALKING_SENDER_ID || process.env.AT_SENDER_ID || 'LangoMarket';
     this.productName = process.env.AFRICASTALKING_PRODUCT_NAME || 'Lango Market Pulse';
     this.isInitialized = false;
     
@@ -26,7 +29,7 @@ class AfricaTalkingService {
     if (!this.apiKey || !this.username) {
       const errorMsg = `Africa's Talking credentials missing. 
         API Key: ${!!this.apiKey}, Username: ${!!this.username}
-        Check AFRICASTALKING_API_KEY and AFRICASTALKING_USERNAME in .env`;
+        Check AFRICASTALKING_API_KEY/AFRICASTALKING_USERNAME or AT_API_KEY/AT_USERNAME in .env`;
       console.error(errorMsg);
       throw new Error('Africa\'s Talking credentials missing');
     }
@@ -35,7 +38,7 @@ class AfricaTalkingService {
     logger.info('Africa\'s Talking service initialized', {
       username: this.username,
       senderId: this.senderId,
-      environment: 'sandbox'
+      environment: this.environment
     });
     
     return true;
@@ -384,7 +387,7 @@ class AfricaTalkingService {
         message: 'Africa\'s Talking connection successful',
         balance: balance.balance,
         senderId: this.senderId,
-        environment: 'sandbox'
+        environment: this.environment
       };
     } catch (error) {
       return {

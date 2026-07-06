@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +10,7 @@ const ProfileCompletionReminder = () => {
   const reminderState = useSelector((state) => state?.ui?.profileReminder);
   const dismissed = Boolean(reminderState?.dismissed);
   const snoozedUntil = reminderState?.snoozedUntil || null;
+  const [currentTime, setCurrentTime] = useState(0);
 
   const profileCompletion = useMemo(() => {
     if (!user) return 100;
@@ -18,9 +19,28 @@ const ProfileCompletionReminder = () => {
     return Math.round((filled / fields.length) * 100);
   }, [user]);
 
+  useEffect(() => {
+    if (!snoozedUntil) {
+      setCurrentTime(0);
+      return undefined;
+    }
+
+    const now = Date.now();
+    setCurrentTime(now);
+
+    const remainingMs = Math.max(snoozedUntil - now, 0);
+    if (!remainingMs) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setCurrentTime(Date.now());
+    }, remainingMs);
+
+    return () => window.clearTimeout(timer);
+  }, [snoozedUntil]);
+
   if (!isAuthenticated) return null;
   if (dismissed) return null;
-  if (snoozedUntil && Date.now() < snoozedUntil) return null;
+  if (snoozedUntil && currentTime < snoozedUntil) return null;
   if (profileCompletion >= 100) return null;
 
   return (

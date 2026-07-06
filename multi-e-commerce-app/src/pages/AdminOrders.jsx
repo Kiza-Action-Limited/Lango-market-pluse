@@ -1,335 +1,515 @@
-// src/pages/AdminOrders.jsx
-import React, { useState, useEffect } from 'react';
-import api from '../config/axios';
-import { useAuth } from '../context/AuthContext';
-import { FaEye, FaTruck, FaCheckCircle, FaBox, FaUser, FaMapMarkerAlt, FaClock, FaBrain, FaBell } from 'react-icons/fa';
+import React, { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
+import {
+  FaBox,
+  FaCheckCircle,
+  FaClock,
+  FaDownload,
+  FaEye,
+  FaFilter,
+  FaMapMarkerAlt,
+  FaMoneyBillWave,
+  FaSearch,
+  FaShieldAlt,
+  FaSyncAlt,
+  FaTruck,
+  FaUser,
+} from 'react-icons/fa';
+import api from '../config/axios';
 import { formatCurrency } from '../utils/formatters';
 
+const statusOptions = [
+  ['all', 'All statuses'],
+  ['AWAITING_PAYMENT', 'Awaiting payment'],
+  ['FUNDS_HELD', 'Funds held'],
+  ['processing', 'Processing'],
+  ['IN_TRANSIT', 'In transit'],
+  ['DELIVERED', 'Delivered'],
+  ['RELEASED', 'Released'],
+  ['DISPUTED', 'Disputed'],
+  ['REFUNDED', 'Refunded'],
+  ['cancelled', 'Cancelled'],
+];
+
+const updateStatusOptions = statusOptions.filter(([value]) => value !== 'all');
+
+const paymentStatusOptions = [
+  ['all', 'All payments'],
+  ['pending', 'Pending'],
+  ['paid', 'Paid'],
+  ['completed', 'Completed'],
+  ['failed', 'Failed'],
+  ['refunded', 'Refunded'],
+];
+
+const normalizeStatus = (status) => String(status || 'pending')
+  .replace(/_/g, ' ')
+  .toLowerCase()
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const getUserName = (user) => (
+  user?.businessName ||
+  user?.fullName ||
+  user?.name ||
+  user?.email ||
+  'Unknown'
+);
+
+const getOrderId = (order) => order?._id || order?.id;
+
+const getStatusTone = (status) => {
+  const value = String(status || '').toLowerCase();
+  if (['released', 'completed', 'delivered'].includes(value)) return 'border-green-200 bg-green-50 text-green-700';
+  if (['funds_held', 'payment_escrowed', 'processing'].includes(value)) return 'border-blue-200 bg-blue-50 text-blue-700';
+  if (['in_transit', 'dispatched'].includes(value)) return 'border-cyan-200 bg-cyan-50 text-cyan-700';
+  if (['awaiting_payment', 'pending_payment'].includes(value)) return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (['disputed', 'refunded', 'cancelled', 'expired'].includes(value)) return 'border-red-200 bg-red-50 text-red-700';
+  return 'border-gray-200 bg-gray-100 text-gray-700';
+};
+
+const StatCard = ({ icon: Icon, label, value, detail, color = '#F97316' }) => (
+  <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="flex items-center justify-between gap-3">
+      <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gray-50" style={{ color }}>
+        <Icon />
+      </span>
+      <p className="text-2xl font-bold text-gray-950">{value}</p>
+    </div>
+    <p className="mt-3 text-xs font-semibold uppercase text-gray-500">{label}</p>
+    {detail && <p className="mt-1 text-sm text-gray-600">{detail}</p>}
+  </div>
+);
+
 const AdminOrders = () => {
-  const { token } = useAuth();
   const [orders, setOrders] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
+  const [updatingOrderId, setUpdatingOrderId] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [filter, setFilter] = useState('all');
-
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
-    try {
-      const response = await api.get('/v1/admin/orders');
-      setOrders(response.data.orders);
-    } catch (error) {
-      console.error('Error fetching orders:', error);
-      toast.error('Failed to load orders');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const updateOrderStatus = async (orderId, status) => {
-    try {
-      await api.put(`/v1/admin/orders/${orderId}/status`, { status });
-      toast.success('Order status updated successfully');
-      fetchOrders();
-    } catch (error) {
-      toast.error('Failed to update order status');
-    }
-  };
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'pending':
-        return 'bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20';
-      case 'processing':
-        return 'bg-[#FB923C]/10 text-[#FB923C] border border-[#FB923C]/20';
-      case 'shipped':
-        return 'bg-[#F97316]/10 text-[#F97316] border border-[#F97316]/20';
-      case 'delivered':
-        return 'bg-[#16A34A]/10 text-[#16A34A] border border-[#16A34A]/20';
-      case 'cancelled':
-        return 'bg-red-100 text-red-800 border border-red-200';
-      default:
-        return 'bg-gray-100 text-gray-800 border border-gray-200';
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'pending':
-        return <FaClock className="mr-1" size={12} />;
-      case 'processing':
-        return <FaBox className="mr-1" size={12} />;
-      case 'shipped':
-        return <FaTruck className="mr-1" size={12} />;
-      case 'delivered':
-        return <FaCheckCircle className="mr-1" size={12} />;
-      default:
-        return null;
-    }
-  };
-
-  const filteredOrders = orders.filter(order => {
-    if (filter === 'all') return true;
-    return order.status === filter;
+  const [filters, setFilters] = useState({
+    search: '',
+    status: 'all',
+    paymentStatus: 'all',
+    startDate: '',
+    endDate: '',
   });
 
-  // Order statistics
-  const orderStats = {
-    pending: orders.filter(o => o.status === 'pending').length,
-    processing: orders.filter(o => o.status === 'processing').length,
-    shipped: orders.filter(o => o.status === 'shipped').length,
-    delivered: orders.filter(o => o.status === 'delivered').length,
-    cancelled: orders.filter(o => o.status === 'cancelled').length,
-    totalRevenue: orders.reduce((sum, o) => sum + o.total, 0),
+  const fetchOrders = async ({ page = 1, silent = false } = {}) => {
+    if (!silent) setLoading(true);
+    try {
+      const response = await api.get('/v1/admin/orders', {
+        params: {
+          page,
+          limit: pagination.limit || 25,
+          status: filters.status,
+          paymentStatus: filters.paymentStatus,
+          startDate: filters.startDate || undefined,
+          endDate: filters.endDate || undefined,
+          search: filters.search.trim() || undefined,
+        },
+      });
+      setOrders(Array.isArray(response.data.orders) ? response.data.orders : []);
+      setSummary(response.data.summary || {});
+      setPagination(response.data.pagination || { page, limit: pagination.limit || 25, total: 0, pages: 1 });
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      toast.error(error.response?.data?.message || 'Failed to load orders');
+    } finally {
+      if (!silent) setLoading(false);
+    }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#F97316]"></div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => fetchOrders({ page: 1 }), 250);
+    return () => window.clearTimeout(timer);
+  }, [filters.search, filters.status, filters.paymentStatus, filters.startDate, filters.endDate]);
+
+  const updateOrderStatus = async (orderId, status) => {
+    setUpdatingOrderId(orderId);
+    try {
+      const response = await api.put(`/v1/admin/orders/${orderId}/status`, { status });
+      toast.success(response.data?.message || 'Order status updated');
+      await fetchOrders({ page: pagination.page || 1, silent: true });
+      setSelectedOrder((current) => (
+        String(getOrderId(current)) === String(orderId)
+          ? { ...current, status }
+          : current
+      ));
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to update order status');
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  const orderStats = useMemo(() => ({
+    totalOrders: summary.totalOrders || pagination.total || 0,
+    totalRevenue: summary.totalRevenue || 0,
+    totalOrderValue: summary.totalOrderValue || 0,
+    averageOrderValue: summary.averageOrderValue || 0,
+    awaitingPayment: summary.awaitingPayment || 0,
+    processing: summary.processing || 0,
+    inTransit: summary.inTransit || 0,
+    delivered: summary.delivered || 0,
+    disputed: summary.disputed || 0,
+    cancelled: summary.cancelled || 0,
+  }), [summary, pagination.total]);
+
+  const exportOrders = () => {
+    const headers = ['Order', 'Buyer', 'Seller', 'Product', 'Status', 'Payment', 'Total', 'Date'];
+    const rows = orders.map((order) => [
+      order.orderNumber || getOrderId(order),
+      order.buyerName || getUserName(order.buyer),
+      order.sellerName || getUserName(order.seller),
+      order.productName,
+      order.status,
+      order.paymentStatus,
+      order.total || order.totalAmount || 0,
+      order.createdAt ? new Date(order.createdAt).toISOString() : '',
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `admin_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
-    <div className="bg-[#F9FAFB] min-h-screen py-8">
-      <div className="container mx-auto px-4">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <FaTruck className="text-[#16A34A] text-3xl" />
-            <h1 className="text-3xl font-bold text-[#F97316]">Manage Orders</h1>
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
+      <div className="mx-auto max-w-screen-2xl space-y-6">
+        <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase text-[#F97316]">Admin orders</p>
+              <h1 className="mt-2 text-2xl font-bold text-gray-950">Professional order operations</h1>
+              <p className="mt-1 text-sm text-gray-600">
+                Manage buyer orders, escrow status, seller fulfillment, logistics movement, and delivery outcomes.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => fetchOrders({ page: pagination.page || 1 })}
+                disabled={loading}
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                <FaSyncAlt className={loading ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={exportOrders}
+                className="inline-flex h-10 items-center gap-2 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white hover:bg-[#374151]"
+              >
+                <FaDownload />
+                Export CSV
+              </button>
+            </div>
           </div>
-          <p className="text-[#6B7280]">Lango Lako la Biashara Smart — Track and manage all platform orders</p>
-        </div>
+        </section>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-          <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-[#F97316]">
-            <p className="text-[#6B7280] text-xs uppercase tracking-wide">Total Orders</p>
-            <p className="text-2xl font-bold text-[#111827]">{orders.length}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-[#16A34A]">
-            <p className="text-[#6B7280] text-xs uppercase tracking-wide">Total Revenue</p>
-            <p className="text-2xl font-bold text-[#16A34A]">{formatCurrency(orderStats.totalRevenue)}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-[#F97316]">
-            <p className="text-[#6B7280] text-xs uppercase tracking-wide">Pending</p>
-            <p className="text-2xl font-bold text-[#F97316]">{orderStats.pending}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-[#FB923C]">
-            <p className="text-[#6B7280] text-xs uppercase tracking-wide">Processing</p>
-            <p className="text-2xl font-bold text-[#FB923C]">{orderStats.processing}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-[#F97316]">
-            <p className="text-[#6B7280] text-xs uppercase tracking-wide">Shipped</p>
-            <p className="text-2xl font-bold text-[#F97316]">{orderStats.shipped}</p>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-[#16A34A]">
-            <p className="text-[#6B7280] text-xs uppercase tracking-wide">Delivered</p>
-            <p className="text-2xl font-bold text-[#16A34A]">{orderStats.delivered}</p>
-          </div>
-        </div>
-        
-        {/* Filters */}
-        <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setFilter('all')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filter === 'all' 
-                  ? 'bg-[#F97316] text-white shadow-md' 
-                  : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
-              }`}
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+          <StatCard icon={FaBox} label="Orders" value={Number(orderStats.totalOrders).toLocaleString('en-KE')} detail={`${pagination.total || 0} filtered`} />
+          <StatCard icon={FaMoneyBillWave} label="Revenue" value={formatCurrency(orderStats.totalRevenue)} detail={`${formatCurrency(orderStats.averageOrderValue)} AOV`} color="#16A34A" />
+          <StatCard icon={FaClock} label="Awaiting payment" value={orderStats.awaitingPayment} detail="Buyer action needed" color="#F59E0B" />
+          <StatCard icon={FaShieldAlt} label="Escrow processing" value={orderStats.processing} detail="Funds held or preparing" color="#3B82F6" />
+          <StatCard icon={FaTruck} label="In transit" value={orderStats.inTransit} detail="Moving with logistics" color="#06B6D4" />
+          <StatCard icon={FaCheckCircle} label="Delivered" value={orderStats.delivered} detail={`${orderStats.disputed} disputed`} color="#16A34A" />
+        </section>
+
+        <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+          <form
+            className="grid gap-3 lg:grid-cols-[1fr_190px_190px_160px_160px_auto]"
+            onSubmit={(event) => {
+              event.preventDefault();
+              fetchOrders({ page: 1 });
+            }}
+          >
+            <div className="relative">
+              <FaSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={filters.search}
+                onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+                placeholder="Search order number or order ID..."
+                className="h-10 w-full rounded-md border border-gray-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+              />
+            </div>
+            <select
+              value={filters.status}
+              onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+              className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
             >
-              All Orders ({orders.length})
-            </button>
-            <button
-              onClick={() => setFilter('pending')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filter === 'pending' 
-                  ? 'bg-[#F97316] text-white shadow-md' 
-                  : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
-              }`}
+              {statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <select
+              value={filters.paymentStatus}
+              onChange={(event) => setFilters((current) => ({ ...current, paymentStatus: event.target.value }))}
+              className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
             >
-              Pending ({orderStats.pending})
-            </button>
+              {paymentStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+            <input
+              type="date"
+              value={filters.startDate}
+              onChange={(event) => setFilters((current) => ({ ...current, startDate: event.target.value }))}
+              className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#F97316]"
+            />
+            <input
+              type="date"
+              value={filters.endDate}
+              onChange={(event) => setFilters((current) => ({ ...current, endDate: event.target.value }))}
+              className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#F97316]"
+            />
             <button
-              onClick={() => setFilter('processing')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filter === 'processing' 
-                  ? 'bg-[#FB923C] text-white shadow-md' 
-                  : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
-              }`}
+              type="submit"
+              disabled={loading}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-semibold text-white hover:bg-[#EA580C] disabled:opacity-60"
             >
-              Processing ({orderStats.processing})
+              <FaFilter />
+              Apply
             </button>
-            <button
-              onClick={() => setFilter('shipped')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filter === 'shipped' 
-                  ? 'bg-[#F97316] text-white shadow-md' 
-                  : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
-              }`}
-            >
-              Shipped ({orderStats.shipped})
-            </button>
-            <button
-              onClick={() => setFilter('delivered')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filter === 'delivered' 
-                  ? 'bg-[#16A34A] text-white shadow-md' 
-                  : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
-              }`}
-            >
-              Delivered ({orderStats.delivered})
-            </button>
-            <button
-              onClick={() => setFilter('cancelled')}
-              className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                filter === 'cancelled' 
-                  ? 'bg-red-500 text-white shadow-md' 
-                  : 'bg-gray-100 text-[#6B7280] hover:bg-gray-200'
-              }`}
-            >
-              Cancelled ({orderStats.cancelled})
-            </button>
+          </form>
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-5 py-4">
+            <h2 className="font-semibold text-gray-950">Order Queue</h2>
+            <p className="mt-1 text-sm text-gray-500">Review order participants, payment, escrow status, logistics, and fulfillment state.</p>
           </div>
-        </div>
-        
-        {/* AI Intelligence Tip */}
-        {filter === 'pending' && orderStats.pending > 5 && (
-          <div className="mb-6 bg-linear-to-r from-[#F97316]/10 to-[#FB923C]/10 rounded-xl p-4 border border-[#F97316]/20">
-            <div className="flex items-start gap-3">
-              <FaBrain className="text-[#F97316] text-xl mt-0.5" />
+
+          {loading ? (
+            <div className="space-y-3 p-5">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="h-20 rounded-lg bg-gray-100 skeleton-shimmer" />
+              ))}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1180px] text-left text-sm">
+                <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                  <tr>
+                    <th className="px-5 py-3">Order</th>
+                    <th className="px-5 py-3">Buyer</th>
+                    <th className="px-5 py-3">Seller</th>
+                    <th className="px-5 py-3">Product</th>
+                    <th className="px-5 py-3">Payment</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Logistics</th>
+                    <th className="px-5 py-3">Total</th>
+                    <th className="px-5 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {orders.map((order) => {
+                    const orderId = getOrderId(order);
+                    const logistics = order.logistics || {};
+
+                    return (
+                      <tr key={orderId} className="bg-white hover:bg-gray-50">
+                        <td className="px-5 py-4">
+                          <p className="font-mono text-sm font-semibold text-gray-950">{order.orderNumber || `#${String(orderId).slice(-8)}`}</p>
+                          <p className="mt-1 text-xs text-gray-500">{order.createdAt ? new Date(order.createdAt).toLocaleString() : '-'}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <FaUser className="text-gray-400" />
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-gray-900">{order.buyerName || getUserName(order.buyer)}</p>
+                              <p className="truncate text-xs text-gray-500">{order.buyer?.phone || order.buyer?.email || '-'}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="truncate font-semibold text-gray-900">{order.sellerName || getUserName(order.seller)}</p>
+                          <p className="truncate text-xs text-gray-500">{order.seller?.phone || order.seller?.email || '-'}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="max-w-[180px] truncate font-semibold text-gray-900">{order.productName}</p>
+                          <p className="text-xs text-gray-500">Qty {order.quantity || order.items?.[0]?.quantity || 0} | {normalizeStatus(order.productCategory)}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(order.paymentStatus)}`}>
+                            {normalizeStatus(order.paymentStatus)}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4">
+                          <select
+                            value={order.status}
+                            onChange={(event) => updateOrderStatus(orderId, event.target.value)}
+                            disabled={updatingOrderId === orderId}
+                            className={`max-w-[170px] rounded-lg border px-2 py-1 text-xs font-semibold outline-none disabled:opacity-60 ${getStatusTone(order.status)}`}
+                          >
+                            {updateStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-5 py-4">
+                          {logistics?._id ? (
+                            <div>
+                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(logistics.status)}`}>
+                                {normalizeStatus(logistics.status)}
+                              </span>
+                              <p className="mt-1 text-xs text-gray-500">{logistics.trackingNumber || logistics.tripId || 'Tracking pending'}</p>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-500">No logistics record</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="font-semibold text-green-700">{formatCurrency(order.total || order.totalAmount || 0)}</p>
+                          <p className="text-xs text-gray-500">Unit {formatCurrency(order.unitPrice || order.items?.[0]?.price || 0)}</p>
+                        </td>
+                        <td className="px-5 py-4">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOrder(order)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-[#F97316]/30 bg-white px-3 py-2 text-xs font-semibold text-[#F97316] hover:bg-[#FFF7ED]"
+                          >
+                            <FaEye />
+                            Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {!orders.length && (
+                <div className="p-10 text-center">
+                  <FaBox className="mx-auto text-4xl text-[#F97316]" />
+                  <h3 className="mt-3 font-semibold text-gray-950">No orders found</h3>
+                  <p className="mt-1 text-sm text-gray-500">Try another status, payment filter, date range, or search.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 border-t border-gray-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-gray-500">
+              Page <span className="font-semibold text-gray-950">{pagination.page || 1}</span> of <span className="font-semibold text-gray-950">{pagination.pages || 1}</span>
+              {' '}({pagination.total || 0} orders)
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={loading || (pagination.page || 1) <= 1}
+                onClick={() => fetchOrders({ page: (pagination.page || 1) - 1 })}
+                className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={loading || (pagination.page || 1) >= (pagination.pages || 1)}
+                onClick={() => fetchOrders({ page: (pagination.page || 1) + 1 })}
+                className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-gray-200 bg-white p-5">
               <div>
-                <h4 className="font-semibold text-[#111827] mb-1">AI Intelligence Alert</h4>
-                <p className="text-sm text-[#6B7280]">
-                  {orderStats.pending} pending orders require attention. Processing them faster can improve customer satisfaction by <span className="text-[#16A34A] font-medium">32%</span>.
+                <p className="text-xs font-semibold uppercase text-[#F97316]">Order details</p>
+                <h2 className="mt-1 text-xl font-bold text-gray-950">{selectedOrder.orderNumber || `#${String(getOrderId(selectedOrder)).slice(-8)}`}</h2>
+                <p className="mt-1 text-sm text-gray-500">{selectedOrder.createdAt ? new Date(selectedOrder.createdAt).toLocaleString() : '-'}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedOrder(null)} className="rounded-md border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5">
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-gray-500">Status</p>
+                  <span className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(selectedOrder.status)}`}>
+                    {normalizeStatus(selectedOrder.status)}
+                  </span>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-gray-500">Payment</p>
+                  <p className="mt-2 font-semibold text-gray-950">{normalizeStatus(selectedOrder.paymentStatus)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-gray-500">Order value</p>
+                  <p className="mt-2 font-semibold text-green-700">{formatCurrency(selectedOrder.total || selectedOrder.totalAmount || 0)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-gray-500">Estimated delivery</p>
+                  <p className="mt-2 font-semibold text-gray-950">{selectedOrder.estimatedDelivery ? new Date(selectedOrder.estimatedDelivery).toLocaleDateString() : 'Pending'}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border border-gray-200 p-4">
+                  <h3 className="flex items-center gap-2 font-semibold text-gray-950"><FaUser className="text-[#F97316]" /> Buyer</h3>
+                  <p className="mt-3 font-semibold text-gray-900">{selectedOrder.buyerName || getUserName(selectedOrder.buyer)}</p>
+                  <p className="text-sm text-gray-500">{selectedOrder.buyer?.phone || '-'}</p>
+                  <p className="text-sm text-gray-500">{selectedOrder.buyer?.email || '-'}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-4">
+                  <h3 className="flex items-center gap-2 font-semibold text-gray-950"><FaUser className="text-[#F97316]" /> Seller</h3>
+                  <p className="mt-3 font-semibold text-gray-900">{selectedOrder.sellerName || getUserName(selectedOrder.seller)}</p>
+                  <p className="text-sm text-gray-500">{selectedOrder.seller?.phone || '-'}</p>
+                  <p className="text-sm text-gray-500">{selectedOrder.seller?.email || '-'}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border border-gray-200 p-4">
+                  <h3 className="flex items-center gap-2 font-semibold text-gray-950"><FaBox className="text-[#F97316]" /> Product</h3>
+                  {(selectedOrder.items || []).map((item) => (
+                    <div key={item.id || item.name} className="mt-3 flex items-center justify-between gap-3 rounded-md bg-gray-50 p-3">
+                      <div>
+                        <p className="font-semibold text-gray-950">{item.name || selectedOrder.productName}</p>
+                        <p className="text-sm text-gray-500">Qty {item.quantity} x {formatCurrency(item.price || 0)}</p>
+                      </div>
+                      <p className="font-semibold text-green-700">{formatCurrency((item.quantity || 0) * (item.price || 0))}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-lg border border-gray-200 p-4">
+                  <h3 className="flex items-center gap-2 font-semibold text-gray-950"><FaTruck className="text-[#F97316]" /> Logistics</h3>
+                  {selectedOrder.logistics?._id ? (
+                    <div className="mt-3 space-y-2 text-sm text-gray-600">
+                      <p><span className="font-semibold text-gray-950">Trip:</span> {selectedOrder.logistics.tripId || selectedOrder.logistics.bookingReference || '-'}</p>
+                      <p><span className="font-semibold text-gray-950">Status:</span> {normalizeStatus(selectedOrder.logistics.status)}</p>
+                      <p><span className="font-semibold text-gray-950">Tracking:</span> {selectedOrder.logistics.trackingNumber || '-'}</p>
+                      <p><span className="font-semibold text-gray-950">Driver:</span> {selectedOrder.logistics.driverName || '-'} {selectedOrder.logistics.driverPhone ? `(${selectedOrder.logistics.driverPhone})` : ''}</p>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-gray-500">No logistics record has been created for this order yet.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 p-4">
+                <h3 className="flex items-center gap-2 font-semibold text-gray-950"><FaMapMarkerAlt className="text-[#F97316]" /> Delivery address</h3>
+                <p className="mt-3 text-sm text-gray-600">
+                  {selectedOrder.deliveryAddressText ||
+                    [selectedOrder.deliveryAddress?.label, selectedOrder.deliveryAddress?.town, selectedOrder.deliveryAddress?.county, selectedOrder.deliveryAddress?.country]
+                      .filter(Boolean)
+                      .join(', ') ||
+                    'No delivery address saved'}
                 </p>
               </div>
             </div>
           </div>
-        )}
-        
-        {/* Orders List */}
-        <div className="space-y-4">
-          {filteredOrders.map((order) => (
-            <div key={order._id} className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-              <div className="bg-linear-to-r from-gray-50 to-white px-4 sm:px-6 py-4 border-b flex flex-wrap gap-3 justify-between items-center">
-                <div className="flex items-center gap-3 sm:gap-4">
-                  <div className="flex items-center gap-2">
-                    <FaBox className="text-[#FB923C]" />
-                    <span className="text-sm font-mono text-[#FB923C]">#{String(order._id).slice(-8)}</span>
-                  </div>
-                  <div className="w-px h-4 bg-gray-300" />
-                  <div className="flex items-center gap-2 text-sm text-[#6B7280]">
-                    <FaClock size={12} />
-                    <span>{new Date(order.createdAt).toLocaleDateString()}</span>
-                  </div>
-                </div>
-                <div className="w-full sm:w-auto flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-4 sm:justify-end">
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 ${getStatusColor(order.status)}`}>
-                    {getStatusIcon(order.status)}
-                    {order.status.toUpperCase()}
-                  </span>
-                  <span className="font-bold text-[#16A34A]">{formatCurrency(order.total)}</span>
-                  <button
-                    onClick={() => setSelectedOrder(selectedOrder?._id === order._id ? null : order)}
-                    className="text-[#F97316] hover:text-[#FB923C] font-medium flex items-center gap-1 transition-colors"
-                  >
-                    <FaEye size={14} />
-                    {selectedOrder?._id === order._id ? 'Hide Details' : 'View Details'}
-                  </button>
-                </div>
-              </div>
-              
-              {selectedOrder?._id === order._id && (
-                <div className="p-6 border-t bg-[#F9FAFB]">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-white rounded-lg p-4 shadow-sm">
-                      <div className="flex items-center gap-2 mb-3">
-                        <FaUser className="text-[#F97316]" />
-                        <h3 className="font-semibold text-[#111827]">Customer Information</h3>
-                      </div>
-                      <p className="text-[#111827] font-medium">{order.customer?.name || 'Guest Customer'}</p>
-                      <p className="text-[#6B7280] text-sm">{order.customer?.email}</p>
-                      <p className="text-[#6B7280] text-sm mt-1">{order.shippingAddress?.phone}</p>
-                    </div>
-                    
-                    <div className="bg-white rounded-lg p-4 shadow-sm">
-                      <div className="flex items-center gap-2 mb-3">
-                        <FaMapMarkerAlt className="text-[#F97316]" />
-                        <h3 className="font-semibold text-[#111827]">Shipping Address</h3>
-                      </div>
-                      <p className="text-[#111827]">{order.shippingAddress?.addressLine1}</p>
-                      {order.shippingAddress?.addressLine2 && (
-                        <p className="text-[#6B7280] text-sm">{order.shippingAddress.addressLine2}</p>
-                      )}
-                      <p className="text-[#6B7280] text-sm">
-                        {order.shippingAddress?.city}, {order.shippingAddress?.state} {order.shippingAddress?.zipCode}
-                      </p>
-                      <p className="text-[#6B7280] text-sm">{order.shippingAddress?.country}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-6 bg-white rounded-lg p-4 shadow-sm">
-                    <h3 className="font-semibold mb-3 text-[#111827]">Order Items</h3>
-                    <div className="space-y-2">
-                      {order.items.map((item) => (
-                        <div key={item.id} className="flex flex-wrap justify-between items-center gap-2 py-2 border-b last:border-0">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <img
-                              src={item.image || 'https://via.placeholder.com/50'}
-                              alt={item.name}
-                              className="w-12 h-12 object-cover rounded-lg"
-                            />
-                            <div>
-                              <p className="font-medium text-[#111827]">{item.name}</p>
-                              <p className="text-sm text-[#6B7280]">Qty: {item.quantity}</p>
-                            </div>
-                          </div>
-                          <span className="font-semibold text-[#16A34A]">{formatCurrency(item.price * item.quantity)}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-3 pt-3 border-t flex justify-between items-center">
-                      <span className="font-semibold text-[#111827]">Total</span>
-                      <span className="text-xl font-bold text-[#16A34A]">{formatCurrency(order.total)}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4 pt-4 border-t">
-                    <label className="block text-sm font-medium mb-2 text-[#111827]">Update Order Status</label>
-                    <select
-                      value={order.status}
-                      onChange={(e) => updateOrderStatus(order._id, e.target.value)}
-                      className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent"
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="processing">Processing</option>
-                      <option value="shipped">Shipped</option>
-                      <option value="delivered">Delivered</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-          
-          {filteredOrders.length === 0 && (
-            <div className="bg-white rounded-xl shadow-md p-12 text-center">
-              <div className="text-5xl mb-4">📦</div>
-              <p className="text-[#6B7280] text-lg">No orders found</p>
-              <p className="text-[#6B7280] text-sm mt-1">Try changing your filter to see more orders</p>
-            </div>
-          )}
         </div>
-      </div>
+      )}
     </div>
   );
 };

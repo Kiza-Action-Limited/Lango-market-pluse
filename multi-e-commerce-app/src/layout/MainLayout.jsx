@@ -8,12 +8,15 @@ import ProfileCompletionReminder from '../components/ProfileCompletionReminder';
 const MainLayout = () => {
   const location = useLocation();
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register';
+  const isLogisticsView = location.pathname.startsWith('/logistics');
+  const isBuyerView = location.pathname.startsWith('/buyer');
   const isSellerOrAdminView =
     location.pathname.startsWith('/seller') || location.pathname.startsWith('/admin');
+  const isWorkspaceView = isSellerOrAdminView || isLogisticsView || isBuyerView;
 
   return (
     <div className="min-h-screen flex flex-col">
-      {isSellerOrAdminView ? null : isAuthPage ? (
+      {isWorkspaceView ? null : isAuthPage ? (
         <nav className="bg-[#F2871A] text-white sticky top-0 z-40 shadow-sm">
           <div className="max-w-screen-2xl mx-auto px-4 md:px-6">
             <div className="h-14 sm:h-16 flex items-center">
@@ -29,8 +32,8 @@ const MainLayout = () => {
       ) : (
         <Navbar />
       )}
-      <main className={`grow bg-gray-50 ${isAuthPage || isSellerOrAdminView ? '' : 'pt-24 md:pt-26'}`}>
-        {!isAuthPage && !isSellerOrAdminView && (
+      <main className={`grow bg-gray-50 ${isAuthPage || isWorkspaceView ? '' : 'pt-24 md:pt-26'}`}>
+        {!isAuthPage && !isWorkspaceView && (
           <div className="max-w-screen-2xl mx-auto px-4 pt-3">
             <ProfileCompletionReminder />
           </div>
@@ -50,7 +53,7 @@ const MainLayout = () => {
           <Outlet />
         </Suspense>
       </main>
-      {!isAuthPage && !isSellerOrAdminView && <Footer />}
+      {!isAuthPage && !isWorkspaceView && <Footer />}
     </div>
   );
 };

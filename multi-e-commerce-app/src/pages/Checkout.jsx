@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../config/axios';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
+import { SHIPPING_COST } from '../utils/contants';
 import { productService } from '../services/productService';
 import { paymentService } from '../services/paymentService';
 import { FaTruck, FaShieldAlt, FaBrain, FaLock, FaArrowLeft, FaStar, FaRegStar, FaTimes } from 'react-icons/fa';
@@ -20,7 +21,7 @@ const Checkout = () => {
   const [activeReviewIndex, setActiveReviewIndex] = useState(0);
   const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
-  const [postOrderPath, setPostOrderPath] = useState('/orders');
+  const [postOrderPath, setPostOrderPath] = useState('/buyer/orders');
   const [shippingAddress, setShippingAddress] = useState({
     fullName: user?.name || '',
     addressLine1: '',
@@ -29,10 +30,14 @@ const Checkout = () => {
     state: '',
     zipCode: '',
     country: 'Kenya',
-    phone: ''
+    phone: user?.phone || '',
+    gpsLat: '',
+    gpsLng: '',
   });
+  const [mpesaPhone, setMpesaPhone] = useState(user?.phone || '');
   const paymentMethod = 'mpesa';
   const showReviewPopup = reviewItems.length > 0;
+  const kenyaMpesaPhonePattern = /^(\+?254|0)?[71][0-9]{8}$/;
 
   const buildDeliveryAddress = () => ({
     label: [
@@ -46,6 +51,8 @@ const Checkout = () => {
     town: shippingAddress.city,
     county: shippingAddress.state,
     country: shippingAddress.country || 'Kenya',
+    gpsLat: shippingAddress.gpsLat ? Number(shippingAddress.gpsLat) : undefined,
+    gpsLng: shippingAddress.gpsLng ? Number(shippingAddress.gpsLng) : undefined,
   });
 
   const getOrderId = (response) =>
@@ -55,6 +62,12 @@ const Checkout = () => {
     response?.data?.data?.order?._id ||
     response?.data?.data?.id ||
     response?.data?.data?._id;
+
+  const getCreatedOrder = (response) =>
+    response?.data?.data ||
+    response?.data?.order ||
+    response?.data?.data?.order ||
+    response?.data;
 
   if (cartItems.length === 0 && !showReviewPopup) {
     navigate('/cart');
@@ -115,6 +128,17 @@ const Checkout = () => {
       return;
     }
 
+    const paymentPhone = mpesaPhone.trim();
+    if (!paymentPhone) {
+      toast.error('Enter the buyer M-Pesa phone number');
+      return;
+    }
+
+    if (!kenyaMpesaPhonePattern.test(paymentPhone)) {
+      toast.error('Enter a valid M-Pesa number, for example 0712345678');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -142,9 +166,13 @@ const Checkout = () => {
       }
 
       toast.success('Order placed successfully! Complete payment before reviewing products.');
+      const firstCreatedOrder = getCreatedOrder(orderResponses[0]);
+      if (firstCreatedOrder?.totalAmount) {
+        toast.success(`Escrow amount includes logistics: ${formatCurrency(firstCreatedOrder.totalAmount)}`);
+      }
       const orderIds = orderResponses.map(getOrderId).filter(Boolean);
       const orderId = orderIds[0];
-      const nextPath = orderId ? `/orders/${orderId}/track` : '/orders';
+      const nextPath = orderId ? `/buyer/orders/${orderId}/track` : '/buyer/orders';
 
       await clearCart();
 
@@ -152,7 +180,7 @@ const Checkout = () => {
         try {
           const paymentResult = await paymentService.initiateMpesaPayment({
             orderId,
-            phoneNumber: shippingAddress.phone || user?.phone,
+            phoneNumber: paymentPhone,
           });
           const checkoutRequestId = paymentResult?.checkoutRequestId || paymentResult?.CheckoutRequestID || paymentResult?.data?.checkoutRequestId || paymentResult?.data?.CheckoutRequestID;
           toast.success(checkoutRequestId ? 'M-Pesa prompt sent to your phone' : 'Payment request sent');
@@ -171,7 +199,7 @@ const Checkout = () => {
   };
 
   const subtotal = getCartTotal();
-  const shipping = subtotal >= 50 ? 0 : 5;
+  const shipping = SHIPPING_COST;
   const total = subtotal + shipping;
   const currentReviewItem = reviewItems[activeReviewIndex];
 
@@ -305,6 +333,32 @@ const Checkout = () => {
                       placeholder="Kenya"
                     />
                   </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-[#111827]">GPS Latitude (Optional)</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      name="gpsLat"
+                      value={shippingAddress.gpsLat}
+                      onChange={handleAddressChange}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent"
+                      placeholder="-1.292100"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-[#111827]">GPS Longitude (Optional)</label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      name="gpsLng"
+                      value={shippingAddress.gpsLng}
+                      onChange={handleAddressChange}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:border-transparent"
+                      placeholder="36.821900"
+                    />
+                  </div>
                 </div>
               </div>
               
@@ -318,6 +372,21 @@ const Checkout = () => {
                   <p className="font-semibold text-[#111827]">M-Pesa</p>
                   <p className="text-sm text-[#6B7280] mt-1">
                     Pay securely via M-Pesa STK Push. A prompt will be sent to your phone number.
+                  </p>
+                  <label className="mt-4 block text-sm font-medium text-[#111827]">
+                    M-Pesa Phone Number *
+                    <input
+                      type="tel"
+                      value={mpesaPhone}
+                      onChange={(event) => setMpesaPhone(event.target.value)}
+                      required
+                      inputMode="tel"
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#16A34A] focus:border-transparent"
+                      placeholder="0712345678"
+                    />
+                  </label>
+                  <p className="mt-2 text-xs text-[#166534]">
+                    Enter the buyer number that should receive the STK Push.
                   </p>
                 </div>
               </div>
@@ -334,7 +403,7 @@ const Checkout = () => {
                     Processing...
                   </span>
                 ) : (
-                  `Place Order • ${formatCurrency(total)}`
+                  `Place Order • M-Pesa includes logistics`
                 )}
               </button>
             </form>
@@ -375,26 +444,12 @@ const Checkout = () => {
                   <span>{formatCurrency(subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-[#6B7280]">
-                  <span>Shipping</span>
-                  <span className="flex items-center gap-1">
-                    {shipping === 0 ? (
-                      <>
-                        <FaTruck className="text-[#16A34A] text-xs" />
-                        <span className="text-[#16A34A]">Free</span>
-                      </>
-                    ) : (
-                      formatCurrency(shipping)
-                    )}
-                  </span>
+                  <span>Logistics delivery</span>
+                  <span>{formatCurrency(shipping)}</span>
                 </div>
-                {shipping === 0 && subtotal >= 50 && (
-                  <div className="bg-[#16A34A]/10 rounded-lg p-2 text-center">
-                    <span className="text-[#16A34A] text-xs font-medium">✓ Free Shipping Applied</span>
-                  </div>
-                )}
                 <div className="border-t border-gray-200 pt-3 mt-2">
                   <div className="flex justify-between font-bold text-lg">
-                    <span>Total</span>
+                    <span>Product subtotal</span>
                     <span className="text-[#F97316]">{formatCurrency(total)}</span>
                   </div>
                 </div>
@@ -413,20 +468,6 @@ const Checkout = () => {
               </div>
             </div>
             
-            {/* AI Intelligence Tip */}
-            {subtotal < 50 && (
-             <div className="mt-4 bg-linear-to-r from-[#F97316]/10 to-[#FB923C]/10 rounded-xl p-4 border border-[#F97316]/20">
-                <div className="flex items-start gap-2">
-                  <FaBrain className="text-[#F97316] text-lg mt-0.5" />
-                  <div>
-                    <h4 className="font-semibold text-[#111827] text-sm">Smart Savings Tip</h4>
-                    <p className="text-xs text-[#6B7280]">
-                      Add <span className="font-bold text-[#16A34A]">{formatCurrency(50 - subtotal)}</span> more to qualify for <strong className="text-[#16A34A]">Free Shipping</strong>!
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>

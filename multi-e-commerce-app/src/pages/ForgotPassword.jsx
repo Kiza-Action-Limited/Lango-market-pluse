@@ -8,7 +8,15 @@ import { validateEmail, validatePassword } from '../utils/validators';
 const ForgotPassword = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
+  const role = searchParams.get('role') || '';
   const hasToken = useMemo(() => token.trim().length > 0, [token]);
+  const loginPath = useMemo(() => {
+    if (role === 'seller') return '/seller/login';
+    if (role === 'buyer') return '/buyer/login';
+    if (role === 'logistics') return '/logistics/login';
+    if (role === 'admin') return '/admin';
+    return '/login';
+  }, [role]);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -73,7 +81,7 @@ const ForgotPassword = () => {
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center bg-linear-to-br from-[#F9FAFB] to-[#E5E7EB] py-8 px-4">
       <div className="w-full max-w-md bg-white border border-[#F97316]/15 rounded-2xl shadow-md p-6">
         <div className="mb-4">
-          <Link to="/login" className="inline-flex items-center gap-2 text-sm text-[#6B7280] hover:text-[#F97316]">
+          <Link to={loginPath} className="inline-flex items-center gap-2 text-sm text-[#6B7280] hover:text-[#F97316]">
             <FaArrowLeft size={12} />
             Back to login
           </Link>
@@ -168,7 +176,7 @@ const ForgotPassword = () => {
                 ? 'Your password has been updated successfully.'
                 : 'If your email exists, a reset link has been sent.'}
             </p>
-            <Link to="/login" className="inline-block mt-3 text-sm font-semibold text-[#F97316] hover:underline">
+            <Link to={loginPath} className="inline-block mt-3 text-sm font-semibold text-[#F97316] hover:underline">
               Go to login
             </Link>
           </div>

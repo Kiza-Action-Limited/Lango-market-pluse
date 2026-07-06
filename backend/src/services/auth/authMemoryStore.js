@@ -19,7 +19,18 @@ const findByPhoneOrEmail = ({ phone, email }) => {
   return null;
 };
 
-const createUser = async ({ phone, email, password, fullName, role, businessType, businessName, businessLogoUrl }) => {
+const createUser = async ({
+  phone,
+  email,
+  password,
+  fullName,
+  role,
+  businessType,
+  businessName,
+  businessLogoUrl,
+  isPhoneVerified = false,
+  isEmailVerified = false,
+}) => {
   const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
   const passwordHash = await bcrypt.hash(password, 10);
   const now = new Date();
@@ -32,6 +43,8 @@ const createUser = async ({ phone, email, password, fullName, role, businessType
     businessType: businessType || null,
     businessName: businessName || null,
     businessLogoUrl: businessLogoUrl || null,
+    isPhoneVerified: Boolean(isPhoneVerified),
+    isEmailVerified: Boolean(isEmailVerified),
     isActive: true,
     kycVerified: false,
     subscriptionTier: 'free',

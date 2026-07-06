@@ -51,16 +51,62 @@ exports.getOrders = async (req, res, next) => {
   }
 };
 
+exports.getBuyerSellers = async (req, res, next) => {
+  try {
+    const sellers = await orderService.getBuyerSellers(req.user.id);
+    res.status(200).json({
+      success: true,
+      data: sellers,
+      summary: {
+        sellers: sellers.length,
+        activeOrders: sellers.reduce((sum, seller) => sum + Number(seller.activeOrders || 0), 0),
+        deliveredOrders: sellers.reduce((sum, seller) => sum + Number(seller.deliveredOrders || 0), 0),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getBuyerReviewQueue = async (req, res, next) => {
+  try {
+    const queue = await orderService.getBuyerReviewQueue(req.user.id);
+    res.status(200).json({
+      success: true,
+      data: queue,
+      summary: {
+        total: queue.length,
+        reviewed: queue.filter((item) => item.reviewed).length,
+        pending: queue.filter((item) => !item.reviewed).length,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Get single order by ID
  * GET /api/v1/orders/:id
  */
 exports.getOrderById = async (req, res, next) => {
   try {
-    const order = await orderService.getOrderById(req.params.id, req.user.id, req.user.role);
+    const order = await orderService.getOrderView(req.params.id, req.user.id, req.user.role);
     res.status(200).json({
       success: true,
       data: order,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getOrderTracking = async (req, res, next) => {
+  try {
+    const tracking = await orderService.getOrderTracking(req.params.id, req.user.id, req.user.role);
+    res.status(200).json({
+      success: true,
+      data: tracking,
     });
   } catch (error) {
     next(error);

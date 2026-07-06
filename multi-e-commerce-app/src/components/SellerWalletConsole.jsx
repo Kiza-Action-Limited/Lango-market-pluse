@@ -37,13 +37,8 @@ const SellerWalletConsole = ({ className = '' }) => {
     statement: null,
   });
   const [forms, setForms] = useState({
-    addAmount: '',
-    addMethod: 'mpesa',
     withdrawAmount: '',
     withdrawPhone: '',
-    transferTo: '',
-    transferAmount: '',
-    transferDescription: '',
   });
 
   const loadWallet = async () => {
@@ -58,9 +53,9 @@ const SellerWalletConsole = ({ className = '' }) => {
       ]);
 
       setWalletState({
-        balance: balanceRes?.balance ?? balanceRes?.data?.balance ?? null,
+        balance: balanceRes?.balance || balanceRes?.data?.balance || balanceRes || null,
         details: detailsRes?.__error ? null : (detailsRes?.wallet || detailsRes?.data || detailsRes || null),
-        transactions: txRes?.transactions || txRes?.data?.transactions || [],
+        transactions: Array.isArray(txRes) ? txRes : (txRes?.transactions || txRes?.data?.transactions || txRes?.data || []),
         statement: statementRes?.__error ? null : (statementRes?.statement || statementRes?.data || statementRes || null),
       });
     } catch (error) {
@@ -79,6 +74,11 @@ const SellerWalletConsole = ({ className = '' }) => {
   };
 
   const walletDetails = walletState.details || {};
+  const balanceDetails = typeof walletState.balance === 'object' && walletState.balance !== null ? walletState.balance : {};
+  const totalBalance = Number(walletDetails.balance ?? balanceDetails.totalBalance ?? walletState.balance ?? 0);
+  const lockedBalance = Number(walletDetails.lockedBalance ?? balanceDetails.lockedBalance ?? 0);
+  const availableBalance = Number(balanceDetails.availableBalance ?? Math.max(0, totalBalance - lockedBalance));
+  const pendingWithdrawals = walletState.transactions.filter((tx) => tx.type === 'withdrawal' && tx.status === 'pending');
   const walletStatement = walletState.statement || {};
   const statementRows = walletStatement.transactions || walletStatement.entries || walletStatement.items || [];
 
@@ -93,12 +93,8 @@ const SellerWalletConsole = ({ className = '' }) => {
       toast.success(successMessage);
       setForms((prev) => ({
         ...prev,
-        addAmount: '',
         withdrawAmount: '',
         withdrawPhone: '',
-        transferTo: '',
-        transferAmount: '',
-        transferDescription: '',
       }));
       await loadWallet();
     } catch (error) {
@@ -114,9 +110,9 @@ const SellerWalletConsole = ({ className = '' }) => {
     <section className={`rounded-2xl border border-gray-200 bg-white p-5 shadow-sm ${className}`}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#F97316]">Wallet center</p>
-          <h3 className="mt-2 text-2xl font-bold text-[#111827]">Payment Wallet</h3>
-          <p className="mt-2 text-sm text-gray-600">These controls call the backend wallet, statement, and transaction endpoints directly.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#F97316]">Payout center</p>
+          <h3 className="mt-2 text-2xl font-bold text-[#111827]">Seller Wallet</h3>
+          <p className="mt-2 text-sm text-gray-600">Withdraw released earnings and audit wallet movements from the backend ledger.</p>
         </div>
         <button
           type="button"
@@ -129,67 +125,22 @@ const SellerWalletConsole = ({ className = '' }) => {
 
       <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-xl bg-[#FFF7ED] p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[#9A3412]">Balance</p>
-          <p className="mt-2 text-3xl font-bold text-[#111827]">{walletState.balance === null ? '-' : `KES ${Number(walletState.balance || 0).toLocaleString()}`}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#9A3412]">Available to withdraw</p>
+          <p className="mt-2 text-3xl font-bold text-[#111827]">{walletState.balance === null ? '-' : formatCurrency(availableBalance)}</p>
         </div>
         <div className="rounded-xl bg-gray-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Transactions</p>
-          <p className="mt-2 text-3xl font-bold text-[#111827]">{walletState.transactions.length}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Locked escrow</p>
+          <p className="mt-2 text-3xl font-bold text-[#111827]">{formatCurrency(lockedBalance)}</p>
         </div>
         <div className="rounded-xl bg-gray-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Statement</p>
-          <p className="mt-2 text-sm text-gray-600">{walletState.statement ? 'Loaded from backend' : 'No statement loaded yet'}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Pending withdrawals</p>
+          <p className="mt-2 text-3xl font-bold text-[#111827]">{pendingWithdrawals.length}</p>
         </div>
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <form
-          className="rounded-xl border border-gray-200 p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!forms.addAmount) return toast.error('Amount is required');
-            return runAction(
-              'add-funds',
-              () => paymentService.addWalletFunds({
-                amount: Number(forms.addAmount),
-                paymentMethod: forms.addMethod,
-                description: 'Wallet top-up from seller dashboard',
-              }),
-              'Wallet top-up sent'
-            );
-          }}
-        >
-          <h4 className="font-semibold text-[#111827]">Add Funds</h4>
-          <div className="mt-3 space-y-3">
-            <input
-              type="number"
-              min="10"
-              value={forms.addAmount}
-              onChange={(e) => updateForm('addAmount', e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Amount"
-            />
-            <select
-              value={forms.addMethod}
-              onChange={(e) => updateForm('addMethod', e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            >
-              <option value="mpesa">M-Pesa</option>
-              <option value="card">Card</option>
-              <option value="bank_transfer">Bank Transfer</option>
-            </select>
-            <button
-              type="submit"
-              disabled={actionLoading === 'add-funds'}
-              className="w-full rounded-lg bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#EA580C] disabled:opacity-60"
-            >
-              {actionLoading === 'add-funds' ? 'Sending...' : 'Add Funds'}
-            </button>
-          </div>
-        </form>
-
-        <form
-          className="rounded-xl border border-gray-200 p-4"
+          className="rounded-xl border border-gray-200 p-4 xl:col-span-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (!forms.withdrawAmount || !forms.withdrawPhone) return toast.error('Amount and phone number are required');
@@ -199,86 +150,64 @@ const SellerWalletConsole = ({ className = '' }) => {
                 amount: Number(forms.withdrawAmount),
                 phoneNumber: forms.withdrawPhone,
               }),
-              'Withdrawal request sent'
+              'Withdrawal queued for payout'
             );
           }}
         >
-          <h4 className="font-semibold text-[#111827]">Withdraw</h4>
-          <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="font-semibold text-[#111827]">Withdraw to M-Pesa</h4>
+              <p className="mt-1 text-sm text-gray-500">Minimum withdrawal is KES 50. The amount is reserved immediately while payout is pending.</p>
+            </div>
+            <span className="rounded-full border border-[#16A34A]/20 bg-[#16A34A]/10 px-3 py-1 text-xs font-semibold text-[#15803D]">
+              Available {formatCurrency(availableBalance)}
+            </span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr_auto]">
             <input
               type="number"
               min="50"
               value={forms.withdrawAmount}
               onChange={(e) => updateForm('withdrawAmount', e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Amount"
+              placeholder="Amount in KES"
             />
             <input
               type="tel"
               value={forms.withdrawPhone}
               onChange={(e) => updateForm('withdrawPhone', e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Phone number"
+              placeholder="M-Pesa phone number"
             />
             <button
               type="submit"
               disabled={actionLoading === 'withdraw'}
-              className="w-full rounded-lg bg-[#111827] px-4 py-2.5 text-sm font-semibold text-white hover:bg-black disabled:opacity-60"
+              className="rounded-lg bg-[#111827] px-5 py-2.5 text-sm font-semibold text-white hover:bg-black disabled:opacity-60"
             >
-              {actionLoading === 'withdraw' ? 'Sending...' : 'Withdraw to M-Pesa'}
+              {actionLoading === 'withdraw' ? 'Queuing...' : 'Withdraw'}
             </button>
           </div>
         </form>
 
-        <form
-          className="rounded-xl border border-gray-200 p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!forms.transferTo || !forms.transferAmount) return toast.error('Recipient and amount are required');
-            return runAction(
-              'transfer',
-              () => paymentService.transferWalletFunds({
-                toUserId: forms.transferTo,
-                amount: Number(forms.transferAmount),
-                description: forms.transferDescription || 'Wallet transfer',
-              }),
-              'Transfer sent'
-            );
-          }}
-        >
-          <h4 className="font-semibold text-[#111827]">Transfer</h4>
-          <div className="mt-3 space-y-3">
-            <input
-              type="text"
-              value={forms.transferTo}
-              onChange={(e) => updateForm('transferTo', e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Recipient user ID"
-            />
-            <input
-              type="number"
-              min="10"
-              value={forms.transferAmount}
-              onChange={(e) => updateForm('transferAmount', e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Amount"
-            />
-            <input
-              type="text"
-              value={forms.transferDescription}
-              onChange={(e) => updateForm('transferDescription', e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="Description"
-            />
-            <button
-              type="submit"
-              disabled={actionLoading === 'transfer'}
-              className="w-full rounded-lg bg-[#16A34A] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-60"
-            >
-              {actionLoading === 'transfer' ? 'Sending...' : 'Transfer Funds'}
-            </button>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <h4 className="font-semibold text-[#111827]">Payout Status</h4>
+          <div className="mt-3 space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">Total wallet</span>
+              <span className="font-semibold text-[#111827]">{formatCurrency(totalBalance)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">Locked funds</span>
+              <span className="font-semibold text-[#111827]">{formatCurrency(lockedBalance)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">Pending payout</span>
+              <span className="font-semibold text-[#111827]">
+                {formatCurrency(pendingWithdrawals.reduce((sum, tx) => sum + Number(tx.amount || 0), 0))}
+              </span>
+            </div>
           </div>
-        </form>
+        </div>
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -304,8 +233,9 @@ const SellerWalletConsole = ({ className = '' }) => {
           {walletState.details || walletState.statement ? (
             <div className="mt-3 space-y-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <DetailTile label="Available Balance" value={formatCurrency(walletDetails.balance || walletState.balance || 0)} tone="green" />
-                <DetailTile label="Locked Balance" value={formatCurrency(walletDetails.lockedBalance || 0)} tone="orange" />
+                <DetailTile label="Available Balance" value={formatCurrency(availableBalance)} tone="green" />
+                <DetailTile label="Total Balance" value={formatCurrency(totalBalance)} />
+                <DetailTile label="Locked Balance" value={formatCurrency(lockedBalance)} tone="orange" />
                 <DetailTile label="Currency" value={walletDetails.currency || 'KES'} />
                 <DetailTile label="Wallet ID" value={walletDetails._id} mono />
                 <DetailTile label="Owner User ID" value={walletDetails.user} mono />

@@ -4,11 +4,49 @@ import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { productService } from '../services/productService';
+import { rfqService } from '../services/rfqService';
 import { userService } from '../services/userService';
-import { FaStar, FaStarHalfAlt, FaRegStar, FaShoppingCart, FaHeart, FaRegHeart, FaTruck, FaShieldAlt, FaUndo } from 'react-icons/fa';
+import { FaStar, FaStarHalfAlt, FaRegStar, FaShoppingCart, FaHeart, FaRegHeart, FaTruck, FaShieldAlt, FaUndo, FaFileInvoiceDollar } from 'react-icons/fa';
+import ProductCard from '../components/ProductCard';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import { clampToMinimumOrder, getMinimumOrderQuantity, MQQ_TIERS } from '../utils/moq';
+
+const getProductId = (product = {}) => product.id || product._id;
+
+const unpackProductList = (payload) => {
+  const list = payload?.products || payload?.data?.products || payload?.data || [];
+  return Array.isArray(list) ? list : [];
+};
+
+const ProductRelationSection = ({ title, description, products, loading }) => {
+  if (!loading && products.length === 0) return null;
+
+  return (
+    <section className="mt-10">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-[#111827]">{title}</h2>
+          <p className="mt-1 text-sm text-gray-600">{description}</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="h-72 rounded-md border border-gray-200 bg-gray-100 animate-pulse" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          {products.map((item) => (
+            <ProductCard key={getProductId(item)} product={item} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+};
 
 const ProductDetail = () => {
   const { id } = useParams();
@@ -26,8 +64,18 @@ const ProductDetail = () => {
     canReview: false,
     message: 'Complete payment for this product before writing a review.',
   });
+  const [rfqForm, setRfqForm] = useState({
+    targetPrice: '',
+    deliveryLocation: '',
+    neededBy: '',
+    message: '',
+  });
+  const [submittingRfq, setSubmittingRfq] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [activeImage, setActiveImage] = useState(0);
+  const [relatedProducts, setRelatedProducts] = useState([]);
+  const [sellerProducts, setSellerProducts] = useState([]);
+  const [relationsLoading, setRelationsLoading] = useState(false);
 
   useEffect(() => {
     fetchProduct();
@@ -45,7 +93,8 @@ const ProductDetail = () => {
 
       setProduct(fetchedProduct);
       setQuantity(getMinimumOrderQuantity(fetchedProduct));
-      setReviews(productPayload?.reviews || []);
+      setReviews(productPayload?.reviews || fetchedProduct.reviews || []);
+      loadProductRelations(fetchedProduct);
       if (isAuthenticated) {
         checkWishlist();
         checkReviewEligibility();
@@ -114,6 +163,74 @@ const ProductDetail = () => {
 
     addToCart(productId, validQuantity, selectedVariant, product);
     navigate('/checkout');
+  };
+
+  const handleSubmitRfq = async (event) => {
+    event.preventDefault();
+    if (!isAuthenticated) {
+      toast.error('Please login to request a quote');
+      navigate('/login');
+      return;
+    }
+
+    setSubmittingRfq(true);
+    try {
+      await rfqService.create({
+        productId: product.id || product._id,
+        quantity,
+        unit: product.unit,
+        targetPrice: rfqForm.targetPrice,
+        deliveryLocation: rfqForm.deliveryLocation,
+        neededBy: rfqForm.neededBy,
+        message: rfqForm.message,
+      });
+      setRfqForm({
+        targetPrice: '',
+        deliveryLocation: '',
+        neededBy: '',
+        message: '',
+      });
+      toast.success('RFQ sent to seller');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Failed to send RFQ');
+    } finally {
+      setSubmittingRfq(false);
+    }
+  };
+
+  const loadProductRelations = async (sourceProduct) => {
+    const currentProductId = String(getProductId(sourceProduct) || id);
+    const sourceSellerId = sourceProduct?.seller?._id || sourceProduct?.seller?.id || sourceProduct?.seller;
+
+    setRelationsLoading(true);
+    try {
+      const requests = [];
+
+      requests.push(
+        sourceProduct.category
+          ? productService.getAll({ category: sourceProduct.category, limit: 9, sortBy: 'rating' }).catch((error) => ({ __error: error }))
+          : Promise.resolve(null)
+      );
+
+      requests.push(
+        sourceSellerId
+          ? productService.getAll({ seller: sourceSellerId, limit: 7, sortBy: 'newest' }).catch((error) => ({ __error: error }))
+          : Promise.resolve(null)
+      );
+
+      const [relatedResponse, sellerResponse] = await Promise.all(requests);
+      const normalizeList = (response) => unpackProductList(response)
+        .filter((item) => String(getProductId(item) || '') !== currentProductId);
+
+      setRelatedProducts(normalizeList(relatedResponse).slice(0, 4));
+      setSellerProducts(normalizeList(sellerResponse).slice(0, 4));
+    } catch (error) {
+      console.error('Error loading product relations:', error);
+      setRelatedProducts([]);
+      setSellerProducts([]);
+    } finally {
+      setRelationsLoading(false);
+    }
   };
 
   const handleToggleWishlist = async () => {
@@ -213,7 +330,23 @@ const ProductDetail = () => {
   const isMqqRestricted = minOrderQty > 1;
   const sellerId = product?.seller?._id || product?.seller?.id || product?.seller;
   const sellerBusinessName = product?.seller?.businessName || product?.seller?.fullName || product?.seller?.name || 'Verified Seller';
-  const metadataEntries = Object.entries(product.attributes || {}).filter(([, value]) => value !== '' && value !== null && value !== undefined);
+  const metadataSource = product.attributes || product.customAttributes || product.metadata || {};
+  const metadataEntries = Object.entries(metadataSource).filter(([, value]) => value !== '' && value !== null && value !== undefined);
+  const averageRating = Number(product.rating || 0);
+  const reviewCount = reviews.length;
+  const ratingCounts = reviews.reduce((acc, review) => {
+    const rating = Math.max(1, Math.min(5, Math.round(Number(review.rating || 0))));
+    acc[rating] = (acc[rating] || 0) + 1;
+    return acc;
+  }, {});
+  const productFacts = [
+    { label: 'SKU', value: product.sku || product.trackingSku || 'Not assigned' },
+    { label: 'Category', value: product.category || 'Uncategorized' },
+    { label: 'Fulfillment hub', value: product.locationHub || 'Seller pickup hub' },
+    { label: 'Warehouse status', value: product.warehouseStatus ? String(product.warehouseStatus).replaceAll('_', ' ') : 'Seller storage' },
+    { label: 'MOQ', value: `${minOrderQty} ${product.unit || 'unit'}` },
+    { label: 'Available stock', value: `${availableStock} ${product.unit || 'unit'}` },
+  ];
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -279,6 +412,18 @@ const ProductDetail = () => {
               <span className={availableStock > 0 ? 'text-green-600' : 'text-red-600'}>
                 {availableStock > 0 ? `${availableStock} in stock` : 'Out of stock'}
               </span>
+            </div>
+          </div>
+
+          <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
+            <h3 className="mb-3 font-semibold text-[#111827]">More Product Details</h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {productFacts.map((fact) => (
+                <div key={fact.label} className="rounded-md bg-gray-50 px-3 py-2">
+                  <p className="text-xs font-medium uppercase text-gray-500">{fact.label}</p>
+                  <p className="mt-1 text-sm font-semibold capitalize text-[#111827]">{fact.value}</p>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -373,11 +518,70 @@ const ProductDetail = () => {
             </button>
           </div>
 
+          <form onSubmit={handleSubmitRfq} className="mb-6 rounded-lg border border-blue-100 bg-blue-50 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <FaFileInvoiceDollar className="text-blue-700" />
+              <div>
+                <h3 className="font-semibold text-[#111827]">Request a Bulk Quote</h3>
+                <p className="text-sm text-gray-600">Send quantity, target price, and delivery needs directly to the seller.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="text-sm font-medium text-[#111827]">
+                Target unit price
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={rfqForm.targetPrice}
+                  onChange={(event) => setRfqForm((prev) => ({ ...prev, targetPrice: event.target.value }))}
+                  placeholder="Optional"
+                  className="mt-1 h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="text-sm font-medium text-[#111827]">
+                Delivery location
+                <input
+                  value={rfqForm.deliveryLocation}
+                  onChange={(event) => setRfqForm((prev) => ({ ...prev, deliveryLocation: event.target.value }))}
+                  placeholder="Town, depot, or delivery hub"
+                  className="mt-1 h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+              <label className="text-sm font-medium text-[#111827]">
+                Needed by
+                <input
+                  type="date"
+                  value={rfqForm.neededBy}
+                  onChange={(event) => setRfqForm((prev) => ({ ...prev, neededBy: event.target.value }))}
+                  className="mt-1 h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </label>
+            </div>
+            <textarea
+              value={rfqForm.message}
+              onChange={(event) => setRfqForm((prev) => ({ ...prev, message: event.target.value }))}
+              placeholder="Add packaging, pickup, delivery, or negotiation notes..."
+              rows="3"
+              className="mt-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-blue-900">RFQ quantity uses your selected quantity: {quantity} {product.unit || 'unit'}.</p>
+              <button
+                type="submit"
+                disabled={submittingRfq}
+                className="rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {submittingRfq ? 'Sending RFQ...' : 'Send RFQ'}
+              </button>
+            </div>
+          </form>
+
           {/* Shipping Info */}
           <div className="border-t pt-4 space-y-2">
             <div className="flex items-center text-gray-600">
               <FaTruck className="mr-2" />
-              <span>Free shipping on orders over KSh 50</span>
+              <span>Delivery charges apply at checkout</span>
             </div>
             <div className="flex items-center text-gray-600">
               <FaShieldAlt className="mr-2" />
@@ -391,9 +595,54 @@ const ProductDetail = () => {
         </div>
       </div>
 
+      <ProductRelationSection
+        title="Related Products"
+        description="Similar items from the same category."
+        products={relatedProducts}
+        loading={relationsLoading}
+      />
+
+      <ProductRelationSection
+        title="More From This Seller"
+        description={`Other listings from ${sellerBusinessName}.`}
+        products={sellerProducts}
+        loading={relationsLoading}
+      />
+
       {/* Reviews Section */}
       <div className="mt-12">
-        <h2 className="text-2xl font-bold mb-6">Customer Reviews</h2>
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-[#111827]">Product Reviews</h2>
+            <p className="mt-1 text-sm text-gray-600">Verified buyer feedback and rating history.</p>
+          </div>
+          <Link to={`/products/${getProductId(product)}/reviews`} className="text-sm font-semibold text-[#F97316] hover:underline">
+            View review page
+          </Link>
+        </div>
+
+        <div className="mb-8 grid gap-4 rounded-lg border border-gray-200 bg-white p-5 md:grid-cols-[220px_1fr]">
+          <div className="flex flex-col justify-center rounded-lg bg-gray-50 p-4 text-center">
+            <p className="text-4xl font-bold text-[#111827]">{averageRating.toFixed(1)}</p>
+            <div className="mt-2 flex justify-center">{renderStars(averageRating)}</div>
+            <p className="mt-2 text-sm text-gray-600">{reviewCount} review{reviewCount === 1 ? '' : 's'}</p>
+          </div>
+          <div className="space-y-2">
+            {[5, 4, 3, 2, 1].map((rating) => {
+              const count = ratingCounts[rating] || 0;
+              const pct = reviewCount ? Math.round((count / reviewCount) * 100) : 0;
+              return (
+                <div key={rating} className="grid grid-cols-[52px_1fr_42px] items-center gap-3 text-sm">
+                  <span className="font-medium text-[#111827]">{rating} star</span>
+                  <div className="h-2 rounded-full bg-gray-100">
+                    <div className="h-2 rounded-full bg-[#F59E0B]" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-right text-gray-500">{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
         
         {/* Write Review */}
         {!isAuthenticated ? (
@@ -454,13 +703,13 @@ const ProductDetail = () => {
         {/* Reviews List */}
         <div className="space-y-4">
           {reviews.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">No reviews yet. Be the first to review!</p>
+            <p className="rounded-lg bg-gray-50 py-8 text-center text-gray-500">No reviews yet.</p>
           ) : (
             reviews.map((review) => (
-              <div key={review.id || review._id} className="border-b pb-4">
+              <div key={review.id || review._id} className="rounded-lg border border-gray-200 bg-white p-4">
                 <div className="flex items-center mb-2">
                   <div className="flex mr-2">{renderStars(review.rating)}</div>
-                  <span className="font-semibold">{review.user?.name}</span>
+                  <span className="font-semibold">{review.user?.name || review.user?.fullName || 'Verified buyer'}</span>
                   <span className="text-gray-500 text-sm ml-2">
                     {new Date(review.createdAt).toLocaleDateString()}
                   </span>

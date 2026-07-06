@@ -33,6 +33,7 @@ const Navbar = () => {
   const cartCount = getCartCount();
   const userRole = String(user?.role || '').toLowerCase();
   const isLogisticsUser = userRole === 'logistics';
+  const isBuyerAccount = ['buyer', 'consumer'].includes(userRole) && !isSeller && !isAdmin && !isLogisticsUser;
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -105,9 +106,9 @@ const Navbar = () => {
                         <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
                       )}
                       {isAdmin && (
-                        <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin')}>Admin Dashboard</Link>
+                        <Link to="/admin/dashboard" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin/dashboard')}>Admin Dashboard</Link>
                       )}
-                      <Link to="/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
+                      <Link to="/buyer/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
                       <Link to="/notifications/preferences" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Notification Preferences</Link>
                       <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
                       <button onClick={handleAuthAction} className="w-full text-left px-4 py-2 hover:bg-gray-100">Sign out</button>
@@ -123,6 +124,11 @@ const Navbar = () => {
             </div>
 
             <Link to="/products" className="font-semibold hover:opacity-90" {...createPrefetchHandlers('/products')}>Shop</Link>
+            {isAuthenticated && !isBuyerAccount && (
+              <Link to="/mizigo-engine" className="font-semibold hover:opacity-90" onClick={closeAllMenus}>
+                Plan 4 Mizigo
+              </Link>
+            )}
 
             <div className="relative">
               <button
@@ -235,9 +241,9 @@ const Navbar = () => {
                       <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
                     )}
                     {isAdmin && (
-                      <Link to="/admin" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin')}>Admin Dashboard</Link>
+                      <Link to="/admin/dashboard" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin/dashboard')}>Admin Dashboard</Link>
                     )}
-                    <Link to="/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
+                    <Link to="/buyer/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
                     <Link to="/notifications/preferences" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Notification Preferences</Link>
                     <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
                     <button onClick={handleAuthAction} className="w-full text-left px-4 py-2 hover:bg-gray-100">Sign out</button>
@@ -252,6 +258,11 @@ const Navbar = () => {
             )}
 
             <Link to="/products" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/products')}>Shop</Link>
+            {isAuthenticated && !isBuyerAccount && (
+              <Link to="/mizigo-engine" className="block font-semibold" onClick={closeAllMenus}>
+                Plan 4 Mizigo
+              </Link>
+            )}
 
             <button onClick={() => toggleDropdown('categoryMobile')} className="w-full bg-[#E97A12] px-3 py-2 rounded flex items-center justify-between">
               <span>All</span>

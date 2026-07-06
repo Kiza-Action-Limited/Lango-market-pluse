@@ -45,10 +45,19 @@ export const normalizeOrder = (order = {}) => {
   };
 };
 
-export const normalizeTracking = (order = {}) => ({
-  updates: (order.timeline || []).map((entry) => ({
+const normalizeTrackingEntries = (entries = []) => entries.map((entry) => ({
+    source: entry.source,
     status: entry.status,
     timestamp: entry.timestamp,
-    description: entry.note,
-  })),
+    description: entry.note || entry.description,
+    location: entry.location,
+    gpsCoords: entry.gpsCoords,
+  }));
+
+export const normalizeTracking = (source = {}) => ({
+  ...source,
+  sellerTracking: normalizeTrackingEntries(source.sellerTracking || source.sellerUpdates || []),
+  logisticsTracking: normalizeTrackingEntries(source.logisticsTracking || source.logisticsUpdates || []),
+  milestones: source.milestones || [],
+  updates: normalizeTrackingEntries(source.timeline || source.updates || []),
 });

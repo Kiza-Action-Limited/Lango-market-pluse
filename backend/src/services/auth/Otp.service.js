@@ -60,17 +60,72 @@ const store = {
 // Constants
 const PHONE_OTP_TTL = 5 * 60;   // 5 minutes
 const EMAIL_OTP_TTL = 10 * 60;  // 10 minutes
+const VERIFIED_OTP_TTL = 30 * 60; // 30 minutes to finish registration
 const MAX_ATTEMPTS = 3;
 const MAX_RESENDS = 3;
 const RESEND_COOLDOWN = 60;
 const isProduction = process.env.NODE_ENV === 'production';
+const shouldExposeDevOtp = !isProduction && process.env.OTP_EXPOSE_DEV_CODE === 'true';
+const configuredDevTestOtp = String(
+  process.env.OTP_DEV_TEST_CODE || process.env.DEV_TEST_OTP_CODE || '123456'
+).trim();
+const allowDevTestOtp = !isProduction
+  && /^\d{6}$/.test(configuredDevTestOtp)
+  && process.env.OTP_ENABLE_DEV_TEST_CODE !== 'false';
 
 // Helper functions
 const generateCode = () => crypto.randomInt(100000, 999999).toString();
 
+const devOtpFields = (actualCode) => ({
+  ...(allowDevTestOtp ? { devTestCode: configuredDevTestOtp } : {}),
+  ...(shouldExposeDevOtp ? { devCode: actualCode } : {}),
+});
+
+const isDevTestOtp = (code) => allowDevTestOtp && String(code || '').trim() === configuredDevTestOtp;
+
+const getOtpSecret = () => process.env.OTP_HASH_SECRET || process.env.JWT_SECRET || 'lango-market-otp-secret';
+
+const hashOtpCode = (channel, identifier, code) => crypto
+  .createHmac('sha256', getOtpSecret())
+  .update(`${channel}:${identifier}:${code}`)
+  .digest('hex');
+
+const isOtpMatch = (channel, identifier, code, entry = {}) => {
+  const expectedHash = entry.codeHash || hashOtpCode(channel, identifier, entry.code || '');
+  const providedHash = hashOtpCode(channel, identifier, String(code || '').trim());
+  return crypto.timingSafeEqual(Buffer.from(expectedHash), Buffer.from(providedHash));
+};
+
 const phoneKey = (phone) => `otp:phone:${phone}`;
 const emailKey = (email) => `otp:email:${email.toLowerCase()}`;
 const resendKey = (channel, id) => `otp:resend:${channel}:${id}`;
+const verifiedKey = (channel, id) => `otp:verified:${channel}:${id}`;
+
+const normalizeIdentifier = (channel, identifier) => {
+  if (channel === 'email') return String(identifier || '').trim().toLowerCase();
+  if (channel === 'phone') return africaTalkingService.formatPhoneNumber(identifier);
+  return String(identifier || '').trim();
+};
+
+const markVerifiedOtp = async (channel, identifier) => {
+  const normalized = normalizeIdentifier(channel, identifier);
+  await store.set(verifiedKey(channel, normalized), {
+    verifiedAt: Date.now(),
+  }, VERIFIED_OTP_TTL);
+};
+
+const hasVerifiedOtp = async (channel, identifier) => {
+  const normalized = normalizeIdentifier(channel, identifier);
+  return Boolean(await store.get(verifiedKey(channel, normalized)));
+};
+
+const consumeVerifiedOtp = async (channel, identifier) => {
+  const normalized = normalizeIdentifier(channel, identifier);
+  const entry = await store.get(verifiedKey(channel, normalized));
+  if (!entry) return false;
+  await store.del(verifiedKey(channel, normalized));
+  return true;
+};
 
 /**
  * Send OTP via SMS
@@ -112,7 +167,7 @@ const sendPhoneOtp = async (phone) => {
 
   // Store OTP
   await store.set(phoneKey(formattedPhone), {
-    code,
+    codeHash: hashOtpCode('phone', formattedPhone, code),
     attempts: 0,
     createdAt: Date.now(),
   }, PHONE_OTP_TTL);
@@ -129,9 +184,22 @@ const sendPhoneOtp = async (phone) => {
     return {
       success: true,
       message: 'Verification code sent successfully',
+      delivered: true,
       cooldownSeconds: RESEND_COOLDOWN,
+      ...devOtpFields(code),
     };
   } catch (error) {
+    if (allowDevTestOtp) {
+      return {
+        success: true,
+        message: 'Verification code generated. SMS delivery failed in development mode.',
+        delivered: false,
+        deliveryError: error.message,
+        cooldownSeconds: RESEND_COOLDOWN,
+        ...devOtpFields(code),
+      };
+    }
+
     await store.del(phoneKey(formattedPhone));
     throw error;
   }
@@ -152,6 +220,13 @@ const verifyPhoneOtp = async (phone, code) => {
   }
 
   const formattedPhone = africaTalkingService.formatPhoneNumber(phone);
+  if (isDevTestOtp(code)) {
+    await markVerifiedOtp('phone', formattedPhone);
+    await store.del(phoneKey(formattedPhone));
+    await store.del(resendKey('phone', formattedPhone));
+    return true;
+  }
+
   const entry = await store.get(phoneKey(formattedPhone));
 
   if (!entry) {
@@ -169,7 +244,7 @@ const verifyPhoneOtp = async (phone, code) => {
     throw err;
   }
 
-  if (entry.code !== code.trim()) {
+  if (!isOtpMatch('phone', formattedPhone, code, entry)) {
     const newAttempts = entry.attempts + 1;
     await store.set(phoneKey(formattedPhone), {
       ...entry,
@@ -188,7 +263,7 @@ const verifyPhoneOtp = async (phone, code) => {
     throw err;
   }
 
-  // Success - cleanup
+  await markVerifiedOtp('phone', formattedPhone);
   await store.del(phoneKey(formattedPhone));
   await store.del(resendKey('phone', formattedPhone));
   return true;
@@ -231,7 +306,7 @@ const sendEmailOtpCode = async (email) => {
   let deliveryError = null;
 
   await store.set(emailKey(normalized), {
-    code,
+    codeHash: hashOtpCode('email', normalized, code),
     attempts: 0,
     createdAt: Date.now(),
   }, EMAIL_OTP_TTL);
@@ -260,7 +335,7 @@ const sendEmailOtpCode = async (email) => {
     cooldownSeconds: RESEND_COOLDOWN,
     delivered,
     ...(deliveryError && !isProduction ? { deliveryError: deliveryError.message } : {}),
-    ...(!isProduction ? { devCode: code } : {}),
+    ...devOtpFields(code),
   };
 };
 
@@ -279,6 +354,13 @@ const verifyEmailOtp = async (email, code) => {
   }
 
   const normalized = email.toLowerCase().trim();
+  if (isDevTestOtp(code)) {
+    await markVerifiedOtp('email', normalized);
+    await store.del(emailKey(normalized));
+    await store.del(resendKey('email', normalized));
+    return true;
+  }
+
   const entry = await store.get(emailKey(normalized));
 
   if (!entry) {
@@ -297,7 +379,7 @@ const verifyEmailOtp = async (email, code) => {
     throw err;
   }
 
-  if (entry.code !== code.trim()) {
+  if (!isOtpMatch('email', normalized, code, entry)) {
     const newAttempts = entry.attempts + 1;
     await store.set(emailKey(normalized), {
       ...entry,
@@ -316,6 +398,7 @@ const verifyEmailOtp = async (email, code) => {
     throw err;
   }
 
+  await markVerifiedOtp('email', normalized);
   await store.del(emailKey(normalized));
   await store.del(resendKey('email', normalized));
   return true;
@@ -328,7 +411,8 @@ const verifyEmailOtp = async (email, code) => {
  * @returns {Promise<number>}
  */
 const resendCooldownSeconds = async (channel, identifier) => {
-  const entry = await store.get(resendKey(channel, identifier));
+  const normalized = normalizeIdentifier(channel, identifier);
+  const entry = await store.get(resendKey(channel, normalized));
   if (!entry || !entry.lastSentAt) return 0;
   const elapsed = Math.floor((Date.now() - entry.lastSentAt) / 1000);
   return Math.max(0, RESEND_COOLDOWN - elapsed);
@@ -344,11 +428,13 @@ const clearOtpData = async (phone = null, email = null) => {
     const formattedPhone = africaTalkingService.formatPhoneNumber(phone);
     await store.del(phoneKey(formattedPhone));
     await store.del(resendKey('phone', formattedPhone));
+    await store.del(verifiedKey('phone', formattedPhone));
   }
   if (email) {
     const normalized = email.toLowerCase().trim();
     await store.del(emailKey(normalized));
     await store.del(resendKey('email', normalized));
+    await store.del(verifiedKey('email', normalized));
   }
 };
 
@@ -359,10 +445,16 @@ module.exports = {
   verifyEmailOtp,
   resendCooldownSeconds,
   clearOtpData,
+  hasVerifiedOtp,
+  consumeVerifiedOtp,
   PHONE_OTP_TTL,
   EMAIL_OTP_TTL,
+  VERIFIED_OTP_TTL,
   MAX_ATTEMPTS,
   MAX_RESENDS,
   RESEND_COOLDOWN,
+  allowDevTestOtp,
+  configuredDevTestOtp,
   emailKey,
+  verifiedKey,
 };

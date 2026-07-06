@@ -3,6 +3,7 @@ const router = express.Router();
 const { body } = require('express-validator');
 const authController = require('../../controllers/auth.controller');
 const { protect } = require('../../middleware/auth');
+const { upload, handleUploadError } = require('../../middleware/upload');
 
 const requireSellerBusinessName = body('businessName')
   .if((value, { req }) => ['seller', 'vendor', 'farmer'].includes(String(req.body.role || '').toLowerCase()))
@@ -13,6 +14,13 @@ const requireSellerBusinessName = body('businessName')
 // ============================================
 // Step-by-Step Registration Routes (v1)
 // ============================================
+
+router.post(
+  '/register/business-logo',
+  upload.single('businessLogo'),
+  handleUploadError,
+  authController.uploadBusinessLogo
+);
 
 // Send OTP to phone (Step 1)
 router.post(
@@ -81,7 +89,7 @@ router.post(
     body('role').isIn(['farmer', 'buyer', 'vendor', 'admin', 'seller', 'logistics']).withMessage('Invalid role'),
     requireSellerBusinessName,
     body('businessType').optional(),
-    body('businessLogoUrl').optional().isURL().withMessage('Valid URL is required for business logo'),
+    body('businessLogoUrl').optional({ nullable: true, checkFalsy: true }).isURL().withMessage('Valid URL is required for business logo'),
   ],
   authController.completeRegistration
 );
@@ -283,6 +291,14 @@ router.post(
 // Get current user
 router.get('/me', protect, authController.getCurrentUser);
 
+router.post(
+  '/me/profile-image',
+  protect,
+  upload.single('profileImage'),
+  handleUploadError,
+  authController.uploadProfileImage
+);
+
 // Update current user profile
 router.put(
   '/me',
@@ -304,7 +320,16 @@ router.put(
       'logistics',
     ]).withMessage('Invalid business type'),
     body('businessLogoUrl').optional({ nullable: true, checkFalsy: true }).isURL().withMessage('Valid business logo URL is required'),
+    body('profileImageUrl').optional({ nullable: true, checkFalsy: true }).isURL().withMessage('Valid profile image URL is required'),
+    body('locationHub').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 120 }).withMessage('Location hub cannot exceed 120 characters'),
+    body('city').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 120 }).withMessage('City cannot exceed 120 characters'),
     body('address').optional({ nullable: true }).trim().isLength({ max: 240 }).withMessage('Address cannot exceed 240 characters'),
+    body('logisticsProfile').optional({ nullable: true }).isObject().withMessage('Logistics profile must be an object'),
+    body('logisticsProfile.baseHub').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 120 }).withMessage('Base hub cannot exceed 120 characters'),
+    body('logisticsProfile.locationHub').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 120 }).withMessage('Location hub cannot exceed 120 characters'),
+    body('logisticsProfile.driverMode').optional({ nullable: true, checkFalsy: true }).isIn(['owner_operator', 'hired_driver']).withMessage('Invalid driver mode'),
+    body('logisticsProfile.vehiclePlate').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 20 }).withMessage('Vehicle plate cannot exceed 20 characters'),
+    body('logisticsProfile.cargoCapacityKg').optional({ nullable: true, checkFalsy: true }).isFloat({ min: 0 }).withMessage('Cargo capacity must be 0 or greater'),
   ],
   authController.updateCurrentUser
 );

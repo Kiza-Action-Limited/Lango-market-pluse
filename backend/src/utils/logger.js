@@ -8,7 +8,7 @@ const LOG_LEVELS = {
   debug: 3,
 };
 
-const currentLevel = LOG_LEVELS[process.env.LOG_LEVEL || 'info'];
+const currentLevel = LOG_LEVELS[process.env.LOG_LEVEL || 'info'] ?? LOG_LEVELS.info;
 
 const logger = {
   error: (message, ...args) => {

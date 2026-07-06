@@ -1,10 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FaCheckCircle, FaChevronDown, FaChevronUp, FaCrown, FaLock, FaMapMarkerAlt, FaRoute, FaTimesCircle, FaTruck } from 'react-icons/fa';
+import {
+  FaBoxOpen,
+  FaCalendarAlt,
+  FaCheckCircle,
+  FaChevronDown,
+  FaChevronUp,
+  FaCrown,
+  FaExclamationTriangle,
+  FaLock,
+  FaMapMarkerAlt,
+  FaRoute,
+  FaSms,
+  FaTimesCircle,
+  FaTruck,
+} from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import { FEATURE_LABELS, FEATURE_TOOLTIPS, MIZIGO_PLANS, PLAN_IDS, TRADER_PLANS } from '../config/subscriptionPlans';
 import { logisticsService } from '../services/logisticsService';
+import { subscriptionService } from '../services/subscriptionService';
 import {
   activateSellerLogisticsAddon,
   deactivateSellerLogisticsAddon,
@@ -13,6 +28,7 @@ import {
   saveSellerLogisticsAddon,
 } from '../utils/logisticsAddon';
 import { hasPremiumVerification } from '../utils/premiumSellerProfile';
+import { listPendingSubscriptionPayments } from '../utils/subscriptionPaymentRecovery';
 
 const PlanCard = ({ plan, isActive, onActivate, featureLimit, isExpanded, onToggleExpand, isHighlighted, lockTooltip }) => (
   <div
@@ -83,15 +99,173 @@ const PlanCard = ({ plan, isActive, onActivate, featureLimit, isExpanded, onTogg
   </div>
 );
 
+const formatDate = (value) => {
+  if (!value) return 'Not scheduled';
+  return new Date(value).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
+const formatProductLimit = (usage) => {
+  if (!usage) return '0/5';
+  if (usage.isUnlimited) return `${usage.totalProducts || 0}/Unlimited`;
+  return `${usage.totalProducts || 0}/${usage.productLimit ?? 5}`;
+};
+
+const SubscriptionOverviewPanel = ({ overview, loading, pendingPayment, onAction }) => {
+  const productUsage = overview?.usage?.products;
+  const smsCredits = overview?.usage?.smsCredits;
+  const billing = overview?.billing;
+  const lockedCount = overview?.entitlements?.lockedFeatures?.length || 0;
+  const productLimit = productUsage?.productLimit ?? 5;
+  const productTotal = productUsage?.totalProducts || 0;
+  const productLimitMessage = overview?.entitlements?.active
+    ? `You've reached your ${overview?.subscription?.planName || 'current plan'} product limit. Upgrade your subscription to add more products.`
+    : "You've reached your free 5 product limit. Upgrade your subscription to add more products.";
+  const progress = productUsage?.isUnlimited
+    ? 100
+    : Math.min(100, Math.round((productTotal / Math.max(productLimit, 1)) * 100));
+  const isWarning = Boolean(productUsage?.upgradeRequired || billing?.renewalState === 'due_soon' || billing?.renewalState === 'expired');
+
+  if (loading) {
+    return (
+      <section className="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="h-5 w-48 animate-pulse rounded bg-gray-200" />
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          {[1, 2, 3, 4].map((item) => (
+            <div key={item} className="h-24 animate-pulse rounded-lg bg-gray-100" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (!overview) return null;
+
+  return (
+    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Subscription account</p>
+          <h2 className="mt-1 text-2xl font-bold text-[#111827]">
+            {overview.subscription?.planName || 'Free seller allowance'}
+          </h2>
+          <p className="mt-1 text-sm text-[#6B7280]">
+            {overview.primaryAction?.message || 'Your seller subscription, catalog limit, SMS, and billing status are synced from the backend.'}
+          </p>
+        </div>
+        <div className={`rounded-full px-3 py-1 text-xs font-semibold ${overview.entitlements?.active ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>
+          {overview.entitlements?.active ? 'Active' : 'Free allowance'}
+        </div>
+      </div>
+
+      {isWarning && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+          <FaExclamationTriangle className="mt-0.5 shrink-0" />
+          <span>
+            {productUsage?.upgradeRequired
+              ? productLimitMessage
+              : 'Your subscription needs attention soon. Review billing before seller tools are interrupted.'}
+          </span>
+        </div>
+      )}
+
+      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[#111827]">Product slots</p>
+            <FaBoxOpen className="text-[#F97316]" />
+          </div>
+          <p className="mt-3 text-2xl font-bold text-[#111827]">{formatProductLimit(productUsage)}</p>
+          <div className="mt-3 h-2 rounded-full bg-gray-100">
+            <div className="h-2 rounded-full bg-[#F97316]" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-[#6B7280]">
+            {productUsage?.isUnlimited ? 'Unlimited catalog on this plan' : `${productUsage?.remainingSlots ?? 0} slots remaining`}
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[#111827]">SMS balance</p>
+            <FaSms className="text-[#2563EB]" />
+          </div>
+          <p className="mt-3 text-2xl font-bold text-[#111827]">{smsCredits?.balance || 0}</p>
+          <p className="mt-2 text-xs text-[#6B7280]">
+            {smsCredits?.includedPerCycle || 0} included this cycle, {smsCredits?.usedThisCycle || 0} used
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[#111827]">Billing</p>
+            <FaCalendarAlt className="text-[#16A34A]" />
+          </div>
+          <p className="mt-3 text-2xl font-bold text-[#111827]">
+            {billing?.daysRemaining === null || billing?.daysRemaining === undefined ? '--' : `${Math.max(0, billing.daysRemaining)}d`}
+          </p>
+          <p className="mt-2 text-xs text-[#6B7280]">Next billing: {formatDate(billing?.nextBillingDate || billing?.endDate)}</p>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[#111827]">Locked tools</p>
+            <FaLock className="text-[#6B7280]" />
+          </div>
+          <p className="mt-3 text-2xl font-bold text-[#111827]">{lockedCount}</p>
+          <p className="mt-2 text-xs text-[#6B7280]">
+            {overview.sellerLogisticsAddon?.active ? 'Mizigo add-on active' : 'Upgrade to unlock more seller tools'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
+        <p className="text-sm text-[#6B7280]">
+          {pendingPayment ? 'A pending M-Pesa payment is saved for this account.' : 'Subscription changes route through the secure seller payment flow.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => onAction(overview.primaryAction)}
+          className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white hover:bg-black"
+        >
+          {overview.primaryAction?.label || 'Manage Subscription'}
+        </button>
+      </div>
+    </section>
+  );
+};
+
 const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId, onToggleExpand }) => {
   const plan = MIZIGO_PLANS[0];
   const [addon, setAddon] = useState(() => getSellerLogisticsAddon(user));
   const [providers, setProviders] = useState([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
+  const [savingAddon, setSavingAddon] = useState(false);
   const [sellerHub, setSellerHub] = useState(addon.sellerHub || user?.locationHub || user?.city || '');
 
   useEffect(() => {
-    setAddon(getSellerLogisticsAddon(user));
+    const loadAddon = async () => {
+      const localAddon = getSellerLogisticsAddon(user);
+      setAddon(localAddon);
+      setSellerHub(localAddon.sellerHub || user?.locationHub || user?.city || '');
+
+      try {
+        const backendAddon = await subscriptionService.getSellerLogisticsAddon();
+        if (backendAddon) {
+          const mergedAddon = saveSellerLogisticsAddon(user, backendAddon);
+          setAddon(mergedAddon);
+          setSellerHub(mergedAddon.sellerHub || user?.locationHub || user?.city || '');
+        }
+      } catch (error) {
+        if (error.response?.status !== 404 && error.response?.status !== 403) {
+          toast.error(error.response?.data?.message || 'Unable to load saved logistics add-on');
+        }
+      }
+    };
+
+    loadAddon();
   }, [user]);
 
   useEffect(() => {
@@ -117,15 +291,37 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
 
   const selectedProvider = rankedProviders.find((provider) => provider.id === addon.selectedProviderId) || addon.selectedProvider;
 
-  const activateAddon = () => {
-    const nextAddon = activateSellerLogisticsAddon(user, { sellerHub });
-    setAddon(nextAddon);
+  const persistAddon = async (payload, fallbackUpdater) => {
+    setSavingAddon(true);
+    try {
+      const backendAddon = await subscriptionService.updateSellerLogisticsAddon(payload);
+      const nextAddon = saveSellerLogisticsAddon(user, backendAddon || payload);
+      setAddon(nextAddon);
+      setSellerHub(nextAddon.sellerHub || '');
+      return nextAddon;
+    } catch (error) {
+      const nextAddon = fallbackUpdater();
+      setAddon(nextAddon);
+      toast.error(error.response?.data?.message || 'Saved locally. Backend could not update logistics add-on.');
+      return nextAddon;
+    } finally {
+      setSavingAddon(false);
+    }
+  };
+
+  const activateAddon = async () => {
+    await persistAddon(
+      { active: true, sellerHub },
+      () => activateSellerLogisticsAddon(user, { sellerHub })
+    );
     toast.success('Mizigo Logistics Bridge activated as an add-on');
   };
 
-  const deactivateAddon = () => {
-    const nextAddon = deactivateSellerLogisticsAddon(user);
-    setAddon(nextAddon);
+  const deactivateAddon = async () => {
+    await persistAddon(
+      { active: false, sellerHub, selectedProviderId: '' },
+      () => deactivateSellerLogisticsAddon(user)
+    );
     toast.success('Mizigo Logistics Bridge paused');
   };
 
@@ -136,14 +332,20 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
     }
   };
 
-  const chooseProvider = (provider) => {
-    const nextAddon = saveSellerLogisticsAddon(user, {
-      active: true,
-      sellerHub,
-      selectedProviderId: provider.id,
-      selectedProvider: provider,
-    });
-    setAddon(nextAddon);
+  const chooseProvider = async (provider) => {
+    await persistAddon(
+      {
+        active: true,
+        sellerHub,
+        selectedProviderId: provider.id,
+      },
+      () => saveSellerLogisticsAddon(user, {
+        active: true,
+        sellerHub,
+        selectedProviderId: provider.id,
+        selectedProvider: provider,
+      })
+    );
     toast.success(`${provider.name} selected for seller deliveries`);
   };
 
@@ -198,17 +400,19 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
               <button
                 type="button"
                 onClick={deactivateAddon}
-                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-[#111827] hover:bg-gray-50"
+                disabled={savingAddon}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-[#111827] hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Pause Add-on
+                {savingAddon ? 'Saving...' : 'Pause Add-on'}
               </button>
             ) : (
               <button
                 type="button"
                 onClick={activateAddon}
-                className="rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
+                disabled={savingAddon}
+                className="rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Activate Logistics Bridge
+                {savingAddon ? 'Saving...' : 'Activate Logistics Bridge'}
               </button>
             )}
           </div>
@@ -261,10 +465,10 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
                   <button
                     type="button"
                     onClick={() => chooseProvider(provider)}
-                    disabled={!addon.active}
+                    disabled={!addon.active || savingAddon}
                     className="rounded-lg bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {addon.selectedProviderId === provider.id ? 'Selected' : 'Choose'}
+                    {savingAddon ? 'Saving' : addon.selectedProviderId === provider.id ? 'Selected' : 'Choose'}
                   </button>
                 </div>
               ))
@@ -291,6 +495,9 @@ const SubscriptionPlans = () => {
   const requestedPlanId = searchParams.get('plan');
   const [expandedPlanId, setExpandedPlanId] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const [pendingSubscriptionPayments, setPendingSubscriptionPayments] = useState([]);
+  const [subscriptionOverview, setSubscriptionOverview] = useState(null);
+  const [overviewLoading, setOverviewLoading] = useState(false);
 
   const allPlanIds = useMemo(
     () => new Set([...TRADER_PLANS, ...MIZIGO_PLANS].map((plan) => plan.id)),
@@ -317,18 +524,56 @@ const SubscriptionPlans = () => {
     return () => clearTimeout(timer);
   }, [highlightedPlanId]);
 
+  useEffect(() => {
+    setPendingSubscriptionPayments(listPendingSubscriptionPayments(user));
+  }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSubscriptionOverview = async () => {
+      if (!isSeller) {
+        setSubscriptionOverview(null);
+        return;
+      }
+
+      setOverviewLoading(true);
+      try {
+        const overview = await subscriptionService.getOverview();
+        if (!cancelled) {
+          setSubscriptionOverview(overview);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSubscriptionOverview(null);
+          toast.error(error.response?.data?.message || 'Unable to load subscription account status');
+        }
+      } finally {
+        if (!cancelled) {
+          setOverviewLoading(false);
+        }
+      }
+    };
+
+    loadSubscriptionOverview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSeller, user?._id, user?.id]);
+
   const handleToggleExpand = (planId) => {
     setExpandedPlanId((prev) => (prev === planId ? null : planId));
   };
 
   const handleActivatePlan = (plan) => {
-    const isPremiumTraderPlan = plan.id === PLAN_IDS.SMART || plan.id === PLAN_IDS.GROWTH;
-    if (!isPremiumTraderPlan) {
+    if (plan.id === PLAN_IDS.MIZIGO) {
       switchPlan(plan.id);
       return;
     }
 
-    if (!hasPremiumVerification(user)) {
+    const requiresPremiumVerification = plan.id === PLAN_IDS.SMART || plan.id === PLAN_IDS.GROWTH;
+    if (requiresPremiumVerification && !hasPremiumVerification(user)) {
       navigate(`/seller/premium-verification?plan=${encodeURIComponent(plan.id)}`);
       return;
     }
@@ -336,7 +581,17 @@ const SubscriptionPlans = () => {
     navigate(`/seller/premium-payment?plan=${encodeURIComponent(plan.id)}`);
   };
 
+  const handleOverviewAction = (action) => {
+    if (!action?.path) {
+      navigate('/seller/subscription-plans');
+      return;
+    }
+
+    navigate(action.path);
+  };
+
   const canCancelCurrentPlan = isSeller && activePlan?.id && activePlan.id !== PLAN_IDS.MIZIGO;
+  const latestPendingPayment = pendingSubscriptionPayments[0] || null;
 
   const handleCancelSubscription = async () => {
     if (!canCancelCurrentPlan || cancelling) return;
@@ -347,6 +602,8 @@ const SubscriptionPlans = () => {
     setCancelling(true);
     try {
       await cancelSubscription(`Cancelled ${activePlan.name} from subscription page`);
+      const overview = await subscriptionService.getOverview();
+      setSubscriptionOverview(overview);
     } finally {
       setCancelling(false);
     }
@@ -384,6 +641,35 @@ const SubscriptionPlans = () => {
           )}
         </div>
 
+        {isSeller && latestPendingPayment && (
+          <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-950">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold">Pending M-Pesa subscription payment</p>
+                <p className="mt-1 text-sm">
+                  {latestPendingPayment.message || 'Complete your phone STK prompt, then check the saved payment status.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(`/seller/premium-payment?plan=${encodeURIComponent(latestPendingPayment.planId)}`)}
+                className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white hover:bg-black"
+              >
+                Continue Payment
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isSeller && (
+          <SubscriptionOverviewPanel
+            overview={subscriptionOverview}
+            loading={overviewLoading}
+            pendingPayment={latestPendingPayment}
+            onAction={handleOverviewAction}
+          />
+        )}
+
         {!isSeller && (
           <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-950">
             <h2 className="text-xl font-semibold">Seller registration required</h2>
@@ -415,7 +701,7 @@ const SubscriptionPlans = () => {
                     isExpanded={expandedPlanId === plan.id}
                     onToggleExpand={handleToggleExpand}
                     isHighlighted={highlightedPlanId === plan.id}
-                    lockTooltip={plan.id === PLAN_IDS.SOLO ? 'Starter plan with 30 SKU cap' : FEATURE_TOOLTIPS[plan.featureKeys[0]] || 'Upgrade to unlock'}
+                    lockTooltip={plan.id === PLAN_IDS.SOLO ? 'Starter plan with 200 product catalog' : FEATURE_TOOLTIPS[plan.featureKeys[0]] || 'Upgrade to unlock'}
                   />
                 ))}
               </div>

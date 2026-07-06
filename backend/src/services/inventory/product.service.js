@@ -4,6 +4,44 @@ const { scarcityQueue } = require('../../config/redis');
 const logger = require('../../utils/logger');
 
 const PRODUCT_LIMIT_MAX = 100;
+const LOW_STOCK_SENSITIVITY_RULES = [
+  { threshold: 50, terms: ['maize', 'corn', 'unga', 'posho', 'grains-cereals', 'food-staples'] },
+  { threshold: 45, terms: ['sugar', 'jaggery', 'sugar-baking'] },
+  { threshold: 40, terms: ['rice', 'beans', 'wheat', 'flour', 'millet', 'sorghum'] },
+  { threshold: 25, terms: ['cooking oil', 'oil', 'cooking-oil'] },
+  { threshold: 20, terms: ['milk', 'dairy', 'eggs', 'dairy-eggs'] },
+  { threshold: 18, terms: ['vegetables', 'tomato', 'onion', 'potato', 'cabbage', 'fresh'] },
+  { threshold: 15, terms: ['beverage', 'water', 'juice', 'soda', 'beverages'] },
+  { threshold: 12, terms: ['household', 'soap', 'detergent', 'tissue'] },
+  { threshold: 10, terms: ['farm-inputs', 'seed', 'fertilizer', 'feed'] },
+];
+
+const getAutoLowStockThreshold = (product = {}) => {
+  const haystack = `${product.name || ''} ${product.category || ''}`.toLowerCase();
+  const matchedRule = LOW_STOCK_SENSITIVITY_RULES.find((rule) => (
+    rule.terms.some((term) => haystack.includes(term))
+  ));
+
+  return matchedRule?.threshold || 10;
+};
+
+const getEffectiveLowStockThreshold = (product = {}) => {
+  const configured = Number(product.minThreshold);
+  if (Number.isFinite(configured) && configured === 0) return 0;
+  const autoThreshold = getAutoLowStockThreshold(product);
+  if (!Number.isFinite(configured) || configured < 0) return autoThreshold;
+  return Math.max(configured, autoThreshold);
+};
+
+const getProductId = (productOrId) => productOrId?._id || productOrId;
+
+const normalizeQuantity = (quantity) => {
+  const normalized = Number(quantity);
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    throw new Error('Quantity must be greater than zero');
+  }
+  return normalized;
+};
 
 class ProductService {
   async createProduct(data) {
@@ -107,39 +145,109 @@ class ProductService {
   }
 
   async getLowStockProducts(sellerId, threshold = 10) {
+    const explicitThreshold = Number(threshold) > 0 ? Number(threshold) : null;
     const products = await Product.find({
       seller: sellerId,
-      quantityAvailable: { $lte: threshold },
+      quantityAvailable: { $gt: 0 },
     });
-    return products;
+    return products.filter((product) => {
+      const alertThreshold = explicitThreshold || getEffectiveLowStockThreshold(product);
+      return alertThreshold > 0 && Number(product.quantityAvailable || 0) <= alertThreshold;
+    });
   }
 
   async checkScarcity(product) {
-    const threshold = product.quantityAvailable <= 5 ? 'critical' : product.quantityAvailable <= 20 ? 'low' : null;
+    const alertThreshold = getEffectiveLowStockThreshold(product);
+    const threshold = alertThreshold > 0 && product.quantityAvailable <= alertThreshold
+      ? product.quantityAvailable <= Math.max(1, Math.ceil(alertThreshold / 2)) ? 'critical' : 'low'
+      : null;
     if (threshold) {
       await scarcityQueue.add('check', {
         productId: product._id,
         threshold,
+        alertThreshold,
         quantity: product.quantityAvailable,
       });
     }
   }
 
   async reserveStock(productId, quantity) {
-    const product = await Product.findById(productId);
+    const normalizedQuantity = normalizeQuantity(quantity);
+    const product = await Product.findById(getProductId(productId));
     if (!product) throw new Error('Product not found');
-    if (product.quantityAvailable - product.reservedQuantity < quantity) {
+    if (product.quantityAvailable - product.reservedQuantity < normalizedQuantity) {
       throw new Error('Insufficient stock');
     }
-    product.reservedQuantity += quantity;
+    product.reservedQuantity += normalizedQuantity;
     await product.save();
     return product;
   }
 
   async releaseReservedStock(productId, quantity) {
-    const product = await Product.findById(productId);
+    const normalizedQuantity = normalizeQuantity(quantity);
+    const product = await Product.findById(getProductId(productId));
     if (!product) throw new Error('Product not found');
-    product.reservedQuantity = Math.max(0, product.reservedQuantity - quantity);
+    product.reservedQuantity = Math.max(0, product.reservedQuantity - normalizedQuantity);
+    await product.save();
+    return product;
+  }
+
+  async commitReservedStock(productId, quantity) {
+    const normalizedQuantity = normalizeQuantity(quantity);
+    const product = await Product.findOneAndUpdate(
+      {
+        _id: getProductId(productId),
+        reservedQuantity: { $gte: normalizedQuantity },
+        quantityAvailable: { $gte: normalizedQuantity },
+      },
+      {
+        $inc: {
+          quantityAvailable: -normalizedQuantity,
+          reservedQuantity: -normalizedQuantity,
+          soldCount: normalizedQuantity,
+        },
+      },
+      { new: true }
+    );
+
+    if (!product) {
+      throw new Error('Cannot complete sale because reserved stock is no longer available');
+    }
+
+    const history = Array.isArray(product.inventoryHistory) ? product.inventoryHistory : [];
+    history.push({
+      onHand: product.quantityAvailable || 0,
+      reserved: product.reservedQuantity || 0,
+      available: Math.max(0, (product.quantityAvailable || 0) - (product.reservedQuantity || 0)),
+      unit: product.unit,
+      event: 'sale_committed',
+      recordedAt: new Date(),
+    });
+    product.inventoryHistory = history.slice(-30);
+    await product.save();
+    return product;
+  }
+
+  async restoreCommittedStock(productId, quantity) {
+    const normalizedQuantity = normalizeQuantity(quantity);
+    const product = await Product.findByIdAndUpdate(
+      getProductId(productId),
+      { $inc: { quantityAvailable: normalizedQuantity, soldCount: -normalizedQuantity } },
+      { new: true }
+    );
+    if (!product) throw new Error('Product not found');
+    if (product.soldCount < 0) product.soldCount = 0;
+
+    const history = Array.isArray(product.inventoryHistory) ? product.inventoryHistory : [];
+    history.push({
+      onHand: product.quantityAvailable || 0,
+      reserved: product.reservedQuantity || 0,
+      available: Math.max(0, (product.quantityAvailable || 0) - (product.reservedQuantity || 0)),
+      unit: product.unit,
+      event: 'sale_restocked',
+      recordedAt: new Date(),
+    });
+    product.inventoryHistory = history.slice(-30);
     await product.save();
     return product;
   }

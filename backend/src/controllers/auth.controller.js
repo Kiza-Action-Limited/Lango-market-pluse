@@ -1,13 +1,18 @@
 const authService = require('../services/auth/auth.service');
 const User = require('../models/User.model');
 const { validationResult } = require('express-validator');
+const fs = require('fs/promises');
+const path = require('path');
+const { randomUUID } = require('crypto');
+const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { 
   sendPhoneOtp, 
   verifyPhoneOtp, 
   sendEmailOtpCode, 
   verifyEmailOtp,
   resendCooldownSeconds,
-  clearOtpData
+  clearOtpData,
+  hasVerifiedOtp
 } = require('../services/auth/Otp.service');
 
 // Redis client for cleanup
@@ -130,6 +135,115 @@ const mapBusinessType = (role, businessType) => {
   return 'small_business';
 };
 
+const buildPublicUploadUrl = (req, relativePath) => {
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  return `${protocol}://${req.get('host')}${relativePath}`;
+};
+
+const saveImageLocally = async (req, file, folderName) => {
+  const extension = path.extname(file.originalname || '').toLowerCase() || '.png';
+  const filename = `${Date.now()}-${randomUUID()}${extension}`;
+  const uploadDir = path.join(__dirname, '..', 'uploads', folderName);
+  await fs.mkdir(uploadDir, { recursive: true });
+  await fs.writeFile(path.join(uploadDir, filename), file.buffer);
+  return buildPublicUploadUrl(req, `/uploads/${folderName}/${filename}`);
+};
+
+const saveLogoLocally = (req, file) => saveImageLocally(req, file, 'business-logos');
+
+exports.uploadBusinessLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Business logo image is required',
+        code: 'BUSINESS_LOGO_REQUIRED',
+      });
+    }
+
+    let logoUrl = null;
+    let storage = 'local';
+
+    try {
+      const result = await uploadToCloudinary(
+        req.file.buffer,
+        'business-logos',
+        req.file.mimetype
+      );
+      logoUrl = result.secure_url || result.url;
+      storage = 'cloudinary';
+    } catch (uploadError) {
+      console.warn('Business logo Cloudinary upload failed, using local storage:', uploadError.message);
+      logoUrl = await saveLogoLocally(req, req.file);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'Business logo uploaded successfully',
+      data: {
+        businessLogoUrl: logoUrl,
+        storage,
+      },
+    });
+  } catch (error) {
+    console.error('Business logo upload error:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload business logo. Please try again.',
+      code: 'BUSINESS_LOGO_UPLOAD_FAILED',
+    });
+  }
+};
+
+exports.uploadProfileImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Profile image is required',
+        code: 'PROFILE_IMAGE_REQUIRED',
+      });
+    }
+
+    let profileImageUrl = null;
+    let storage = 'local';
+
+    try {
+      const result = await uploadToCloudinary(
+        req.file.buffer,
+        'profile-images',
+        req.file.mimetype
+      );
+      profileImageUrl = result.secure_url || result.url;
+      storage = 'cloudinary';
+    } catch (uploadError) {
+      console.warn('Profile image Cloudinary upload failed, using local storage:', uploadError.message);
+      profileImageUrl = await saveImageLocally(req, req.file, 'profile-images');
+    }
+
+    const user = await authService.updateCurrentUser(req.user._id || req.user.id, {
+      profileImageUrl,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile image uploaded successfully',
+      data: {
+        profileImageUrl,
+        storage,
+        user,
+      },
+    });
+  } catch (error) {
+    console.error('Profile image upload error:', error.message);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Failed to upload profile image. Please try again.',
+      code: 'PROFILE_IMAGE_UPLOAD_FAILED',
+    });
+  }
+};
+
 // ============================================
 // OTP Controllers for main routes (auth.routes.js)
 // ============================================
@@ -164,6 +278,8 @@ exports.sendPhoneVerificationOtp = async (req, res) => {
       success: true,
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
       ...(result.devCode ? { devCode: result.devCode } : {}),
       ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
@@ -243,6 +359,7 @@ exports.sendEmailVerificationOtp = async (req, res) => {
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
       delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
       ...(result.devCode ? { devCode: result.devCode } : {}),
       ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
@@ -368,6 +485,10 @@ exports.resendOtpCode = async (req, res) => {
       success: true,
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
   } catch (error) {
     console.error('Resend OTP error:', error.message);
@@ -415,6 +536,10 @@ exports.sendPhoneOtp = async (req, res) => {
       success: true,
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
       nextStep: '/api/v1/auth/register/phone/verify'
     });
   } catch (error) {
@@ -493,6 +618,10 @@ exports.resendPhoneOtp = async (req, res) => {
       success: true,
       message: 'Verification code resent successfully',
       cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
   } catch (error) {
     console.error('Resend phone OTP error:', error.message);
@@ -536,6 +665,7 @@ exports.sendEmailOtp = async (req, res) => {
       message: result.message,
       cooldownSeconds: result.cooldownSeconds,
       delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
       ...(result.devCode ? { devCode: result.devCode } : {}),
       ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
       nextStep: '/api/v1/auth/register/email/verify'
@@ -617,6 +747,7 @@ exports.resendEmailOtp = async (req, res) => {
       message: 'Verification code resent successfully',
       cooldownSeconds: result.cooldownSeconds,
       delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
       ...(result.devCode ? { devCode: result.devCode } : {}),
       ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
     });
@@ -658,6 +789,25 @@ exports.completeRegistration = async (req, res) => {
     // Map business type to valid enum value
     businessType = mapBusinessType(role, businessType);
 
+    if (typeof businessLogoUrl === 'string' && businessLogoUrl.startsWith('data:')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please re-upload your business logo before registering.',
+        code: 'INLINE_BUSINESS_LOGO_NOT_ALLOWED',
+      });
+    }
+
+    const phoneVerified = await hasVerifiedOtp('phone', phone);
+    const emailVerified = await hasVerifiedOtp('email', email);
+
+    if (!emailVerified || !phoneVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please verify your email first, then verify your phone number before completing registration.',
+        code: 'CONTACT_NOT_VERIFIED',
+      });
+    }
+
     const result = await authService.register({
       phone,
       password,
@@ -667,8 +817,8 @@ exports.completeRegistration = async (req, res) => {
       businessType,
       businessName,
       businessLogoUrl,
-      isPhoneVerified: true,
-      isEmailVerified: true,
+      isPhoneVerified: phoneVerified,
+      isEmailVerified: emailVerified,
     });
 
     // Clear OTP data after successful registration
@@ -741,10 +891,22 @@ exports.register = async (req, res) => {
     // Map business type to valid enum value
     businessType = mapBusinessType(role, businessType);
 
-    // Verify phone OTP if provided
+    if (typeof businessLogoUrl === 'string' && businessLogoUrl.startsWith('data:')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please re-upload your business logo before registering.',
+        code: 'INLINE_BUSINESS_LOGO_NOT_ALLOWED',
+      });
+    }
+
+    let isPhoneVerified = false;
+    let isEmailVerified = false;
+
+    // Verify phone OTP if provided, otherwise accept a recent verified marker.
     if (phoneOtpCode) {
       try {
         await verifyPhoneOtp(phone, phoneOtpCode);
+        isPhoneVerified = true;
       } catch (error) {
         return res.status(400).json({
           success: false,
@@ -752,12 +914,15 @@ exports.register = async (req, res) => {
           code: error.code,
         });
       }
+    } else if (phone) {
+      isPhoneVerified = await hasVerifiedOtp('phone', phone);
     }
 
-    // Verify email OTP if provided
+    // Verify email OTP if provided, otherwise accept a recent verified marker.
     if (email && emailOtpCode) {
       try {
         await verifyEmailOtp(email, emailOtpCode);
+        isEmailVerified = true;
       } catch (error) {
         return res.status(400).json({
           success: false,
@@ -765,6 +930,16 @@ exports.register = async (req, res) => {
           code: error.code,
         });
       }
+    } else if (email) {
+      isEmailVerified = await hasVerifiedOtp('email', email);
+    }
+
+    if (!isEmailVerified || !isPhoneVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please verify your email first, then verify your phone number before registering.',
+        code: 'CONTACT_NOT_VERIFIED',
+      });
     }
 
     const result = await authService.register({
@@ -776,8 +951,8 @@ exports.register = async (req, res) => {
       businessType,
       businessName,
       businessLogoUrl,
-      isPhoneVerified: !!phoneOtpCode,
-      isEmailVerified: !!(email && emailOtpCode),
+      isPhoneVerified,
+      isEmailVerified,
     });
 
     // Clear OTP data after successful registration

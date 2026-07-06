@@ -22,7 +22,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: storage,
   limits: { 
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: 10 * 1024 * 1024, // 10MB limit
     files: 10 // Max 10 files
   },
   fileFilter: fileFilter,
@@ -49,7 +49,7 @@ const uploadDocuments = multer({
   storage,
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB
-    files: 4,
+    files: 6,
   },
   fileFilter: documentFileFilter,
 });
@@ -67,7 +67,7 @@ const handleUploadError = (err, req, res, next) => {
     if (err.code === 'LIMIT_FILE_COUNT') {
       return res.status(400).json({
         success: false,
-        message: 'Too many files. Maximum is 4 documents'
+        message: 'Too many files. Maximum is 6 documents'
       });
     }
     if (err.code === 'LIMIT_UNEXPECTED_FILE') {
