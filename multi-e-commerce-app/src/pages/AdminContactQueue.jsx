@@ -138,6 +138,14 @@ const AdminContactQueue = () => {
     fetchSupportMessages();
   }, []);
 
+  useEffect(() => {
+    if (!selectedSupport) return;
+    const isGuestContact = !selectedSupport.requester && selectedSupport.requesterEmail;
+    if (isGuestContact && replyForm.channel === 'in_app') {
+      setReplyForm((current) => ({ ...current, channel: 'email' }));
+    }
+  }, [selectedSupportId, selectedSupport]);
+
   const refresh = () => setQueue(readQueue());
 
   const refreshAll = () => {
@@ -261,7 +269,12 @@ const AdminContactQueue = () => {
       });
       updateSelectedSupport(response.data);
       setReplyForm((current) => ({ ...current, message: '' }));
-      toast.success('Reply sent to user');
+      const emailDelivery = response.delivery?.email;
+      if (['email', 'all'].includes(replyForm.channel) && emailDelivery?.success === false) {
+        toast.error(emailDelivery.message || emailDelivery.error || 'Reply saved, but email was not sent');
+      } else {
+        toast.success(emailDelivery ? 'Reply saved and emailed to user' : 'Reply saved to conversation');
+      }
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to send reply');
     } finally {

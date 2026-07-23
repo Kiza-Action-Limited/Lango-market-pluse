@@ -144,63 +144,33 @@ const AdminAnalytics = () => {
   const paymentRows = useMemo(() => analytics?.paymentStats || [], [analytics]);
   const escrowRows = useMemo(() => analytics?.escrowStats || [], [analytics]);
 
-  const exportPdfReport = () => {
-    const pdfEscape = (text = '') => String(text).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-    const lines = [];
-    let y = 800;
-    const left = 48;
-    const text = (size, value, x = left) => {
-      lines.push(`BT /F1 ${size} Tf ${x} ${y} Td (${pdfEscape(value)}) Tj ET`);
-      y -= size + 7;
-    };
-
-    text(18, 'Lango MarketPulse - Platform Analytics');
-    text(10, `Generated: ${new Date().toLocaleString()}`);
-    text(10, `Period: ${period}`);
-    y -= 8;
-    text(13, 'Executive Summary');
-    text(10, `Revenue: ${formatCurrency(summary.totalRevenue || 0)}`);
-    text(10, `Orders: ${formatNumber(summary.totalOrders || 0)}`);
-    text(10, `Users: ${formatNumber(summary.totalUsers || 0)}`);
-    text(10, `Products: ${formatNumber(summary.totalProducts || 0)}`);
-    text(10, `Active Logistics: ${formatNumber(summary.activeLogistics || 0)}`);
-    y -= 8;
-    text(13, 'Financials');
-    text(10, `Marketplace: ${formatCurrency(financials.marketplaceRevenue || 0)}`);
-    text(10, `Subscriptions: ${formatCurrency(financials.subscriptionRevenue || 0)}`);
-    text(10, `Platform Fees: ${formatCurrency(financials.platformFeeRevenue || 0)}`);
-    text(10, `Escrow Held: ${formatCurrency(financials.escrowHeld || 0)}`);
-    y -= 8;
-    text(13, 'Top Products');
-    (analytics?.topProducts || []).slice(0, 8).forEach((item) => {
-      text(10, `${item.product?.name || 'Unnamed'} - ${formatCurrency(item.revenue || 0)} - ${formatNumber(item.totalSold || 0)} sold`);
-    });
-
-    const content = lines.join('\n');
-    const encoder = new TextEncoder();
-    const objects = [
-      '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-      '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-      '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
-      '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-      `5 0 obj << /Length ${encoder.encode(content).length} >> stream\n${content}\nendstream endobj`,
+  const exportCsvReport = () => {
+    const escapeCsv = (value = '') => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const rows = [
+      ['Section', 'Metric', 'Value'],
+      ['Report', 'Generated', new Date().toLocaleString()],
+      ['Report', 'Period', period],
+      ['Executive Summary', 'Revenue', formatCurrency(summary.totalRevenue || 0)],
+      ['Executive Summary', 'Orders', formatNumber(summary.totalOrders || 0)],
+      ['Executive Summary', 'Users', formatNumber(summary.totalUsers || 0)],
+      ['Executive Summary', 'Products', formatNumber(summary.totalProducts || 0)],
+      ['Executive Summary', 'Active Logistics', formatNumber(summary.activeLogistics || 0)],
+      ['Financials', 'Marketplace', formatCurrency(financials.marketplaceRevenue || 0)],
+      ['Financials', 'Subscriptions', formatCurrency(financials.subscriptionRevenue || 0)],
+      ['Financials', 'Platform Fees', formatCurrency(financials.platformFeeRevenue || 0)],
+      ['Financials', 'Escrow Held', formatCurrency(financials.escrowHeld || 0)],
+      ...(analytics?.topProducts || []).slice(0, 8).map((item) => [
+        'Top Products',
+        item.product?.name || 'Unnamed',
+        `${formatCurrency(item.revenue || 0)} | ${formatNumber(item.totalSold || 0)} sold`,
+      ]),
     ];
-    let pdf = '%PDF-1.4\n';
-    const offsets = [0];
-    objects.forEach((obj) => {
-      offsets.push(encoder.encode(pdf).length);
-      pdf += `${obj}\n`;
-    });
-    const xrefStart = encoder.encode(pdf).length;
-    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-    for (let i = 1; i <= objects.length; i += 1) pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-    pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
-
-    const blob = new Blob([pdf], { type: 'application/pdf' });
+    const csv = rows.map((row) => row.map(escapeCsv).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `admin_platform_analytics_${new Date().toISOString().slice(0, 10)}.pdf`;
+    a.download = `admin_platform_analytics_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -248,11 +218,11 @@ const AdminAnalytics = () => {
               ))}
               <button
                 type="button"
-                onClick={exportPdfReport}
+                onClick={exportCsvReport}
                 className="inline-flex h-10 items-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-semibold text-white hover:bg-[#EA580C]"
               >
                 <FaFileExport />
-                Export PDF
+                Export CSV
               </button>
             </div>
           </div>

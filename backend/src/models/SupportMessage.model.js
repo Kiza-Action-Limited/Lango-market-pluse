@@ -5,11 +5,10 @@ const SupportThreadMessageSchema = new mongoose.Schema(
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
     },
     senderRole: {
       type: String,
-      enum: ['admin', 'seller', 'farmer', 'buyer', 'vendor', 'logistics', 'user'],
+      enum: ['admin', 'seller', 'farmer', 'buyer', 'vendor', 'logistics', 'user', 'guest'],
       default: 'user',
     },
     body: {
@@ -36,7 +35,6 @@ const SupportMessageSchema = new mongoose.Schema(
     requester: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
       index: true,
     },
     requesterRole: {

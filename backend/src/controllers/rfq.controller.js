@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const RFQ = require('../models/RFQ.model');
 const Product = require('../models/Product.model');
 const notificationService = require('../services/notification/notification.service');
+const { isSellerUser } = require('../utils/userCategory');
 
 const sendValidationErrors = (req, res) => {
   const errors = validationResult(req);
@@ -16,12 +17,12 @@ const sendValidationErrors = (req, res) => {
 };
 
 const userId = (user) => String(user?.id || user?._id || user?.userId || '');
-const isSellerRole = (user) => ['seller', 'farmer'].includes(String(user?.role || '').toLowerCase());
+const isSellerRole = (user) => isSellerUser(user);
 
 const populateRfq = (query) => query
   .populate('product', 'name price unit images sku trackingSku quantityAvailable locationHub')
   .populate('buyer', 'fullName name businessName email phone role')
-  .populate('seller', 'fullName name businessName email phone role');
+  .populate('seller', 'fullName name businessName email phone role businessType');
 
 const getDocId = (value) => value?._id || value?.id || value;
 

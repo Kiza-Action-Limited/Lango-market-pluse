@@ -1,4 +1,5 @@
 const Order = require('../../models/Order.model');
+const mongoose = require('mongoose');
 const Product = require('../../models/Product.model');
 const User = require('../../models/User.model');
 const Logistics = require('../../models/Logistics.model');
@@ -41,6 +42,62 @@ const httpError = (message, statusCode, details = {}) => {
   error.statusCode = statusCode;
   Object.assign(error, details);
   return error;
+};
+
+const toObjectId = (value) => {
+  if (!value) return value;
+  if (value instanceof mongoose.Types.ObjectId) return value;
+  return mongoose.Types.ObjectId.isValid(value) ? new mongoose.Types.ObjectId(value) : value;
+};
+
+const getRangeStart = (range) => {
+  const now = new Date();
+  const start = new Date(now);
+  const normalized = String(range || '').toLowerCase();
+
+  if (normalized === 'today') {
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  if (normalized === '7d') {
+    start.setDate(now.getDate() - 7);
+    return start;
+  }
+  if (normalized === '30d') {
+    start.setDate(now.getDate() - 30);
+    return start;
+  }
+  if (normalized === '90d') {
+    start.setDate(now.getDate() - 90);
+    return start;
+  }
+  if (normalized === 'year') {
+    start.setFullYear(now.getFullYear() - 1);
+    return start;
+  }
+
+  return null;
+};
+
+const buildDateFilter = ({ range, startDate, endDate } = {}) => {
+  const createdAt = {};
+  const rangeStart = getRangeStart(range);
+  if (rangeStart) createdAt.$gte = rangeStart;
+  if (startDate) {
+    const parsedStart = new Date(startDate);
+    if (!Number.isNaN(parsedStart.getTime())) {
+      parsedStart.setHours(0, 0, 0, 0);
+      createdAt.$gte = parsedStart;
+    }
+  }
+  if (endDate) {
+    const parsedEnd = new Date(endDate);
+    if (!Number.isNaN(parsedEnd.getTime())) {
+      parsedEnd.setHours(23, 59, 59, 999);
+      createdAt.$lte = parsedEnd;
+    }
+  }
+  return Object.keys(createdAt).length ? createdAt : null;
 };
 
 const normalizeLogisticsAddress = (address, fallback = {}) => {
@@ -180,6 +237,72 @@ const calculateLogisticsCharge = ({ product, seller, deliveryAddress, quantity }
   };
 };
 
+const getSelectedLogisticsProvider = async (seller) => {
+  const addon = seller?.sellerLogisticsAddon || {};
+  const providerId = addon.selectedProvider?._id || addon.selectedProvider;
+  if (!addon.active || !providerId || !mongoose.Types.ObjectId.isValid(providerId)) return null;
+
+  const provider = await User.findOne({
+    _id: providerId,
+    role: 'logistics',
+    $or: [
+      { verificationStatus: 'verified' },
+      { 'logisticsProfile.verificationStatus': 'verified' },
+    ],
+  }).select('fullName name businessName phone logisticsProfile employer ownerAccount role');
+
+  return provider || null;
+};
+
+const getVerifiedLogisticsProviderById = async (providerId) => {
+  if (!providerId) return null;
+  if (!mongoose.Types.ObjectId.isValid(providerId)) {
+    throw httpError('Choose a valid logistics company.', 400);
+  }
+
+  const provider = await User.findOne({
+    _id: providerId,
+    role: 'logistics',
+    $or: [
+      { verificationStatus: 'verified' },
+      { verificationStatus: 'gold' },
+      { 'logisticsProfile.verificationStatus': 'verified' },
+    ],
+  }).select('fullName name businessName phone logisticsProfile employer ownerAccount role');
+
+  if (!provider) {
+    throw httpError('Selected logistics company is not available or verified.', 404);
+  }
+
+  return provider;
+};
+
+const buildLogisticsPreference = ({ provider, selectedBy, selectionSource, notes }) => ({
+  selectedBy,
+  requestedProvider: provider?._id,
+  providerName: provider?.businessName || provider?.fullName || provider?.name || undefined,
+  providerPhone: provider?.phone || undefined,
+  providerHub: provider?.logisticsProfile?.baseHub || provider?.logisticsProfile?.locationHub || undefined,
+  selectionSource,
+  notes: String(notes || '').trim().slice(0, 300),
+  requestedAt: new Date(),
+});
+
+const buildLogisticsAssignment = (provider) => {
+  if (!provider?._id) return {};
+  const driverMode = String(provider.logisticsProfile?.driverMode || '').toLowerCase();
+  const fleetOwner = provider.employer || provider.ownerAccount || provider.logisticsProfile?.fleetOwner;
+  const isFleetManaged = driverMode === 'hired_driver' || Boolean(fleetOwner);
+
+  return {
+    driver: provider._id,
+    ...(isFleetManaged && fleetOwner ? { fleetOwner } : {}),
+    driverName: provider.businessName || provider.fullName || provider.name || 'Logistics provider',
+    driverPhone: provider.phone || '',
+    carrier: isFleetManaged ? 'fleet_managed' : 'solo_owner_operator',
+  };
+};
+
 const getFirstCoordinatePair = (...sources) => {
   for (const source of sources) {
     const coords = getCoordinatePair(source);
@@ -254,6 +377,7 @@ const notifyOrderParties = async (order, { buyer, seller } = {}) => {
 const getPopulatedOrder = (orderId) => Order.findById(orderId)
   .populate('buyer', 'fullName name businessName phone email')
   .populate('seller', 'fullName name businessName phone email')
+  .populate('logisticsPreference.requestedProvider', 'fullName name businessName phone logisticsProfile.baseHub logisticsProfile.locationHub logisticsProfile.vehiclePlate logisticsProfile.vehicleType')
   .populate('product', 'name images sku trackingSku');
 
 const summarizeEscrow = (escrow) => {
@@ -284,6 +408,9 @@ const summarizeEscrow = (escrow) => {
 
 const summarizeLogistics = (logistics) => {
   if (!logistics) return null;
+  const metadata = logistics.metadata instanceof Map
+    ? Object.fromEntries(logistics.metadata)
+    : logistics.metadata || {};
   const pickupCoords = getCoordinatePair(logistics.pickupAddress);
   const deliveryCoords = getCoordinatePair(logistics.shippingAddress);
   const driverCoords = getFirstCoordinatePair(
@@ -330,6 +457,7 @@ const summarizeLogistics = (logistics) => {
     escrowReleaseDue: logistics.escrowReleaseDue,
     shippingCost: logistics.shippingCost,
     settlement: logistics.settlement,
+    metadata,
     trackingHistory: logistics.trackingHistory || [],
     qrScans: logistics.qrScans || [],
     gpsTracking: logistics.gpsTracking,
@@ -470,13 +598,14 @@ const attachOrderRelations = async (orders) => {
 
 class OrderService {
   async createOrder(orderData) {
-    const { buyer, product, quantity, deliveryAddress } = orderData;
+    const { buyer, product, quantity, deliveryAddress, logisticsProviderId, logisticsPreference = {} } = orderData;
 
     // Get product details
     const productDoc = await Product.findById(product);
     if (!productDoc) throw httpError('Product not found', 404);
 
-    const seller = await User.findById(productDoc.seller).select('businessType phone locationHub city address location logisticsProfile.currentLocation');
+    const seller = await User.findById(productDoc.seller).select('businessType phone locationHub city address location logisticsProfile.currentLocation sellerLogisticsAddon');
+    const buyerDoc = await User.findById(buyer).select('buyerLogisticsPreference');
     const sellerBusinessType = String(seller?.businessType || '').toLowerCase();
     const requiresBulkMinimum = sellerBusinessType === 'wholesaler' || sellerBusinessType === 'manufacturer';
     const orderQuantity = Number(quantity);
@@ -500,6 +629,26 @@ class OrderService {
       seller,
       deliveryAddress: normalizedDeliveryAddress,
       quantity: orderQuantity,
+    });
+    const savedBuyerProviderId = buyerDoc?.buyerLogisticsPreference?.active
+      ? buyerDoc.buyerLogisticsPreference.selectedProvider
+      : null;
+    const buyerRequestedProviderId = logisticsProviderId || savedBuyerProviderId;
+    const buyerPreferenceNotes = logisticsProviderId
+      ? logisticsPreference.notes
+      : buyerDoc?.buyerLogisticsPreference?.notes || logisticsPreference.notes;
+    const buyerSelectedProvider = buyerRequestedProviderId
+      ? await getVerifiedLogisticsProviderById(buyerRequestedProviderId)
+      : null;
+    const sellerSelectedProvider = buyerSelectedProvider ? null : await getSelectedLogisticsProvider(seller);
+    const selectedProvider = buyerSelectedProvider || sellerSelectedProvider;
+    const selectionSource = buyerSelectedProvider ? 'buyer' : sellerSelectedProvider ? 'seller' : 'default';
+    const logisticsAssignment = buildLogisticsAssignment(selectedProvider);
+    const savedLogisticsPreference = buildLogisticsPreference({
+      provider: selectedProvider,
+      selectedBy: buyerSelectedProvider ? buyer : selectedProvider ? productDoc.seller : undefined,
+      selectionSource,
+      notes: buyerPreferenceNotes,
     });
 
     // Create order
@@ -526,6 +675,7 @@ class OrderService {
       totalAmount: productSubtotal + logisticsQuote.logisticsFee,
       deliveryAddress: normalizedDeliveryAddress,
       deliveryAddressText: typeof deliveryAddress === 'string' ? deliveryAddress.trim() : normalizedDeliveryAddress?.label,
+      logisticsPreference: savedLogisticsPreference,
       qrChain: uuidv4(),
       status: 'pending_payment',
       inventoryReservedAt: new Date(),
@@ -537,7 +687,8 @@ class OrderService {
         orderNumber: getOrderLabel(order),
         seller: productDoc.seller,
         buyer,
-        carrier: 'solo_owner_operator',
+        carrier: logisticsAssignment.carrier || 'solo_owner_operator',
+        ...logisticsAssignment,
         pickupAddress: logisticsQuote.pickupAddress,
         shippingAddress: logisticsQuote.shippingAddress,
         weight: logisticsQuote.weightKg,
@@ -576,6 +727,11 @@ class OrderService {
           distanceKm: logisticsQuote.distanceKm,
           calculationSource: logisticsQuote.calculationSource,
           estimated: logisticsQuote.estimated,
+          selectedProviderId: selectedProvider?._id,
+          selectedProviderName: selectedProvider?.businessName || selectedProvider?.fullName || selectedProvider?.name,
+          selectedProviderPhone: selectedProvider?.phone,
+          selectedBy: selectionSource,
+          buyerRequestedProvider: Boolean(buyerSelectedProvider),
         },
       });
       await qrChainSvc.generateTripTokens(logistics);
@@ -587,7 +743,7 @@ class OrderService {
     if (seller?.phone) {
       await smsQueue.add('send', {
         to: seller.phone,
-        message: `New order #${order._id} for ${orderQuantity} ${productDoc.name}. Awaiting payment. Total KES ${Math.ceil(order.totalAmount).toLocaleString()} includes logistics.`,
+        message: `New order #${order._id} for ${orderQuantity} ${productDoc.name}. Awaiting payment. Total KES ${Math.ceil(order.totalAmount).toLocaleString()} includes logistics${selectedProvider ? ` via ${savedLogisticsPreference.providerName}` : ''}.`,
       });
     }
 
@@ -595,25 +751,29 @@ class OrderService {
       buyer: {
         event: 'order_created',
         title: `Order ${getOrderLabel(order)} created`,
-        body: `Your order for ${orderQuantity} ${productDoc.name} is awaiting payment. Total includes logistics delivery fee.`,
+        body: `Your order for ${orderQuantity} ${productDoc.name} is awaiting payment. Total includes logistics delivery fee${selectedProvider ? ` via ${savedLogisticsPreference.providerName}` : ''}.`,
         data: {
           href: `/orders/${order._id}/track`,
           productName: productDoc.name,
           productSubtotal,
           logisticsFee: logisticsQuote.logisticsFee,
           totalAmount: order.totalAmount,
+          logisticsProviderName: savedLogisticsPreference.providerName,
+          logisticsSelectionSource: selectionSource,
         },
       },
       seller: {
         event: 'new_order',
         title: `New order ${getOrderLabel(order)}`,
-        body: `New order for ${orderQuantity} ${productDoc.name}. Buyer payment will hold product and logistics money in escrow.`,
+        body: `New order for ${orderQuantity} ${productDoc.name}. Buyer payment will hold product and logistics money in escrow${selectedProvider ? `; buyer requests you use ${savedLogisticsPreference.providerName} for transport to their location` : ''}.`,
         data: {
           href: '/seller/orders',
           productName: productDoc.name,
           productSubtotal,
           logisticsFee: logisticsQuote.logisticsFee,
           totalAmount: order.totalAmount,
+          logisticsProviderName: savedLogisticsPreference.providerName,
+          logisticsSelectionSource: selectionSource,
         },
       },
     });
@@ -622,32 +782,67 @@ class OrderService {
   }
 
   async getOrders(filters) {
-    const { userId, userRole, page = 1, limit = 10, status, role } = filters;
+    const { userId, userRole, page = 1, limit = 10, status, role, range, startDate, endDate } = filters;
     const query = {};
 
-    if (role === 'buyer') query.buyer = userId;
-    else if (role === 'seller') query.seller = userId;
+    if (role === 'buyer') query.buyer = toObjectId(userId);
+    else if (role === 'seller') query.seller = toObjectId(userId);
     else {
       // For admin or if role not specified, show both
-      query.$or = [{ buyer: userId }, { seller: userId }];
+      const objectUserId = toObjectId(userId);
+      query.$or = [{ buyer: objectUserId }, { seller: objectUserId }];
     }
 
     if (status) query.status = status;
+    const dateFilter = buildDateFilter({ range, startDate, endDate });
+    if (dateFilter) query.createdAt = dateFilter;
 
-    const skip = (page - 1) * limit;
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const pageSize = Math.min(500, Math.max(1, Number(limit) || 10));
+    const skip = (pageNumber - 1) * pageSize;
     const orders = await Order.find(query)
       .populate('buyer', 'fullName phone')
       .populate('seller', 'fullName phone')
+      .populate('logisticsPreference.requestedProvider', 'fullName name businessName phone logisticsProfile.baseHub logisticsProfile.locationHub logisticsProfile.vehiclePlate logisticsProfile.vehicleType')
       .populate('product', 'name images')
       .skip(skip)
-      .limit(limit)
+      .limit(pageSize)
       .sort({ createdAt: -1 });
 
-    const total = await Order.countDocuments(query);
+    const [total, summaryRows] = await Promise.all([
+      Order.countDocuments(query),
+      Order.aggregate([
+        { $match: query },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: { $ifNull: ['$totalAmount', 0] } },
+            pendingOrders: {
+              $sum: {
+                $cond: [
+                  { $in: ['$status', ['pending_payment', 'payment_escrowed', 'processing', 'dispatched']] },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+    ]);
+    const summary = summaryRows[0] || { totalRevenue: 0, pendingOrders: 0 };
 
     return {
       data: await attachOrderRelations(orders),
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      summary: {
+        totalOrders: total,
+        totalRevenue: summary.totalRevenue || 0,
+        pendingOrders: summary.pendingOrders || 0,
+        range: range || null,
+        startDate: dateFilter?.$gte || null,
+        endDate: dateFilter?.$lte || null,
+      },
+      pagination: { page: pageNumber, limit: pageSize, total, pages: Math.ceil(total / pageSize) },
     };
   }
 
@@ -724,6 +919,7 @@ class OrderService {
     const order = await Order.findById(orderId)
       .populate('buyer', 'fullName phone')
       .populate('seller', 'fullName phone')
+      .populate('logisticsPreference.requestedProvider', 'fullName name businessName phone logisticsProfile.baseHub logisticsProfile.locationHub logisticsProfile.vehiclePlate logisticsProfile.vehicleType')
       .populate('product');
     if (!order) throw httpError('Order not found', 404);
 

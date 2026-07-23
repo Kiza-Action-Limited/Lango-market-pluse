@@ -8,14 +8,14 @@ import {
   FaStore, FaTruck, FaEye, FaEdit, FaTrash, FaPlus,
   FaSearch, FaFilter, FaDownload, FaPrint, FaChartBar,
   FaUserTie, FaSeedling, FaWarehouse, FaUserFriends,
-  FaCreditCard, FaMapMarker, FaClock, FaPercent,
+  FaCreditCard, FaMapMarker, FaClock, FaPercent, FaCrown,
   FaShieldAlt, FaEnvelope, FaPhone, FaGlobe,
   FaStar, FaStarHalfAlt, FaRegStar, FaShippingFast,
   FaBoxOpen, FaUndo, FaCheckDouble, FaTimesCircle,
   FaSpinner, FaSync, FaUserCheck, FaUserTimes,
   FaClipboardList, FaMoneyBillWave, FaTruckMoving,
   FaChartPie, FaCalendarAlt, FaFileExport, FaBellSlash,
-  FaFileAlt, FaExternalLinkAlt
+  FaFileAlt, FaExternalLinkAlt, FaIdBadge
 } from 'react-icons/fa';
 import { formatCurrency, formatDate, formatDateTime } from '../utils/formatters';
 import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill, StoreVisitsBySourcePanel } from '../components/dashboard/DashboardWidgets';
@@ -29,6 +29,32 @@ import SharedGroupTripPanel from '../components/logistics/SharedGroupTripPanel';
 const getAdminProductStock = (product) => Number(product?.stock ?? product?.quantityAvailable ?? product?.quantity ?? product?.inventory ?? 0);
 const getAdminProductSku = (product) => product?.sku || product?.trackingSku || product?.SKU || product?.stockKeepingUnit || 'SKU pending';
 const getAdminProductThreshold = (product) => Number(product?.minThreshold ?? product?.lowStockThreshold ?? 10);
+const readMetadata = (source, key) => {
+  const metadata = source?.metadata;
+  if (!metadata) return undefined;
+  if (typeof metadata.get === 'function') return metadata.get(key);
+  return metadata[key];
+};
+const getLogisticsPreference = (order = {}) => {
+  const preference = order.logisticsPreference || {};
+  const provider = preference.requestedProvider;
+  const providerObject = provider && typeof provider === 'object' ? provider : null;
+  const logistics = order.logistics || {};
+  const profile = providerObject?.logisticsProfile || {};
+
+  return {
+    name:
+      preference.providerName ||
+      providerObject?.businessName ||
+      providerObject?.fullName ||
+      providerObject?.name ||
+      readMetadata(logistics, 'selectedProviderName') ||
+      logistics.driverName ||
+      '',
+    source: preference.selectionSource || readMetadata(logistics, 'selectedBy') || 'default',
+    hub: preference.providerHub || profile.baseHub || profile.locationHub || '',
+  };
+};
 const formatAdminLabel = (value) => String(value || 'record')
   .replace(/_/g, ' ')
   .replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -54,6 +80,21 @@ const getAdminDocumentUserName = (document) => (
   document?.user?.email ||
   'User record'
 );
+const adminCsvExportTypes = [
+  'users',
+  'products',
+  'orders',
+  'payments',
+  'transactions',
+  'logistics',
+  'subscriptions',
+  'documents',
+  'categories',
+  'support',
+  'rfqs',
+  'reviews',
+  'agent-referrals',
+];
 const getAdminInventoryGraph = (product) => {
   const graph = Array.isArray(product?.inventoryGraph)
     ? product.inventoryGraph
@@ -140,6 +181,9 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   const [documentFilters, setDocumentFilters] = useState({ search: '', source: 'all', documentType: 'all' });
   const [documentPagination, setDocumentPagination] = useState({ page: 1, limit: 8, total: 0, pages: 1 });
   const [documentLoading, setDocumentLoading] = useState(false);
+  const [agentReferrals, setAgentReferrals] = useState([]);
+  const [agentReferralSummary, setAgentReferralSummary] = useState({ totalReferrals: 0, uniqueAgents: 0, topAgents: [], byPlan: [] });
+  const [agentReferralSearch, setAgentReferralSearch] = useState('');
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -199,6 +243,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   });
   const lastFetchRef = useRef({ key: '', at: 0 });
 
+  const buildDocumentQueryParams = (page = documentPagination.page || 1, filters = documentFilters) => ({
+    page,
+    limit: documentPagination.limit || 8,
+    search: filters.search?.trim() || undefined,
+    source: filters.source || 'all',
+    documentType: filters.documentType || 'all',
+  });
+
   useEffect(() => {
     const key = JSON.stringify({
       section,
@@ -219,13 +271,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     if (!silent) setDocumentLoading(true);
     try {
       const documentsResponse = await api.get('/v1/admin/documents', {
-        params: {
-          page,
-          limit: documentPagination.limit || 8,
-          search: filters.search?.trim() || undefined,
-          source: filters.source || 'all',
-          documentType: filters.documentType || 'all',
-        },
+        params: buildDocumentQueryParams(page, filters),
       });
       setUserDocuments(Array.isArray(documentsResponse.data?.data) ? documentsResponse.data.data : []);
       setDocumentSummary(documentsResponse.data?.summary || { totalDocuments: 0, usersWithDocuments: 0, fileBackedDocuments: 0, metadataRecords: 0 });
@@ -261,13 +307,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             api.get('/v1/admin/products', { params: { page: 1, limit: 50 } }),
             api.get('/v1/admin/logistics', { params: { page: 1, limit: 50 } }),
             api.get('/v1/admin/documents', {
-              params: {
-                page: documentPagination.page || 1,
-                limit: documentPagination.limit || 8,
-                search: documentFilters.search?.trim() || undefined,
-                source: documentFilters.source || 'all',
-                documentType: documentFilters.documentType || 'all',
-              },
+              params: buildDocumentQueryParams(),
             }),
           ]);
           setStats(statsRes.data.data);
@@ -278,6 +318,30 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           setUserDocuments(Array.isArray(dashboardDocumentsRes.data?.data) ? dashboardDocumentsRes.data.data : []);
           setDocumentSummary(dashboardDocumentsRes.data?.summary || { totalDocuments: 0, usersWithDocuments: 0, fileBackedDocuments: 0, metadataRecords: 0 });
           setDocumentPagination(dashboardDocumentsRes.data?.pagination || { page: 1, limit: 8, total: 0, pages: 1 });
+          break;
+
+        case 'documents':
+          const [documentStatsRes, adminDocumentsRes] = await Promise.all([
+            api.get('/v1/admin/stats'),
+            api.get('/v1/admin/documents', { params: buildDocumentQueryParams() }),
+          ]);
+          setStats(documentStatsRes.data.data);
+          setUserDocuments(Array.isArray(adminDocumentsRes.data?.data) ? adminDocumentsRes.data.data : []);
+          setDocumentSummary(adminDocumentsRes.data?.summary || { totalDocuments: 0, usersWithDocuments: 0, fileBackedDocuments: 0, metadataRecords: 0 });
+          setDocumentPagination(adminDocumentsRes.data?.pagination || { page: 1, limit: 8, total: 0, pages: 1 });
+          break;
+
+        case 'agent-referrals':
+          const agentReferralsRes = await api.get('/v1/admin/agent-referrals', {
+            params: {
+              search: agentReferralSearch,
+              page: currentPage,
+              limit: itemsPerPage,
+            },
+          });
+          setAgentReferrals(Array.isArray(agentReferralsRes.data?.data) ? agentReferralsRes.data.data : []);
+          setAgentReferralSummary(agentReferralsRes.data?.summary || { totalReferrals: 0, uniqueAgents: 0, topAgents: [], byPlan: [] });
+          setTotalPages(agentReferralsRes.data?.pagination?.pages || 1);
           break;
           
         case 'users':
@@ -603,6 +667,225 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     }
   );
 
+  const savedDocuments = Number(documentSummary.totalDocuments || stats.documents?.documents || 0);
+  const usersWithDocuments = Number(documentSummary.usersWithDocuments || stats.documents?.usersWithDocuments || 0);
+  const fileBackedDocuments = Number(documentSummary.fileBackedDocuments || 0);
+  const metadataRecords = Number(documentSummary.metadataRecords || 0);
+  const filteredDocuments = Number(documentSummary.filteredDocuments ?? documentPagination.total ?? savedDocuments);
+  const filteredUsersWithDocuments = Number(documentSummary.filteredUsersWithDocuments ?? usersWithDocuments);
+  const sourceBreakdown = documentSummary.sourceBreakdown || {};
+  const documentTypeBreakdown = documentSummary.documentTypeBreakdown || {};
+  const recentUserDocuments = Array.isArray(userDocuments) ? userDocuments : [];
+
+  const renderDocumentVaultPanel = () => (
+    <Panel
+      title="User Documents Vault"
+      className="xl:col-span-12"
+      action={
+        <div className="flex items-center gap-3">
+          <button onClick={() => loadDashboardDocuments({ page: documentPagination.page || 1 })} className="text-xs font-medium text-[#F97316]">
+            Refresh vault
+          </button>
+          <button onClick={() => navigate('/admin/users')} className="text-xs font-medium text-[#F97316]">Open users</button>
+        </div>
+      }
+    >
+      <form
+        className="mb-4 grid gap-3 lg:grid-cols-[1fr_190px_190px_auto]"
+        onSubmit={(event) => {
+          event.preventDefault();
+          loadDashboardDocuments({ page: 1 });
+        }}
+      >
+        <div className="relative">
+          <FaSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            value={documentFilters.search}
+            onChange={(event) => setDocumentFilters((current) => ({ ...current, search: event.target.value }))}
+            placeholder="Search documents, user, phone, email, document number..."
+            className="h-10 w-full rounded-md border border-gray-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+          />
+        </div>
+        <select
+          value={documentFilters.source}
+          onChange={(event) => setDocumentFilters((current) => ({ ...current, source: event.target.value }))}
+          className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
+        >
+          <option value="all">All sources</option>
+          <option value="admin_saved">Admin saved</option>
+          <option value="premium_seller_verification">Premium seller verification</option>
+          <option value="kyc">KYC</option>
+          <option value="logistics_application">Logistics application</option>
+          <option value="logistics_profile">Logistics profile</option>
+        </select>
+        <select
+          value={documentFilters.documentType}
+          onChange={(event) => setDocumentFilters((current) => ({ ...current, documentType: event.target.value }))}
+          className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
+        >
+          <option value="all">All document types</option>
+          <option value="national_id">National ID</option>
+          <option value="business_permit">Business permit</option>
+          <option value="tax_certificate">Tax certificate</option>
+          <option value="kyc">KYC</option>
+          <option value="contract">Contract</option>
+          <option value="receipt">Receipt</option>
+          <option value="other">Other</option>
+        </select>
+        <button
+          type="submit"
+          disabled={documentLoading}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white hover:bg-[#374151] disabled:opacity-60"
+        >
+          <FaFilter />
+          {documentLoading ? 'Loading...' : 'Apply'}
+        </button>
+      </form>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-4">
+        <div className="rounded-md bg-gray-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Saved records</p>
+          <p className="mt-1 text-2xl font-bold text-[#111827]">{savedDocuments}</p>
+        </div>
+        <div className="rounded-md bg-blue-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Users covered</p>
+          <p className="mt-1 text-2xl font-bold text-[#111827]">{usersWithDocuments}</p>
+        </div>
+        <div className="rounded-md bg-green-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Files saved</p>
+          <p className="mt-1 text-2xl font-bold text-[#111827]">{fileBackedDocuments}</p>
+        </div>
+        <div className="rounded-md bg-amber-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">DB records</p>
+          <p className="mt-1 text-2xl font-bold text-[#111827]">{metadataRecords}</p>
+        </div>
+      </div>
+
+      <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
+        <div className="rounded-md border border-gray-100 bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Filtered results</p>
+          <p className="mt-1 text-lg font-bold text-[#111827]">{filteredDocuments} documents across {filteredUsersWithDocuments} users</p>
+        </div>
+        <div className="rounded-md border border-gray-100 bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Source breakdown</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {Object.entries(sourceBreakdown).length ? Object.entries(sourceBreakdown).map(([key, value]) => (
+              <span key={key} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-600">
+                {formatAdminLabel(key)}: {value}
+              </span>
+            )) : <span className="text-xs text-gray-500">No sources yet</span>}
+          </div>
+        </div>
+        <div className="rounded-md border border-gray-100 bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Top type</p>
+          <p className="mt-1 text-lg font-bold text-[#111827]">
+            {Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0]
+              ? `${formatAdminLabel(Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0][0])} (${Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0][1]})`
+              : 'No type'}
+          </p>
+        </div>
+      </div>
+
+      {documentLoading ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="h-44 rounded-md bg-gray-100 skeleton-shimmer" />
+          ))}
+        </div>
+      ) : recentUserDocuments.length ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {recentUserDocuments.map((document, index) => {
+            const userLabel = getAdminDocumentUserName(document);
+            const hasFile = Boolean(document.url);
+            return (
+              <div key={document._id || document.publicId || `${document.source}-${document.documentNumber}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[#111827]" title={document.title || document.originalName}>{document.title || document.originalName || 'User document'}</p>
+                    <p className="mt-1 truncate text-xs text-gray-500" title={userLabel}>{userLabel}</p>
+                  </div>
+                  <FaFileAlt className="shrink-0 text-[#F97316]" />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-600">{formatAdminLabel(document.source)}</span>
+                  <span className="rounded-full border border-orange-100 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700">{formatAdminLabel(document.documentType)}</span>
+                  {!hasFile && <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">Database record</span>}
+                </div>
+                <p className="mt-3 truncate text-xs text-gray-500">{document.originalName || document.mimeType || document.documentNumber || 'Verification record'} {formatAdminFileSize(document.size)}</p>
+                <p className="mt-1 text-xs text-gray-400">{formatDateTime(document.uploadedAt)}</p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleViewUserDetails(document.user)}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    <FaEye /> User
+                  </button>
+                  {hasFile && (
+                    <a
+                      href={document.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-[#374151]"
+                    >
+                      <FaExternalLinkAlt /> File
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-5 text-sm text-gray-500">
+          No saved user documents match this view. Open a user record to upload documents, or clear the vault filters.
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-gray-500">
+          Page <span className="font-semibold text-[#111827]">{documentPagination.page || 1}</span> of <span className="font-semibold text-[#111827]">{documentPagination.pages || 1}</span>
+          {' '}({documentPagination.total || 0} filtered)
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={documentLoading || (documentPagination.page || 1) <= 1}
+            onClick={() => loadDashboardDocuments({ page: (documentPagination.page || 1) - 1 })}
+            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <button
+            type="button"
+            disabled={documentLoading || (documentPagination.page || 1) >= (documentPagination.pages || 1)}
+            onClick={() => loadDashboardDocuments({ page: (documentPagination.page || 1) + 1 })}
+            className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </Panel>
+  );
+
+  const renderUserDetailsModal = () => (
+    showUserModal && selectedUser ? (
+      <UserDetailsModal
+        open={showUserModal}
+        loading={userDetailsLoading}
+        details={selectedUserDetails}
+        fallbackUser={selectedUser}
+        onClose={() => {
+          setShowUserModal(false);
+          setSelectedUser(null);
+          setSelectedUserDetails(null);
+        }}
+        onUploadDocument={uploadUserDocument}
+      />
+    ) : null
+  );
+
   if (section === 'dashboard') {
     const totalUsers = Number(stats.users.total || 0);
     const totalProducts = Number(stats.products.total || 0);
@@ -718,15 +1001,6 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     const platformFeeRevenue = Number(platformSummary.platformFeeRevenue ?? stats.finance?.escrow?.platformFees ?? 0);
     const activeSubscriptions = Number(stats.subscriptions?.active || 0);
     const activeFeatures = Number(stats.subscriptions?.activeFeatures || 0);
-    const savedDocuments = Number(documentSummary.totalDocuments || stats.documents?.documents || 0);
-    const usersWithDocuments = Number(documentSummary.usersWithDocuments || stats.documents?.usersWithDocuments || 0);
-    const fileBackedDocuments = Number(documentSummary.fileBackedDocuments || 0);
-    const metadataRecords = Number(documentSummary.metadataRecords || 0);
-    const filteredDocuments = Number(documentSummary.filteredDocuments ?? documentPagination.total ?? savedDocuments);
-    const filteredUsersWithDocuments = Number(documentSummary.filteredUsersWithDocuments ?? usersWithDocuments);
-    const sourceBreakdown = documentSummary.sourceBreakdown || {};
-    const documentTypeBreakdown = documentSummary.documentTypeBreakdown || {};
-    const recentUserDocuments = Array.isArray(userDocuments) ? userDocuments : [];
     const commandQueues = Array.isArray(adminOverview.workQueues) && adminOverview.workQueues.length
       ? adminOverview.workQueues
       : [
@@ -777,7 +1051,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
       { label: 'Logistics', icon: FaTruckMoving, value: stats.logistics.total || stats.logistics.activeDeliveries || 0, detail: `${stats.logistics.gpsTracked || 0} GPS tracked`, route: '/admin/logistics', color: '#06B6D4' },
       { label: 'Finance', icon: FaMoneyBillWave, value: formatCurrency(heldEscrowAmount), detail: `${escrowReleaseCount} releases`, route: '/admin/finance-audit', color: '#111827' },
       { label: 'Messages', icon: FaEnvelope, value: supportOpen, detail: `${stats.support?.urgent || 0} urgent`, route: '/admin/contact-queue', color: '#DC2626' },
-      { label: 'Documents', icon: FaClipboardList, value: savedDocuments, detail: `${usersWithDocuments} users`, route: '/admin/users', color: '#6366F1' },
+      { label: 'Documents', icon: FaClipboardList, value: savedDocuments, detail: `${usersWithDocuments} users`, route: '/admin/documents', color: '#6366F1' },
     ];
     const platformUpdateStyles = {
       amber: 'border-amber-200 bg-amber-50 text-amber-800',
@@ -789,15 +1063,15 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     const adminLiveTrip = pickAdminLiveTrip(logistics);
 
     return (
-      <div className="min-h-screen bg-[#F7F8FA] px-4 py-6 sm:px-6">
+      <div className="dashboard-shell min-h-screen bg-[#F7F8FA] px-4 py-6 sm:px-6">
         <div className="mx-auto max-w-[1600px]">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Lango Market admin dashboard</p>
-              <h1 className="mt-1 text-2xl font-bold text-[#111827]">Lango Market Revenue Overview</h1>
+              <h1 className="mt-1 truncate text-2xl font-bold text-[#111827]">Lango Market Revenue Overview</h1>
               <p className="mt-1 text-sm text-gray-500">Platform update for revenue, escrow, users, products, logistics, and support operations.</p>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="dashboard-actionbar">
               <div className="inline-flex h-10 items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 text-xs font-medium text-green-700">
                 <span className={`h-2 w-2 rounded-full bg-green-500 ${isRealtimeRefreshing ? 'animate-pulse' : ''}`} />
                 Live - {formatRealtimeStamp(lastUpdated)}
@@ -820,13 +1094,13 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   </button>
                 ))}
               </div>
-              <button onClick={refreshData} disabled={refreshing} className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <button onClick={refreshData} disabled={refreshing} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 <FaSync className={refreshing ? 'animate-spin' : ''} /> Refresh
               </button>
-              <button onClick={() => handleExportData('orders')} className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <button onClick={() => handleExportData('orders')} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 <FaFileExport /> Export
               </button>
-              <button onClick={() => setShowBroadcastModal(true)} className="inline-flex h-10 items-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-medium text-white hover:bg-[#EA580C]">
+              <button onClick={() => setShowBroadcastModal(true)} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-medium text-white hover:bg-[#EA580C]">
                 <FaEnvelope /> Broadcast
               </button>
             </div>
@@ -959,7 +1233,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               className="xl:col-span-4"
               action={<button onClick={() => navigate('/admin/finance-audit')} className="text-xs font-medium text-[#F97316]">Audit</button>}
             >
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <div className="rounded-md bg-green-50 p-3">
                   <p className="text-xs font-semibold uppercase text-green-700">Held escrow</p>
                   <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(heldEscrowAmount)}</p>
@@ -978,7 +1252,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </Panel>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <div className="mt-4 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-4 xl:grid-cols-8">
             {moduleActions.map((item) => {
               const Icon = item.icon;
               return (
@@ -1000,194 +1274,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <Panel
-              title="User Documents Vault"
-              className="xl:col-span-12"
-              action={
-                <div className="flex items-center gap-3">
-                  <button onClick={() => loadDashboardDocuments({ page: documentPagination.page || 1 })} className="text-xs font-medium text-[#F97316]">
-                    Refresh vault
-                  </button>
-                  <button onClick={() => navigate('/admin/users')} className="text-xs font-medium text-[#F97316]">Open users</button>
-                </div>
-              }
-            >
-              <form
-                className="mb-4 grid gap-3 lg:grid-cols-[1fr_190px_190px_auto]"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  loadDashboardDocuments({ page: 1 });
-                }}
-              >
-                <div className="relative">
-                  <FaSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    value={documentFilters.search}
-                    onChange={(event) => setDocumentFilters((current) => ({ ...current, search: event.target.value }))}
-                    placeholder="Search documents, user, phone, email, document number..."
-                    className="h-10 w-full rounded-md border border-gray-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
-                  />
-                </div>
-                <select
-                  value={documentFilters.source}
-                  onChange={(event) => setDocumentFilters((current) => ({ ...current, source: event.target.value }))}
-                  className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
-                >
-                  <option value="all">All sources</option>
-                  <option value="admin_saved">Admin saved</option>
-                  <option value="kyc">KYC</option>
-                  <option value="logistics_application">Logistics application</option>
-                  <option value="logistics_profile">Logistics profile</option>
-                </select>
-                <select
-                  value={documentFilters.documentType}
-                  onChange={(event) => setDocumentFilters((current) => ({ ...current, documentType: event.target.value }))}
-                  className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 outline-none focus:border-[#F97316]"
-                >
-                  <option value="all">All document types</option>
-                  <option value="national_id">National ID</option>
-                  <option value="business_permit">Business permit</option>
-                  <option value="tax_certificate">Tax certificate</option>
-                  <option value="kyc">KYC</option>
-                  <option value="contract">Contract</option>
-                  <option value="receipt">Receipt</option>
-                  <option value="other">Other</option>
-                </select>
-                <button
-                  type="submit"
-                  disabled={documentLoading}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white hover:bg-[#374151] disabled:opacity-60"
-                >
-                  <FaFilter />
-                  {documentLoading ? 'Loading...' : 'Apply'}
-                </button>
-              </form>
-
-              <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                <div className="rounded-md bg-gray-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Saved records</p>
-                  <p className="mt-1 text-2xl font-bold text-[#111827]">{savedDocuments}</p>
-                </div>
-                <div className="rounded-md bg-blue-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Users covered</p>
-                  <p className="mt-1 text-2xl font-bold text-[#111827]">{usersWithDocuments}</p>
-                </div>
-                <div className="rounded-md bg-green-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Files saved</p>
-                  <p className="mt-1 text-2xl font-bold text-[#111827]">{fileBackedDocuments}</p>
-                </div>
-                <div className="rounded-md bg-amber-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">DB records</p>
-                  <p className="mt-1 text-2xl font-bold text-[#111827]">{metadataRecords}</p>
-                </div>
-              </div>
-
-              <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
-                <div className="rounded-md border border-gray-100 bg-white p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Filtered results</p>
-                  <p className="mt-1 text-lg font-bold text-[#111827]">{filteredDocuments} documents across {filteredUsersWithDocuments} users</p>
-                </div>
-                <div className="rounded-md border border-gray-100 bg-white p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Source breakdown</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {Object.entries(sourceBreakdown).length ? Object.entries(sourceBreakdown).map(([key, value]) => (
-                      <span key={key} className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-600">
-                        {formatAdminLabel(key)}: {value}
-                      </span>
-                    )) : <span className="text-xs text-gray-500">No sources yet</span>}
-                  </div>
-                </div>
-                <div className="rounded-md border border-gray-100 bg-white p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Top type</p>
-                  <p className="mt-1 text-lg font-bold text-[#111827]">
-                    {Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0]
-                      ? `${formatAdminLabel(Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0][0])} (${Object.entries(documentTypeBreakdown).sort((a, b) => b[1] - a[1])[0][1]})`
-                      : 'No type'}
-                  </p>
-                </div>
-              </div>
-
-              {documentLoading ? (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <div key={index} className="h-44 rounded-md bg-gray-100 skeleton-shimmer" />
-                  ))}
-                </div>
-              ) : recentUserDocuments.length ? (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {recentUserDocuments.slice(0, 8).map((document, index) => {
-                    const userLabel = getAdminDocumentUserName(document);
-                    const hasFile = Boolean(document.url);
-                    return (
-                      <div key={document._id || document.publicId || `${document.source}-${document.documentNumber}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[#111827]" title={document.title || document.originalName}>{document.title || document.originalName || 'User document'}</p>
-                            <p className="mt-1 truncate text-xs text-gray-500" title={userLabel}>{userLabel}</p>
-                          </div>
-                          <FaFileAlt className="shrink-0 text-[#F97316]" />
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-600">{formatAdminLabel(document.source)}</span>
-                          <span className="rounded-full border border-orange-100 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700">{formatAdminLabel(document.documentType)}</span>
-                          {!hasFile && <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">Database record</span>}
-                        </div>
-                        <p className="mt-3 truncate text-xs text-gray-500">{document.originalName || document.mimeType || document.documentNumber || 'Verification record'} {formatAdminFileSize(document.size)}</p>
-                        <p className="mt-1 text-xs text-gray-400">{formatDateTime(document.uploadedAt)}</p>
-                        <div className="mt-3 flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleViewUserDetails(document.user)}
-                            className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                          >
-                            <FaEye /> User
-                          </button>
-                          {hasFile && (
-                            <a
-                              href={document.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-[#374151]"
-                            >
-                              <FaExternalLinkAlt /> File
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-5 text-sm text-gray-500">
-                  No saved user documents match this view. Open a user record to upload documents, or clear the vault filters.
-                </div>
-              )}
-
-              <div className="mt-4 flex flex-col gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-gray-500">
-                  Page <span className="font-semibold text-[#111827]">{documentPagination.page || 1}</span> of <span className="font-semibold text-[#111827]">{documentPagination.pages || 1}</span>
-                  {' '}({documentPagination.total || 0} filtered)
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    disabled={documentLoading || (documentPagination.page || 1) <= 1}
-                    onClick={() => loadDashboardDocuments({ page: (documentPagination.page || 1) - 1 })}
-                    className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    type="button"
-                    disabled={documentLoading || (documentPagination.page || 1) >= (documentPagination.pages || 1)}
-                    onClick={() => loadDashboardDocuments({ page: (documentPagination.page || 1) + 1 })}
-                    className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-            </Panel>
+            {renderDocumentVaultPanel()}
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1201,7 +1288,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             <NotificationPreferencesCard
               className="xl:col-span-12"
               title="Notification Preferences"
-              description="Keep notification controls in the admin dashboard so the platform can reach you for order updates and account activity."
+              badgeLabel="Admin alerts"
+              description="Keep notification controls in the admin dashboard so platform operators can receive order, account, payment, and support activity without leaving the workspace."
+              pushDescription="Show in-app and browser alerts for urgent platform activity."
+              smsDescription="Send text alerts for time-sensitive admin, payment, logistics, and support events."
+              emailDescription="Receive email records for account, support, payment, and operational updates."
+              orderDescription="Notify admins about shipping, payment, delivery, dispute, QR handoff, and escrow lifecycle changes."
+              scarcityDescription="Notify admins when marketplace inventory is low, out of stock, or under regional scarcity pressure."
+              criticalAlertsLabel="Orders and marketplace stock"
             />
           </div>
 
@@ -1232,7 +1326,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </Panel>
 
             <Panel title="Inventory Health" className="xl:col-span-3">
-              <div className="mb-4 grid grid-cols-2 gap-3">
+              <div className="mb-4 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <div className="rounded-md bg-green-50 p-3">
                   <p className="text-xs font-semibold uppercase text-green-700">Active</p>
                   <p className="mt-1 text-2xl font-bold text-[#111827]">{activeProducts}</p>
@@ -1315,7 +1409,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </Panel>
 
             <Panel title="Marketing Performance" className="xl:col-span-4" action={<button onClick={() => handleExportData('orders')} className="text-xs font-medium text-[#F97316]">Export</button>}>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <div className="rounded-md bg-gray-50 p-3">
                   <p className="text-xs text-gray-500">Campaign revenue</p>
                   <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(0)}</p>
@@ -1356,7 +1450,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </Panel>
 
             <Panel title="Logistics Performance" className="xl:col-span-4" action={<button onClick={() => navigate('/admin/logistics')} className="text-xs font-medium text-[#F97316]">Review</button>}>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <div className="rounded-md bg-blue-50 p-4">
                   <p className="text-xs font-medium uppercase tracking-wide text-blue-700">Active</p>
                   <p className="mt-2 text-2xl font-bold text-[#111827]">{activeLogistics || stats.logistics.activeDeliveries || 0}</p>
@@ -1393,7 +1487,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </Panel>
 
             <Panel title="Recent Activity" className="xl:col-span-7">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-md border border-gray-100">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
@@ -1425,11 +1519,11 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
 
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
             <Panel title="Reports Center" className="xl:col-span-4">
-              <div className="grid grid-cols-2 gap-3">
-                {['orders', 'products', 'users', 'payments'].map((type) => (
+              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
+                {adminCsvExportTypes.map((type) => (
                   <button key={type} type="button" onClick={() => handleExportData(type)} className="rounded-md border border-gray-200 bg-white px-3 py-3 text-left text-sm font-medium capitalize text-[#111827] hover:bg-gray-50">
                     <FaFileExport className="mb-2 text-[#F97316]" />
-                    {type}
+                    {formatAdminLabel(type)}
                   </button>
                 ))}
               </div>
@@ -1448,6 +1542,151 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                 {(!stats.recentActivity || stats.recentActivity.length === 0) && <p className="text-sm text-gray-500">No live activity yet.</p>}
               </div>
             </Panel>
+          </div>
+        </div>
+        {renderUserDetailsModal()}
+      </div>
+    );
+  }
+
+  // ==================== DOCUMENTS SECTION ====================
+  if (section === 'documents') {
+    return (
+      <div className="dashboard-shell min-h-screen bg-[#F7F8FA] px-4 py-6 sm:px-6">
+        <div className="mx-auto max-w-[1600px]">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Admin document vault</p>
+              <h1 className="mt-1 truncate text-2xl font-bold text-[#111827]">All User Documents</h1>
+              <p className="mt-1 text-sm text-gray-500">Review every saved admin, verification, KYC, and logistics document across the marketplace.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadDashboardDocuments({ page: documentPagination.page || 1 })}
+              disabled={documentLoading}
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              <FaSync className={documentLoading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+            {renderDocumentVaultPanel()}
+          </div>
+        </div>
+        {renderUserDetailsModal()}
+      </div>
+    );
+  }
+
+  // ==================== AGENT REFERRALS SECTION ====================
+  if (section === 'agent-referrals') {
+    return (
+      <div className="dashboard-shell min-h-screen bg-[#F7F8FA] px-4 py-6 sm:px-6">
+        <div className="mx-auto max-w-[1600px]">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Admin agent tracking</p>
+              <h1 className="mt-1 truncate text-2xl font-bold text-[#111827]">Agent Referrals</h1>
+              <p className="mt-1 text-sm text-gray-500">Seller subscription referrals captured by agent National ID.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => handleExportData('agent-referrals')}
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                <FaDownload />
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={refreshData}
+                disabled={refreshing}
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                <FaSync className={refreshing ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-5 grid gap-4 md:grid-cols-3">
+            <KpiCard icon={FaIdBadge} label="Tracked referrals" value={agentReferralSummary.totalReferrals || 0} detail="subscription activations" color="#F97316" />
+            <KpiCard icon={FaUserTie} label="Unique agents" value={agentReferralSummary.uniqueAgents || 0} detail="by National ID" color="#2563EB" />
+            <KpiCard
+              icon={FaCrown}
+              label="Top agent"
+              value={agentReferralSummary.topAgents?.[0]?.agentNationalId || '-'}
+              detail={`${agentReferralSummary.topAgents?.[0]?.referrals || 0} referrals`}
+              color="#16A34A"
+            />
+          </div>
+
+          <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div className="relative flex-1">
+                <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={agentReferralSearch}
+                  onChange={(event) => setAgentReferralSearch(event.target.value)}
+                  placeholder="Search agent ID, seller, phone, email, or payment reference..."
+                  className="h-11 w-full rounded-lg border border-gray-300 pl-10 pr-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={refreshData}
+                className="h-11 rounded-lg bg-[#111827] px-4 text-sm font-semibold text-white hover:bg-black"
+              >
+                Search
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">Agent National ID</th>
+                    <th className="px-4 py-3">Seller</th>
+                    <th className="px-4 py-3">Plan</th>
+                    <th className="px-4 py-3">Source</th>
+                    <th className="px-4 py-3">Payment Ref</th>
+                    <th className="px-4 py-3">Referred</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {agentReferrals.map((referral) => {
+                    const seller = referral.seller || referral.sellerSnapshot || {};
+                    const sellerName = seller.businessName || seller.fullName || seller.name || referral.sellerSnapshot?.businessName || referral.sellerSnapshot?.name || 'Seller';
+                    return (
+                      <tr key={referral._id || referral.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-semibold text-[#111827]">{referral.agentNationalId}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-[#111827]">{sellerName}</p>
+                          <p className="text-xs text-gray-500">{seller.email || referral.sellerSnapshot?.email || seller.phone || referral.sellerSnapshot?.phone || '-'}</p>
+                        </td>
+                        <td className="px-4 py-3 uppercase">{referral.planId}</td>
+                        <td className="px-4 py-3">{formatAdminLabel(referral.source)}</td>
+                        <td className="px-4 py-3">{referral.paymentReference || '-'}</td>
+                        <td className="px-4 py-3">{formatDateTime(referral.referredAt || referral.createdAt)}</td>
+                      </tr>
+                    );
+                  })}
+                  {!agentReferrals.length && (
+                    <tr>
+                      <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                        No agent referral records found yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -1470,7 +1709,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     ];
 
     return (
-      <div className="bg-[#F9FAFB] min-h-screen py-8">
+      <div className="dashboard-shell min-h-screen bg-[#F9FAFB] py-8">
         <div className="container mx-auto px-4">
           {/* Header */}
           <div className="sticky top-16 z-20 mb-8 flex justify-between items-center flex-wrap gap-4 bg-[#F9FAFB]/95 backdrop-blur supports-[backdrop-filter]:bg-[#F9FAFB]/85 py-4 border-b border-gray-200">
@@ -1481,17 +1720,17 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               </div>
               <p className="text-[#6B7280]">Lango MarketPulse Trade & Intelligence OS — Complete Platform Overview</p>
             </div>
-            <div className="flex gap-3">
+            <div className="dashboard-actionbar">
               <button
                 onClick={refreshData}
                 disabled={refreshing}
-                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50"
               >
                 <FaSync className={refreshing ? 'animate-spin' : ''} /> Refresh
               </button>
               <button
                 onClick={() => handleExportData('orders')}
-                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50"
               >
                 <FaFileExport /> Export
               </button>
@@ -1608,7 +1847,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   <FaSeedling className="text-[#16A34A]" />
                   Top Performing Farmers
                 </h3>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto rounded-md border border-gray-100">
                   <table className="w-full">
                     <thead className="bg-gray-50">
                       <tr className="text-left">
@@ -1678,7 +1917,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     const visibleUsers = users.filter(Boolean);
 
     return (
-      <div className="bg-[#F9FAFB] min-h-screen py-8">
+      <div className="dashboard-shell min-h-screen bg-[#F9FAFB] py-8">
         <div className="container mx-auto px-4">
           {/* Header */}
           <div className="mb-8 flex justify-between items-center flex-wrap gap-4">
@@ -1689,16 +1928,16 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               </div>
               <p className="text-[#6B7280]">Manage platform users, roles, and permissions</p>
             </div>
-            <div className="flex gap-3">
+            <div className="dashboard-actionbar">
               <button
                 onClick={refreshData}
-                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50"
               >
                 <FaSync /> Refresh
               </button>
               <button
                 onClick={() => handleExportData('users')}
-                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50"
               >
                 <FaFileExport /> Export
               </button>
@@ -1742,7 +1981,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           
           {/* Users Table */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border border-gray-100">
               <table className="w-full">
                 <thead className="bg-[#F97316] text-white">
                   <tr className="text-left">
@@ -1868,7 +2107,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   // ==================== CATEGORIES SECTION ====================
   if (section === 'categories') {
     return (
-      <div className="bg-[#F9FAFB] min-h-screen py-8">
+      <div className="dashboard-shell min-h-screen bg-[#F9FAFB] py-8">
         <div className="container mx-auto px-4">
           <div className="mb-8 flex justify-between items-center">
             <div>
@@ -1935,7 +2174,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     };
 
     return (
-      <div className="bg-[#F9FAFB] min-h-screen py-8">
+      <div className="dashboard-shell min-h-screen bg-[#F9FAFB] py-8">
         <div className="container mx-auto px-4">
           <div className="mb-8 flex justify-between items-center flex-wrap gap-4">
             <div>
@@ -1945,16 +2184,16 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               </div>
               <p className="text-[#6B7280]">Track and manage all platform orders</p>
             </div>
-            <div className="flex gap-3">
+            <div className="dashboard-actionbar">
               <button
                 onClick={refreshData}
-                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50"
               >
                 <FaSync /> Refresh
               </button>
               <button
                 onClick={() => handleExportData('orders')}
-                className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50"
               >
                 <FaFileExport /> Export
               </button>
@@ -2007,13 +2246,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           
           {/* Orders Table */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border border-gray-100">
               <table className="w-full">
                 <thead className="bg-[#F97316] text-white">
                   <tr className="text-left">
                     <th className="px-6 py-3">Order ID</th>
                     <th className="px-6 py-3">Customer</th>
                     <th className="px-6 py-3">Type</th>
+                    <th className="px-6 py-3">Logistics</th>
                     <th className="px-6 py-3">Total</th>
                     <th className="px-6 py-3">Payment</th>
                     <th className="px-6 py-3">Status</th>
@@ -2022,69 +2262,76 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((order, index) => (
-                    <tr key={order._id} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                      <td className="px-6 py-4 font-mono text-sm text-[#FB923C]">
-                        #{String(order.orderNumber || order._id).slice(-8)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div>
-                          <p className="font-medium text-[#111827]">{order.customer?.name || 'Guest'}</p>
-                          <p className="text-xs text-gray-500">{order.customer?.email}</p>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          order.customer?.userType === 'farmer' ? 'bg-green-100 text-green-800' :
-                          order.customer?.userType === 'wholesaler' ? 'bg-orange-100 text-orange-800' :
-                          order.customer?.userType === 'retailer' ? 'bg-blue-100 text-blue-800' :
-                          'bg-purple-100 text-purple-800'
-                        }`}>
-                          {order.customer?.userType || 'consumer'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 font-semibold text-[#16A34A]">{formatCurrency(order.total)}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          order.paymentStatus === 'completed' ? 'bg-green-100 text-green-800' :
-                          order.paymentStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {order.paymentStatus}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <select
-                          value={order.status}
-                          onChange={(e) => handleUpdateOrderStatus(order._id, e.target.value)}
-                          className={`px-2 py-1 rounded-lg text-sm font-medium border ${statusColors[order.status] || statusColors.pending}`}
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="confirmed">Confirmed</option>
-                          <option value="processing">Processing</option>
-                          <option value="shipped">Shipped</option>
-                          <option value="in_transit">In Transit</option>
-                          <option value="out_for_delivery">Out for Delivery</option>
-                          <option value="delivered">Delivered</option>
-                          <option value="cancelled">Cancelled</option>
-                        </select>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600">
-                        {formatDate(order.createdAt)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <button
-                          onClick={() => {
-                            setSelectedOrder(order);
-                            setShowOrderModal(true);
-                          }}
-                          className="text-[#F97316] hover:text-[#FB923C] font-medium flex items-center gap-1"
-                        >
-                          <FaEye /> Details
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {orders.map((order, index) => {
+                    const provider = getLogisticsPreference(order);
+                    return (
+                      <tr key={order._id} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <td className="px-6 py-4 font-mono text-sm text-[#FB923C]">
+                          #{String(order.orderNumber || order._id).slice(-8)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div>
+                            <p className="font-medium text-[#111827]">{order.customer?.name || 'Guest'}</p>
+                            <p className="text-xs text-gray-500">{order.customer?.email}</p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            order.customer?.userType === 'farmer' ? 'bg-green-100 text-green-800' :
+                            order.customer?.userType === 'wholesaler' ? 'bg-orange-100 text-orange-800' :
+                            order.customer?.userType === 'retailer' ? 'bg-blue-100 text-blue-800' :
+                            'bg-purple-100 text-purple-800'
+                          }`}>
+                            {order.customer?.userType || 'consumer'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <p className="max-w-[170px] truncate text-sm font-semibold text-[#111827]">{provider.name || 'Seller preferred'}</p>
+                          <p className="text-xs text-sky-700">{provider.source === 'buyer' ? 'Buyer selected' : 'Default option'}</p>
+                        </td>
+                        <td className="px-6 py-4 font-semibold text-[#16A34A]">{formatCurrency(order.total)}</td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            order.paymentStatus === 'completed' ? 'bg-green-100 text-green-800' :
+                            order.paymentStatus === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-red-100 text-red-800'
+                          }`}>
+                            {order.paymentStatus}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <select
+                            value={order.status}
+                            onChange={(e) => handleUpdateOrderStatus(order._id, e.target.value)}
+                            className={`px-2 py-1 rounded-lg text-sm font-medium border ${statusColors[order.status] || statusColors.pending}`}
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="confirmed">Confirmed</option>
+                            <option value="processing">Processing</option>
+                            <option value="shipped">Shipped</option>
+                            <option value="in_transit">In Transit</option>
+                            <option value="out_for_delivery">Out for Delivery</option>
+                            <option value="delivered">Delivered</option>
+                            <option value="cancelled">Cancelled</option>
+                          </select>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-600">
+                          {formatDate(order.createdAt)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => {
+                              setSelectedOrder(order);
+                              setShowOrderModal(true);
+                            }}
+                            className="text-[#F97316] hover:text-[#FB923C] font-medium flex items-center gap-1"
+                          >
+                            <FaEye /> Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2118,7 +2365,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   // ==================== PRODUCTS SECTION ====================
   if (section === 'products') {
     return (
-      <div className="bg-[#F9FAFB] min-h-screen py-8">
+      <div className="dashboard-shell min-h-screen bg-[#F9FAFB] py-8">
         <div className="container mx-auto px-4">
           <div className="mb-8 flex justify-between items-center">
             <div>
@@ -2227,7 +2474,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
     const adminLiveTrip = pickAdminLiveTrip(logistics);
 
     return (
-      <div className="bg-[#F9FAFB] min-h-screen py-8">
+      <div className="dashboard-shell min-h-screen bg-[#F9FAFB] py-8">
         <div className="container mx-auto px-4">
           <div className="mb-8">
             <div className="flex items-center gap-3 mb-2">
@@ -2259,7 +2506,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           
           {/* Logistics Table */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border border-gray-100">
               <table className="w-full">
                 <thead className="bg-[#F97316] text-white">
                   <tr className="text-left">
@@ -2273,39 +2520,46 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {logistics.map((item, index) => (
-                    <tr key={item._id} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                      <td className="px-6 py-4 font-mono text-sm">{item.trackingNumber}</td>
-                      <td className="px-6 py-4 font-mono text-sm text-[#FB923C]">
-                        #{String(item.order?.orderNumber || item.order?._id).slice(-8)}
-                      </td>
-                      <td className="px-6 py-4 capitalize">{item.carrier}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-full text-xs ${logisticsStatusColors[item.status]}`}>
-                          {item.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm">{item.currentLocation || 'N/A'}</td>
-                      <td className="px-6 py-4 text-sm">{item.estimatedDelivery ? formatDate(item.estimatedDelivery) : 'N/A'}</td>
-                      <td className="px-6 py-4">
-                        <button
-                          onClick={() => {
-                            setSelectedLogistics(item);
-                            setLogisticsUpdate({
-                              status: item.status,
-                              location: item.currentLocation || '',
-                              notes: '',
-                              estimatedDelivery: item.estimatedDelivery?.split('T')[0] || ''
-                            });
-                            setShowLogisticsModal(true);
-                          }}
-                          className="text-[#F97316] hover:text-[#FB923C] font-medium flex items-center gap-1"
-                        >
-                          <FaEdit /> Update
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {logistics.map((item, index) => {
+                    const orderProvider = getLogisticsPreference(item.order || {});
+                    const selectedProviderName = readMetadata(item, 'selectedProviderName') || orderProvider.name || item.driverName || 'Not assigned';
+                    return (
+                      <tr key={item._id} className={`border-t border-gray-100 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        <td className="px-6 py-4 font-mono text-sm">{item.trackingNumber}</td>
+                        <td className="px-6 py-4 font-mono text-sm text-[#FB923C]">
+                          #{String(item.order?.orderNumber || item.order?._id).slice(-8)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <p className="capitalize">{item.carrier}</p>
+                          <p className="mt-1 max-w-[170px] truncate text-xs font-semibold text-sky-700">{selectedProviderName}</p>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-1 rounded-full text-xs ${logisticsStatusColors[item.status]}`}>
+                            {item.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm">{item.currentLocation || 'N/A'}</td>
+                        <td className="px-6 py-4 text-sm">{item.estimatedDelivery ? formatDate(item.estimatedDelivery) : 'N/A'}</td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => {
+                              setSelectedLogistics(item);
+                              setLogisticsUpdate({
+                                status: item.status,
+                                location: item.currentLocation || '',
+                                notes: '',
+                                estimatedDelivery: item.estimatedDelivery?.split('T')[0] || ''
+                              });
+                              setShowLogisticsModal(true);
+                            }}
+                            className="text-[#F97316] hover:text-[#FB923C] font-medium flex items-center gap-1"
+                          >
+                            <FaEdit /> Update
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2318,7 +2572,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   // ==================== PAYMENTS SECTION ====================
   if (section === 'payments') {
     return (
-      <div className="bg-[#F9FAFB] min-h-screen py-8">
+      <div className="dashboard-shell min-h-screen bg-[#F9FAFB] py-8">
         <div className="container mx-auto px-4">
           <div className="mb-8 flex justify-between items-center">
             <div>
@@ -2362,7 +2616,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           
           {/* Payments Table */}
           <div className="bg-white rounded-xl shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border border-gray-100">
               <table className="w-full">
                 <thead className="bg-[#F97316] text-white">
                   <tr className="text-left">
@@ -2493,7 +2747,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             {broadcastResult && (
               <div className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 text-sm">
                 <p className="mb-2 font-semibold text-[#111827]">Last Broadcast Result</p>
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:grid-cols-4">
                   <div>
                     <p className="text-xs text-[#6B7280]">Recipients</p>
                     <p className="font-bold text-[#111827]">{broadcastResult.recipients ?? 0}</p>
@@ -2515,7 +2769,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             )}
           </div>
           
-          <div className="flex gap-3 mt-6">
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <button
               onClick={handleBroadcast}
               className="flex-1 bg-[#F97316] text-white py-2 rounded-lg hover:bg-[#F97316]/90"
@@ -2559,7 +2813,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               onChange={(e) => setNewCategory({...newCategory, description: e.target.value})}
               className="w-full px-3 py-2 border rounded-lg"
             />
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <button type="submit" className="flex-1 bg-[#F97316] text-white py-2 rounded-lg">
                 Add Category
               </button>
@@ -2632,7 +2886,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               />
             </div>
             
-            <div className="flex gap-3 mt-4">
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
               <button
                 onClick={() => handleUpdateLogistics(selectedLogistics._id)}
                 className="flex-1 bg-[#F97316] text-white py-2 rounded-lg"
@@ -2661,7 +2915,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           <p className="text-gray-600 mb-6">
             Are you sure you want to delete "{itemToDelete.name || itemToDelete.category?.name}"? This action cannot be undone.
           </p>
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
             <button
               onClick={() => handleDeleteCategory(itemToDelete.id)}
               className="flex-1 bg-red-500 text-white py-2 rounded-lg hover:bg-red-600"
@@ -2682,6 +2936,8 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
 
   // Order Details Modal
   if (showOrderModal && selectedOrder) {
+    const selectedOrderProvider = getLogisticsPreference(selectedOrder);
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
         <div className="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -2756,6 +3012,19 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                 <p className="text-sm">Carrier: {selectedOrder.carrier}</p>
               </div>
             )}
+
+            <div className="border-t pt-4">
+              <h3 className="font-semibold mb-2">Buyer Logistics Choice</h3>
+              <div className="rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-900">
+                <p className="font-semibold">{selectedOrderProvider.name || 'Seller preferred provider'}</p>
+                <p className="mt-1 text-xs text-sky-700">
+                  {selectedOrderProvider.source === 'buyer'
+                    ? 'Buyer selected this logistics company at checkout.'
+                    : 'Seller or default logistics can be used for this order.'}
+                </p>
+                {selectedOrderProvider.hub && <p className="mt-1 text-xs text-sky-700">Hub: {selectedOrderProvider.hub}</p>}
+              </div>
+            </div>
           </div>
         </div>
       </div>

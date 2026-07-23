@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 export const useRealtimeRefresh = (refreshFn, options = {}) => {
-  const { enabled = true, intervalMs = 15000, deps = [] } = options;
+  const { enabled = true, intervalMs = 15000, deps = [], immediate = false } = options;
   const refreshRef = useRef(refreshFn);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -29,6 +29,8 @@ export const useRealtimeRefresh = (refreshFn, options = {}) => {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') refresh();
     };
+
+    if (immediate) refresh();
 
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', refresh);

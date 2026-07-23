@@ -14,6 +14,14 @@ export const adminSubscriptionService = {
     };
   },
 
+  exportCsv: async (params = {}) => {
+    const response = await api.get('/v1/admin/export/subscriptions', {
+      params,
+      responseType: 'blob',
+    });
+    return response;
+  },
+
   save: async (sellerId, payload) => {
     const response = await api.put(`/v1/admin/subscriptions/${sellerId}`, payload);
     return response.data?.data || response.data;

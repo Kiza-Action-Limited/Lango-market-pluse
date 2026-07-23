@@ -377,6 +377,74 @@ const UserSchema = new mongoose.Schema(
       pausedAt: Date,
       updatedAt: Date,
     },
+    buyerLogisticsPreference: {
+      active: {
+        type: Boolean,
+        default: false,
+      },
+      selectedProvider: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null,
+      },
+      selectedProviderSnapshot: {
+        name: String,
+        phone: String,
+        email: String,
+        hub: String,
+        vehiclePlate: String,
+        vehicleType: String,
+        cargoCapacityKg: Number,
+        verificationStatus: String,
+      },
+      deliveryHub: {
+        type: String,
+        trim: true,
+        maxlength: 120,
+        default: '',
+      },
+      notes: {
+        type: String,
+        trim: true,
+        maxlength: 300,
+        default: '',
+      },
+      updatedAt: Date,
+    },
+    premiumVerification: {
+      storefrontName: {
+        type: String,
+        trim: true,
+        maxlength: 120,
+      },
+      governmentBusinessName: {
+        type: String,
+        trim: true,
+        maxlength: 160,
+      },
+      businessEmail: {
+        type: String,
+        trim: true,
+        lowercase: true,
+      },
+      businessUrls: [
+        {
+          type: String,
+          trim: true,
+        },
+      ],
+      planId: {
+        type: String,
+        trim: true,
+        maxlength: 80,
+      },
+      status: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending',
+      },
+      submittedAt: Date,
+    },
     address: {
       type: String,
       trim: true,

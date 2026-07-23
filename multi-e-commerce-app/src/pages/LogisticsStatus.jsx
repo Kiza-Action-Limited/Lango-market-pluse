@@ -247,6 +247,60 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
     </div>
   ) : null;
 
+  const renderVerificationNotice = () => {
+    if (profileStatus === 'verified') return null;
+
+    const isPending = profileStatus === 'pending';
+    const isRejected = profileStatus === 'rejected';
+    const reviewDue = application?.logisticsProfile?.reviewDueAt
+      ? formatDateTime(application.logisticsProfile.reviewDueAt)
+      : 'within 24 hours';
+
+    return (
+      <div className={`mb-4 rounded-lg border p-4 ${
+        isRejected
+          ? 'border-red-200 bg-red-50'
+          : isPending
+            ? 'border-amber-200 bg-amber-50'
+            : 'border-gray-200 bg-white'
+      }`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex gap-3">
+            {isRejected ? (
+              <FaExclamationTriangle className="mt-1 shrink-0 text-lg text-red-600" />
+            ) : (
+              <FaClock className={`mt-1 shrink-0 text-lg ${isPending ? 'text-amber-600' : 'text-[#F97316]'}`} />
+            )}
+            <div>
+              <p className="text-sm font-semibold text-[#111827]">
+                {isPending
+                  ? 'Your logistics application is under admin review'
+                  : isRejected
+                    ? 'Your logistics application needs changes'
+                    : 'Complete logistics verification to unlock dispatch'}
+              </p>
+              <p className="mt-1 text-sm text-gray-600">
+                {isPending
+                  ? `Your submitted form is saved. Expected review: ${reviewDue}. Assignment acceptance, QR scanning, and payouts unlock after approval.`
+                  : isRejected
+                    ? (application?.logisticsProfile?.reviewNotes || 'Admin requested updates before approval. Review your details and resubmit the application.')
+                    : 'Submit vehicle, GPS, and document details before accepting delivery work.'}
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/logistics/apply"
+            className={`inline-flex h-10 items-center rounded-md px-4 text-sm font-medium text-white ${
+              isPending ? 'bg-[#111827] hover:bg-[#374151]' : 'bg-[#F97316] hover:bg-[#EA580C]'
+            }`}
+          >
+            {isPending ? 'View Application' : 'Open Application'}
+          </Link>
+        </div>
+      </div>
+    );
+  };
+
   const applyDashboardRange = (range) => {
     setDashboardRange(range);
     const end = new Date();
@@ -423,6 +477,8 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
               )}
             </div>
           </div>
+
+          {renderVerificationNotice()}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard icon={FaShieldAlt} label="Account Status" value={profileStatus} detail={application?.logisticsProfile?.driverMode || 'owner operator'} color={profileStatus === 'verified' ? '#16A34A' : '#F97316'} points={[profileStatus === 'verified' ? 100 : 40]} />
@@ -610,6 +666,8 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
             </div>
           </div>
 
+          {renderVerificationNotice()}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard icon={FaBell} label="Open Requests" value={assignmentAlerts.length} detail="seller assignments" color="#F97316" points={assignmentAlerts.map((_, index) => index + 1)} />
             <KpiCard icon={FaClipboardCheck} label="Available Jobs" value={summary.availableTrips || pendingTrips} detail="ready for dispatch" color="#F59E0B" points={filteredTrips.map((trip) => (trip.status === 'pending' ? 1 : 0))} />
@@ -680,6 +738,8 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
             )}
           </div>
         </div>
+
+        {renderVerificationNotice()}
 
         <main className="min-w-0">
 

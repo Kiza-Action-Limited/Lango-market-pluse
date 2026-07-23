@@ -16,6 +16,8 @@ router.post('/', [
     if (value && typeof value === 'object') return true;
     throw new Error('deliveryAddress must be a string or address object');
   }),
+  body('logisticsProviderId').optional({ nullable: true, checkFalsy: true }).isMongoId().withMessage('Choose a valid logistics company'),
+  body('logisticsPreference.notes').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ max: 300 }),
 ], orderController.createOrder);
 
 router.post('/:id/pay', requireVerified, [
@@ -44,6 +46,9 @@ router.get('/', [
     'disputed',
   ]),
   query('role').optional().isIn(['buyer', 'seller']),
+  query('range').optional().isIn(['today', '7d', '30d', '90d', 'year']),
+  query('startDate').optional().isISO8601(),
+  query('endDate').optional().isISO8601(),
 ], orderController.getOrders);
 
 router.get('/buyer/sellers', orderController.getBuyerSellers);

@@ -88,6 +88,28 @@ const readMetadata = (source, key) => {
   return metadata[key];
 };
 
+const getPreferredLogisticsProvider = (order = {}, logistics = null) => {
+  const preference = order.logisticsPreference || {};
+  const provider = preference.requestedProvider;
+  const providerObject = provider && typeof provider === 'object' ? provider : null;
+  const providerProfile = providerObject?.logisticsProfile || {};
+
+  return {
+    id: providerObject?._id || providerObject?.id || provider || readMetadata(logistics, 'selectedProviderId') || '',
+    name:
+      preference.providerName ||
+      providerObject?.businessName ||
+      providerObject?.fullName ||
+      providerObject?.name ||
+      readMetadata(logistics, 'selectedProviderName') ||
+      '',
+    phone: preference.providerPhone || providerObject?.phone || readMetadata(logistics, 'selectedProviderPhone') || '',
+    hub: preference.providerHub || providerProfile.baseHub || providerProfile.locationHub || '',
+    source: preference.selectionSource || readMetadata(logistics, 'selectedBy') || 'default',
+    notes: preference.notes || '',
+  };
+};
+
 const formatDateTime = (value) => {
   if (!value) return 'Pending';
   const date = new Date(value);
@@ -126,6 +148,7 @@ const readAddress = (value, fallback = {}) => {
 
 const buildShipmentPayload = (order) => {
   const product = order.product || {};
+  const preferredProvider = getPreferredLogisticsProvider(order);
   const deliveryAddress = readAddress(order.deliveryAddress || order.shippingAddress, {
     town: order.buyer?.campus || order.customer?.campus || order.buyer?.city || 'Unknown',
   });
@@ -144,7 +167,10 @@ const buildShipmentPayload = (order) => {
     pickupAddress,
     shippingAddress: deliveryAddress,
     isExpress: false,
-    notes: `Created from seller order ${String(getOrderId(order)).slice(-8)}`,
+    logisticsProviderId: preferredProvider.id || undefined,
+    notes: preferredProvider.name
+      ? `Created from seller order ${String(getOrderId(order)).slice(-8)}. Buyer requested logistics: ${preferredProvider.name}.`
+      : `Created from seller order ${String(getOrderId(order)).slice(-8)}`,
   };
 };
 
@@ -558,6 +584,13 @@ const LogisticsPanel = ({
     : [];
   const pickupDone = Boolean(logistics?.pickupQrConfirmed || logistics?.qrScans?.some((scan) => scan.step === 'pickup'));
   const deliveryDone = Boolean(logistics?.deliveryQrConfirmed || logistics?.qrScans?.some((scan) => scan.step === 'delivery'));
+  const preferredProvider = getPreferredLogisticsProvider(order, logistics);
+  const hasPreferredProvider = Boolean(preferredProvider.id || preferredProvider.name);
+  const providerSourceLabel = preferredProvider.source === 'buyer'
+    ? 'Buyer selected'
+    : preferredProvider.source === 'seller'
+      ? 'Seller preferred'
+      : 'Preferred logistics';
 
   if (loading) {
     return (
@@ -580,6 +613,17 @@ const LogisticsPanel = ({
             <p className="mt-1 text-sm text-gray-600">
               Create a shipment once payment is escrowed so drivers, QR handoff, tracking, and delivery status can attach to this order.
             </p>
+            {hasPreferredProvider && (
+              <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                <p className="flex items-center gap-2 font-semibold">
+                  <FaUserCheck />
+                  {providerSourceLabel}: {preferredProvider.name || 'Selected logistics company'}
+                </p>
+                <p className="mt-1 text-xs text-sky-800">
+                  {[preferredProvider.phone, preferredProvider.hub].filter(Boolean).join(' - ') || 'This provider will be used when shipment is created.'}
+                </p>
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -612,6 +656,18 @@ const LogisticsPanel = ({
           {formatStatus(logistics.status).toUpperCase()}
         </span>
       </div>
+
+      {hasPreferredProvider && (
+        <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+          <p className="flex items-center gap-2 font-semibold">
+            <FaUserCheck />
+            {providerSourceLabel}: {preferredProvider.name || logistics.driverName || 'Selected logistics company'}
+          </p>
+          <p className="mt-1 text-xs text-sky-800">
+            {[preferredProvider.phone || logistics.driverPhone, preferredProvider.hub].filter(Boolean).join(' - ') || 'Shipment is linked to the selected logistics company.'}
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <div className="rounded-md bg-gray-50 p-3">

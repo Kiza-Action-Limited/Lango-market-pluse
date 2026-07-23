@@ -13,7 +13,22 @@ router.use(admin);
 // Dashboard & Stats
 router.get('/stats', adminController.getStats);
 router.get('/analytics', adminController.getAnalytics);
-router.get('/reports/summary.pdf', adminController.exportSummaryPdf);
+router.get('/reports/summary.csv', adminController.exportSummaryCsv);
+router.get('/export/:type', param('type').isIn([
+  'users',
+  'products',
+  'orders',
+  'payments',
+  'transactions',
+  'logistics',
+  'subscriptions',
+  'documents',
+  'categories',
+  'support',
+  'rfqs',
+  'reviews',
+  'agent-referrals',
+]), adminController.exportRecordsCsv);
 
 // User Management
 router.get('/users', adminController.getAllUsers);
@@ -21,7 +36,7 @@ router.get('/documents', adminController.getAllUserDocuments);
 router.get('/users/:userId', param('userId').isMongoId(), adminController.getUserDetails);
 router.get('/users/:userId/documents', param('userId').isMongoId(), adminController.getUserDocuments);
 router.put('/users/:userId', param('userId').isMongoId(), [
-  body('role').optional().isIn(['seller', 'farmer', 'buyer', 'logistics', 'admin']),
+  body('role').optional().isIn(['seller', 'farmer', 'buyer', 'logistics', 'admin', 'brand', 'wholesaler', 'manufacturer', 'retailer', 'small_business']),
   body('businessType').optional({ nullable: true, checkFalsy: true }).isIn([
     'brand',
     'wholesaler',
@@ -60,6 +75,7 @@ router.post(
 
 // Subscription Management
 router.get('/subscriptions', adminController.getSubscriptions);
+router.get('/agent-referrals', adminController.getAgentReferrals);
 router.get('/subscriptions/features', adminController.getSubscriptionFeatures);
 router.post('/subscriptions/features', [
   body('key').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ max: 80 }),

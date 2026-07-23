@@ -225,7 +225,6 @@ const SharedGroupTripPanel = ({
   canManageRoutes = false,
   canManagePayments = false,
   allowParticipantPayments = false,
-  showWorkflowGuide = true,
   joinOnly = false,
 }) => {
   const [routes, setRoutes] = useState(KENYA_ROUTES);
@@ -578,22 +577,6 @@ const SharedGroupTripPanel = ({
           </div>
         )}
       </div>
-
-      {showWorkflowGuide && (
-        <div className="mt-5 grid gap-3 md:grid-cols-4">
-          {[
-            ['Buyer', 'Chooses pickup/delivery, selects route, gets ETA/cost, tracks live.'],
-            ['Seller', 'Confirms stock, packages goods, hands over at pickup, uploads proof.'],
-            ['Logistics', 'Accepts route cargo, updates checkpoints, confirms delivery by QR.'],
-            ['Admin', 'Manages routes, assigns providers, monitors escrow and delivery performance.'],
-          ].map(([role, copy]) => (
-            <div key={role} className="rounded-lg border border-gray-200 bg-white p-3">
-              <p className="text-xs font-semibold uppercase text-[#F97316]">{role}</p>
-              <p className="mt-1 text-xs leading-5 text-gray-600">{copy}</p>
-            </div>
-          ))}
-        </div>
-      )}
 
       {canManageRoutes && (
         <form className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-4" onSubmit={createRoute}>

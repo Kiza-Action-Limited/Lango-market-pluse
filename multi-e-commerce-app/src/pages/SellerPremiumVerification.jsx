@@ -77,7 +77,7 @@ const SellerPremiumVerification = () => {
       multipart.append('licenseDocument', licenseFile);
 
       try {
-        await api.post('/seller/premium-verification', multipart, {
+        await api.post('/v1/seller/premium-verification', multipart, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
       } catch (apiError) {

@@ -29,6 +29,7 @@ const BuyerLayout = () => {
     { path: '/buyer', label: 'Dashboard', icon: FaHome },
     { path: '/products', label: 'Browse Market', icon: FaSearch },
     { path: '/buyer/orders', label: 'Order Tracking', icon: FaTruck },
+    { path: '/buyer/logistics', label: 'Verified Logistics', icon: FaTruck },
     { path: '/buyer/rfqs', label: 'RFQ Inbox', icon: FaFileInvoiceDollar },
     { path: '/buyer/sellers', label: 'My Sellers', icon: FaStore },
     { path: '/buyer/reviews', label: 'Reviews', icon: FaStar },
@@ -36,8 +37,15 @@ const BuyerLayout = () => {
     { path: '/cart', label: 'Cart', icon: FaShoppingCart },
     { path: '/buyer/wishlist', label: 'Wishlist', icon: FaHeart },
     { path: '/buyer/notifications/preferences', label: 'Notifications', icon: FaBell },
-    { path: '/buyer/support', label: 'Message Admin', icon: FaEnvelopeOpenText },
+    { path: '/buyer/support', label: 'Support Message', icon: FaEnvelopeOpenText },
     { path: '/buyer/profile', label: 'Profile', icon: FaUser },
+  ];
+  const mobileNavItems = [
+    navItems.find((item) => item.path === '/buyer'),
+    navItems.find((item) => item.path === '/products'),
+    navItems.find((item) => item.path === '/buyer/orders'),
+    navItems.find((item) => item.path === '/cart'),
+    navItems.find((item) => item.path === '/buyer/profile'),
   ];
 
   const currentNav = navItems.find((item) => (
@@ -55,8 +63,8 @@ const BuyerLayout = () => {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <aside className={`sticky top-0 h-screen shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
+    <div className="flex min-h-dvh overflow-hidden bg-gray-50 md:h-screen">
+      <aside className={`sticky top-0 hidden h-screen shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 md:block ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
         <div className="border-b border-white/15 p-4">
           <div className={`flex h-9 items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
             <Link to="/buyer" className={`min-w-0 items-center gap-2 ${isSidebarOpen ? 'flex' : 'sr-only'}`}>
@@ -117,7 +125,7 @@ const BuyerLayout = () => {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-gray-200 bg-white px-6 py-3">
+        <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-gray-900">{pageTitle}</h1>
             <p className="truncate text-sm text-gray-500">
@@ -126,7 +134,7 @@ const BuyerLayout = () => {
           </div>
           <NotificationBell />
         </header>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto pb-24 md:pb-0">
           <Suspense
             fallback={
               <div className="p-6">
@@ -143,6 +151,27 @@ const BuyerLayout = () => {
           </Suspense>
         </div>
       </div>
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+        <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = item.path === '/buyer'
+              ? location.pathname === '/buyer'
+              : location.pathname.startsWith(item.path);
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`flex min-h-14 flex-col items-center justify-center rounded-md px-1 text-[11px] font-semibold transition ${isActive ? 'bg-[#F97316] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                aria-label={item.label}
+              >
+                <Icon className="mb-1 text-lg" />
+                <span className="max-w-full truncate">{item.label.replace(' Tracking', '')}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 };

@@ -13,8 +13,12 @@ export const paymentService = {
     return unwrap(response);
   },
 
-  initiateSubscriptionMpesaPayment: async ({ planId, phoneNumber }) => {
-    const response = await api.post('/v1/payments/mpesa/subscription/stkpush', { planId, phoneNumber });
+  initiateSubscriptionMpesaPayment: async ({ planId, phoneNumber, agentNationalId }) => {
+    const body = { planId, phoneNumber };
+    if (agentNationalId) {
+      body.agentNationalId = String(agentNationalId).replace(/\D/g, '');
+    }
+    const response = await api.post('/v1/payments/mpesa/subscription/stkpush', body);
     return unwrap(response);
   },
 

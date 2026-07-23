@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Link, Navigate } from 'react-router-dom';
 import { FaCheckCircle, FaClock, FaFileAlt, FaLocationArrow, FaTimes, FaTimesCircle, FaTruck, FaUpload } from 'react-icons/fa';
@@ -26,29 +26,36 @@ const statusCopy = {
   },
 };
 
+const NOTICE_AUTO_DISMISS_MS = 9000;
+
+const buildInitialForm = (user) => ({
+  businessName: user?.businessName || user?.fullName || '',
+  driverMode: 'owner_operator',
+  baseHub: user?.locationHub || user?.city || '',
+  operatingAddress: user?.address || '',
+  serviceAreas: '',
+  vehicleType: '',
+  fleetSize: '1',
+  vehiclePlate: '',
+  cargoCapacityKg: '',
+  documentType: 'national_id',
+  documentNumber: '',
+  fleetOwnerId: '',
+  gpsLat: '',
+  gpsLng: '',
+});
+
 const LogisticsApplication = () => {
   const { user, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [application, setApplication] = useState(null);
   const [rejectionMessage, setRejectionMessage] = useState(null);
+  const [successNotice, setSuccessNotice] = useState(null);
   const [previousStatus, setPreviousStatus] = useState(null);
-  const [form, setForm] = useState({
-    businessName: user?.businessName || user?.fullName || '',
-    driverMode: 'owner_operator',
-    baseHub: user?.locationHub || user?.city || '',
-    operatingAddress: user?.address || '',
-    serviceAreas: '',
-    vehicleType: '',
-    fleetSize: '1',
-    vehiclePlate: '',
-    cargoCapacityKg: '',
-    documentType: 'national_id',
-    documentNumber: '',
-    fleetOwnerId: '',
-    gpsLat: '',
-    gpsLng: '',
-  });
+  const successTimerRef = useRef(null);
+  const [formResetKey, setFormResetKey] = useState(0);
+  const [form, setForm] = useState(() => buildInitialForm(user));
   const [nationalIdImage, setNationalIdImage] = useState(null);
   const [businessPermitImage, setBusinessPermitImage] = useState(null);
   const [driverLicenseImage, setDriverLicenseImage] = useState(null);
@@ -57,6 +64,29 @@ const LogisticsApplication = () => {
   const [kraPinCertificateImage, setKraPinCertificateImage] = useState(null);
   const verificationStatus = application?.logisticsProfile?.verificationStatus || 'unverified';
   const role = String(user?.role || '').toLowerCase();
+
+  const clearSuccessNotice = () => {
+    setSuccessNotice(null);
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+      successTimerRef.current = null;
+    }
+  };
+
+  const showSuccessNotice = (notice) => {
+    setSuccessNotice({
+      title: notice?.title || 'Application Submitted',
+      body: notice?.body || 'Your logistics application is now in the admin review queue.',
+    });
+
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+    }
+    successTimerRef.current = setTimeout(() => {
+      setSuccessNotice(null);
+      successTimerRef.current = null;
+    }, Number(notice?.autoDismissMs) || NOTICE_AUTO_DISMISS_MS);
+  };
 
   // Initial load
   useEffect(() => {
@@ -81,33 +111,39 @@ const LogisticsApplication = () => {
 
   // Monitor for rejection status changes and auto-refresh
   useEffect(() => {
-    // Check if status changed to rejected
     const currentStatus = application?.logisticsProfile?.verificationStatus || 'unverified';
-    
-    if (previousStatus && currentStatus === 'rejected' && previousStatus !== 'rejected') {
-      // New rejection detected!
-      const rejectionNote = application?.logisticsProfile?.reviewNotes || 'Your application does not meet the requirements.';
-      
-      // Show rejection toast + message
-      toast.error('Your application was rejected', { duration: 3000 });
-      setRejectionMessage(rejectionNote);
-      
-      // Auto-dismiss rejection message after 3 seconds
-      const dismissTimeout = setTimeout(() => {
-        setRejectionMessage(null);
-      }, 3000);
-      
-      // Reset form after dismissal
-      const resetTimeout = setTimeout(() => {
-        resetForm();
-      }, 3000);
-      
-      return () => {
-        clearTimeout(dismissTimeout);
-        clearTimeout(resetTimeout);
-      };
+
+    if (previousStatus && currentStatus !== previousStatus) {
+      if (currentStatus === 'rejected') {
+        const rejectionNote = application?.logisticsProfile?.reviewNotes || 'Your application does not meet the requirements.';
+
+        toast.error('Your application was rejected', { duration: 3000 });
+        setRejectionMessage(rejectionNote);
+
+        const dismissTimeout = setTimeout(() => {
+          setRejectionMessage(null);
+        }, NOTICE_AUTO_DISMISS_MS);
+
+        const resetTimeout = setTimeout(() => {
+          resetForm();
+        }, NOTICE_AUTO_DISMISS_MS);
+
+        return () => {
+          clearTimeout(dismissTimeout);
+          clearTimeout(resetTimeout);
+        };
+      }
+
+      if (currentStatus === 'verified') {
+        toast.success('Your logistics application was approved.', { duration: 3000 });
+        showSuccessNotice({
+          title: 'Application Approved',
+          body: 'Your logistics account is now active. You can begin accepting delivery work.',
+          autoDismissMs: NOTICE_AUTO_DISMISS_MS,
+        });
+      }
     }
-    
+
     setPreviousStatus(currentStatus);
   }, [application?.logisticsProfile?.verificationStatus, previousStatus, application?.logisticsProfile?.reviewNotes]);
 
@@ -128,29 +164,21 @@ const LogisticsApplication = () => {
   }, [isAuthenticated, role]);
 
   const resetForm = () => {
-    setForm({
-      businessName: user?.businessName || user?.fullName || '',
-      driverMode: 'owner_operator',
-      baseHub: user?.locationHub || user?.city || '',
-      operatingAddress: user?.address || '',
-      serviceAreas: '',
-      vehicleType: '',
-      fleetSize: '1',
-      vehiclePlate: '',
-      cargoCapacityKg: '',
-      documentType: 'national_id',
-      documentNumber: '',
-      fleetOwnerId: '',
-      gpsLat: '',
-      gpsLng: '',
-    });
+    setForm(buildInitialForm(user));
     setNationalIdImage(null);
     setBusinessPermitImage(null);
     setDriverLicenseImage(null);
     setVehicleLogbookImage(null);
     setInsuranceCertificateImage(null);
     setKraPinCertificateImage(null);
+    setFormResetKey((value) => value + 1);
   };
+
+  useEffect(() => () => {
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -189,12 +217,13 @@ const LogisticsApplication = () => {
       if (insuranceCertificateImage) payload.append('insuranceCertificateImage', insuranceCertificateImage);
       if (kraPinCertificateImage) payload.append('kraPinCertificateImage', kraPinCertificateImage);
 
-      await logisticsService.applyAsLogistics(payload);
-      toast.success('Application submitted successfully. Admin will review shortly.');
+      const submission = await logisticsService.applyAsLogistics(payload);
+      toast.success(submission?.notice?.title || 'Application submitted');
 
       const latest = await logisticsService.getMyApplication();
       setApplication(latest);
       setPreviousStatus(latest?.logisticsProfile?.verificationStatus || 'unverified');
+      showSuccessNotice(submission?.notice);
       resetForm();
     } catch (error) {
       const message = error?.response?.data?.message || 'Failed to submit logistics application';
@@ -254,6 +283,10 @@ const LogisticsApplication = () => {
   };
   const StatusIcon = currentStatus.icon;
   const profile = application?.logisticsProfile || {};
+  const canEditApplication = !['pending', 'verified'].includes(verificationStatus);
+  const reviewDueText = profile.reviewDueAt
+    ? new Date(profile.reviewDueAt).toLocaleString()
+    : 'within 24 hours';
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] py-8 px-4">
@@ -275,6 +308,27 @@ const LogisticsApplication = () => {
                 }}
                 className="shrink-0 text-red-600 hover:text-red-800 transition"
                 aria-label="Close rejection message"
+              >
+                <FaTimes className="text-sm" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {successNotice && (
+          <div className="rounded-lg border border-green-300 bg-green-50 p-4 animate-in fade-in duration-300">
+            <div className="flex items-start gap-3">
+              <FaCheckCircle className="mt-0.5 shrink-0 text-lg text-green-600" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-green-900">{successNotice.title}</h3>
+                <p className="mt-1 text-sm text-green-800">{successNotice.body}</p>
+                <p className="mt-2 text-xs text-green-700">This notice will disappear automatically.</p>
+              </div>
+              <button
+                type="button"
+                onClick={clearSuccessNotice}
+                className="shrink-0 text-green-600 hover:text-green-800 transition"
+                aria-label="Close success message"
               >
                 <FaTimes className="text-sm" />
               </button>
@@ -327,7 +381,8 @@ const LogisticsApplication = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+        {canEditApplication ? (
+        <form key={formResetKey} onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
           <div>
             <h2 className="text-lg font-semibold text-[#111827]">Business and Vehicle Details</h2>
             <p className="mt-1 text-sm text-gray-500">These details appear in admin review and seller provider selection.</p>
@@ -580,6 +635,62 @@ const LogisticsApplication = () => {
             {submitting ? 'Submitting...' : verificationStatus === 'verified' ? 'Approved' : verificationStatus === 'pending' ? 'Awaiting Review' : 'Submit Application'}
           </button>
         </form>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">
+                  {verificationStatus === 'verified' ? 'Ready for dispatch' : 'Admin review'}
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-[#111827]">
+                  {verificationStatus === 'verified' ? 'Your logistics account is approved' : 'Application submitted'}
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm text-gray-600">
+                  {verificationStatus === 'verified'
+                    ? 'You can now manage assignments, GPS tracking, QR handoffs, wallet payouts, and delivery proof from the logistics dashboard.'
+                    : `Your form has been cleared and your documents are queued for review. Expected review: ${reviewDueText}.`}
+                </p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${
+                verificationStatus === 'verified'
+                  ? 'bg-green-100 text-green-800'
+                  : 'bg-amber-100 text-amber-900'
+              }`}>
+                {verificationStatus.replace(/_/g, ' ')}
+              </span>
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <p className="text-xs font-semibold uppercase text-gray-500">Business</p>
+                <p className="mt-1 text-sm font-semibold text-[#111827]">{user?.businessName || profile.businessName || form.businessName || 'Logistics provider'}</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <p className="text-xs font-semibold uppercase text-gray-500">Base hub</p>
+                <p className="mt-1 text-sm font-semibold text-[#111827]">{profile.baseHub || profile.locationHub || user?.locationHub || 'Pending'}</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <p className="text-xs font-semibold uppercase text-gray-500">Vehicle</p>
+                <p className="mt-1 text-sm font-semibold text-[#111827]">{profile.vehiclePlate || 'Pending'} {profile.vehicleType ? `- ${profile.vehicleType}` : ''}</p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              <Link to="/logistics/dashboard" className="inline-flex items-center rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white hover:bg-[#374151]">
+                Open Dashboard
+              </Link>
+              {verificationStatus === 'pending' && (
+                <button
+                  type="button"
+                  onClick={() => logisticsService.getMyApplication().then(setApplication).catch(() => null)}
+                  className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-[#111827] hover:bg-gray-50"
+                >
+                  Refresh Review Status
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-[#111827] inline-flex items-center gap-2"><FaTruck /> Next Step</h2>

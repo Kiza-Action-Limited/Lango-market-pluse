@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FaBuilding, FaCheckCircle, FaCreditCard, FaMobileAlt, FaSyncAlt } from 'react-icons/fa';
+import { FaBuilding, FaCheckCircle, FaCreditCard, FaIdCard, FaMobileAlt, FaSyncAlt } from 'react-icons/fa';
 import { ALL_PLANS, PLAN_IDS } from '../config/subscriptionPlans';
 import { useAuth } from '../context/AuthContext';
 import { getPremiumProfileForUser } from '../utils/premiumSellerProfile';
@@ -21,6 +21,7 @@ const SellerPremiumPayment = () => {
   const [checkoutRequestId, setCheckoutRequestId] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [mpesaPhone, setMpesaPhone] = useState(user?.phone || '');
+  const [agentNationalId, setAgentNationalId] = useState(() => String(searchParams.get('agentNationalId') || '').replace(/\D/g, ''));
   const [statusPollingPaused, setStatusPollingPaused] = useState(false);
   const [payeeAccount, setPayeeAccount] = useState({
     name: 'Lango Market Pulse',
@@ -91,6 +92,7 @@ const SellerPremiumPayment = () => {
 
     setCheckoutRequestId(pendingPayment.checkoutRequestId);
     setMpesaPhone(pendingPayment.phoneNumber || user?.phone || '');
+    setAgentNationalId(String(pendingPayment.agentNationalId || searchParams.get('agentNationalId') || '').replace(/\D/g, ''));
     setPaymentStatus(pendingPayment.message || 'You have a pending M-Pesa payment. Check status after completing the prompt on your phone.');
     setStatusPollingPaused(Boolean(pendingPayment.statusPollingPaused));
     if (pendingPayment.payeeAccount) {
@@ -145,6 +147,10 @@ const SellerPremiumPayment = () => {
       toast.error('Enter the M-Pesa phone number that will receive the STK prompt');
       return;
     }
+    if (agentNationalId && agentNationalId.length < 5) {
+      toast.error('Agent National ID must have at least 5 digits');
+      return;
+    }
 
     setActivating(true);
     setPaymentStatus('');
@@ -152,6 +158,7 @@ const SellerPremiumPayment = () => {
       const result = await paymentService.initiateSubscriptionMpesaPayment({
         planId: selectedPlan.id,
         phoneNumber: mpesaPhone.trim(),
+        agentNationalId,
       });
 
       if (result?.checkoutRequestId) {
@@ -167,6 +174,7 @@ const SellerPremiumPayment = () => {
           status: result?.status || 'pending',
           message: 'STK Push sent. Enter your M-Pesa PIN on your phone to complete payment.',
           payeeAccount: result?.payeeAccount,
+          agentNationalId,
         });
         toast.success('M-Pesa STK Push sent to your phone');
       } else {
@@ -258,6 +266,27 @@ const SellerPremiumPayment = () => {
             </div>
             <p className="mt-2 text-xs text-[#6B7280]">
               An STK Push will appear on this phone. Enter your M-Pesa PIN there to confirm payment.
+            </p>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+            <label className="block text-sm font-semibold text-[#111827]" htmlFor="agentNationalId">
+              Agent referral National ID (optional)
+            </label>
+            <div className="relative mt-2">
+              <FaIdCard className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                id="agentNationalId"
+                type="text"
+                inputMode="numeric"
+                value={agentNationalId}
+                onChange={(event) => setAgentNationalId(event.target.value.replace(/\D/g, '').slice(0, 20))}
+                placeholder="Optional agent National ID"
+                className="h-11 w-full rounded-lg border border-gray-300 pl-10 pr-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+              />
+            </div>
+            <p className="mt-2 text-xs text-[#6B7280]">
+              Leave this blank if no Lango agent referred you. When provided, it is saved separately for admin referral tracking after activation.
             </p>
           </div>
 

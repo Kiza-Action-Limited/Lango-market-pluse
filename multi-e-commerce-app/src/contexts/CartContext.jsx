@@ -4,6 +4,7 @@ import { cartService } from '../services/cartService';
 import { useAuth } from './AuthContext';
 import toast from 'react-hot-toast';
 import { clampToMinimumOrder, getMinimumOrderQuantity, MQQ_TIERS } from '../utils/moq';
+import api from '../config/axios';
 
 const CartContext = createContext();
 
@@ -58,8 +59,8 @@ export const CartProvider = ({ children }) => {
     } else {
       let product = productMeta;
       if (!product) {
-        const productResponse = await fetch(`http://localhost:5000/api/v1/products/${productId}`);
-        const responseBody = await productResponse.json();
+        const productResponse = await api.get(`/v1/products/${productId}`);
+        const responseBody = productResponse.data;
         product = responseBody?.product || responseBody?.data || responseBody;
       }
 

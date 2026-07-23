@@ -5,13 +5,24 @@ import { useAuth } from '../context/AuthContext';
 import { FaStar, FaStarHalfAlt, FaRegStar } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { productService } from '../services/productService';
+import ProductReviewModal from '../components/ProductReviewModal';
+
+const getReviewerName = (review = {}) => (
+  review.user?.fullName || review.user?.name || 'Verified buyer'
+);
+
+const getReviewerImage = (review = {}) => review.user?.profileImageUrl || '';
+
+const getReviewerInitial = (review = {}) => getReviewerName(review).charAt(0).toUpperCase() || 'V';
 
 const Reviews = () => {
-  const { productId } = useParams();
+  const params = useParams();
+  const productId = params.productId || params.id;
   const { isAuthenticated } = useAuth();
   const [reviews, setReviews] = useState([]);
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewEligibility, setReviewEligibility] = useState({
     loading: false,
     canReview: false,
@@ -97,6 +108,7 @@ const Reviews = () => {
         return [createdReview, ...next];
       });
       setNewReview({ rating: 5, comment: '' });
+      setIsReviewModalOpen(false);
       toast.success('Review submitted successfully');
     } catch (error) {
       toast.error(error?.response?.data?.message || 'Failed to submit review');
@@ -132,60 +144,30 @@ const Reviews = () => {
         <p className="text-gray-600">Customer Reviews</p>
       </div>
 
-      {/* Write Review */}
-      {!isAuthenticated ? (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-2">Write a Review</h2>
-          <p className="text-gray-600">Log in after completing payment to review this product.</p>
+      <div className="mb-8 rounded-lg bg-white p-6 shadow-md">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">Write a Review</h2>
+            <p className="mt-1 text-gray-600">
+              {!isAuthenticated
+                ? 'Log in after completing payment to review this product.'
+                : reviewEligibility.loading
+                  ? 'Checking review eligibility...'
+                  : reviewEligibility.canReview
+                    ? 'Share feedback for this verified purchase.'
+                    : reviewEligibility.message}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsReviewModalOpen(true)}
+            disabled={!isAuthenticated || reviewEligibility.loading || !reviewEligibility.canReview}
+            className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Write a Review
+          </button>
         </div>
-      ) : reviewEligibility.loading ? (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8 text-gray-600">
-          Checking review eligibility...
-        </div>
-      ) : reviewEligibility.canReview ? (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">Write a Review</h2>
-          <form onSubmit={handleSubmitReview}>
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Rating</label>
-              <div className="flex gap-1">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    type="button"
-                    onClick={() => setNewReview({ ...newReview, rating: star })}
-                    className="text-2xl focus:outline-none"
-                  >
-                    {star <= newReview.rating ? (
-                      <FaStar className="text-yellow-400" />
-                    ) : (
-                      <FaRegStar className="text-gray-300" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="mb-4">
-              <textarea
-                value={newReview.comment}
-                onChange={(e) => setNewReview({ ...newReview, comment: e.target.value })}
-                placeholder="Share your experience with this product..."
-                rows="4"
-                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-primary"
-                required
-              />
-            </div>
-            <button type="submit" className="btn-primary">
-              Submit Review
-            </button>
-          </form>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-2">Write a Review</h2>
-          <p className="text-gray-600">{reviewEligibility.message}</p>
-        </div>
-      )}
+      </div>
 
       {/* Reviews List */}
       <div className="space-y-4">
@@ -200,27 +182,40 @@ const Reviews = () => {
         ) : (
           reviews.map((review) => (
             <div key={review.id || review._id} className="bg-white rounded-lg shadow-md p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white font-bold">
-                    {review.user?.name?.charAt(0).toUpperCase()}
+              <div className="mb-4 flex items-center gap-3">
+                {getReviewerImage(review) ? (
+                  <img
+                    src={getReviewerImage(review)}
+                    alt={getReviewerName(review)}
+                    className="h-10 w-10 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary font-bold text-white">
+                    {getReviewerInitial(review)}
                   </div>
-                  <div>
-                    <p className="font-semibold">{review.user?.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {new Date(review.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex">
-                  {renderStars(review.rating)}
+                )}
+                <div>
+                  <p className="font-semibold text-[#111827]">{getReviewerName(review)}</p>
+                  <p className="text-sm text-gray-500">
+                    {new Date(review.createdAt).toLocaleDateString()}
+                  </p>
                 </div>
               </div>
+              <div className="mb-2 flex">{renderStars(review.rating)}</div>
               <p className="text-gray-700">{review.comment}</p>
             </div>
           ))
         )}
       </div>
+
+      <ProductReviewModal
+        isOpen={isReviewModalOpen}
+        onClose={() => setIsReviewModalOpen(false)}
+        onSubmit={handleSubmitReview}
+        draft={newReview}
+        onDraftChange={setNewReview}
+        productName={product?.name || 'Product'}
+      />
     </div>
   );
 };

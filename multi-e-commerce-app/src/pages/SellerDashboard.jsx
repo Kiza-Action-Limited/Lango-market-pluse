@@ -2,39 +2,128 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { FaPlus, FaEdit, FaTrash, FaBox, FaDollarSign, FaShoppingCart, FaLock, FaUnlockAlt, FaClipboardList, FaWarehouse, FaPercent, FaStar, FaUsers, FaFileExport, FaEye, FaTruck, FaQrcode, FaShippingFast, FaMapMarkerAlt, FaFileInvoiceDollar, FaCreditCard, FaDownload, FaComments, FaCheckCircle } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaBox, FaDollarSign, FaShoppingCart, FaLock, FaUnlockAlt, FaClipboardList, FaWarehouse, FaPercent, FaStar, FaUsers, FaFileExport, FaEye, FaFileInvoiceDollar, FaCreditCard, FaDownload, FaComments, FaCheckCircle, FaBook, FaReceipt, FaSave, FaUndo, FaWallet, FaShieldAlt, FaTruck } from 'react-icons/fa';
 import { formatCurrency } from '../utils/formatters';
 import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
 import { productService } from '../services/productService';
 import { orderService } from '../services/orderService';
 import { logisticsService } from '../services/logisticsService';
 import { rfqService } from '../services/rfqService';
+import { sellerJournalService } from '../services/sellerJournalService';
+import api from '../config/axios';
 import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill } from '../components/dashboard/DashboardWidgets';
 import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
 import SellerWalletConsole from '../components/SellerWalletConsole';
-import LiveLogisticsMapPanel from '../components/logistics/LiveLogisticsMapPanel';
-import SharedGroupTripPanel from '../components/logistics/SharedGroupTripPanel';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { buildReviewSummary, buildSalesByLocation, isPaidOrder } from '../utils/dashboardMetrics';
 import { clearPendingSubscriptionPayment, listPendingSubscriptionPayments } from '../utils/subscriptionPaymentRecovery';
 import { formatProductCategory, getEffectiveLowStockThreshold } from '../utils/inventorySensitivity';
 
 const getOrderId = (order) => order?.id || order?._id;
-const getLogisticsId = (logistics) => logistics?.id || logistics?._id;
-const getLogisticsOrderId = (logistics) => logistics?.order?._id || logistics?.order || logistics?.orderId;
-const hasGpsPoint = (point) => (
-  Number.isFinite(Number(point?.lat ?? point?.gpsLat)) &&
-  Number.isFinite(Number(point?.lng ?? point?.gpsLng))
-);
-const escapeReportText = (value) => String(value ?? '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&#39;');
-const logisticsActiveStatuses = new Set(['pending', 'driver_assigned', 'en_route_to_pickup', 'picked_up', 'in_transit', 'out_for_delivery']);
-const orderDispatchReadyStatuses = new Set(['payment_escrowed', 'processing', 'dispatched', 'funds_held', 'in_transit']);
-const orderClosedStatuses = new Set(['delivered', 'completed', 'cancelled', 'released', 'refunded']);
+const readMetadata = (source, key) => {
+  const metadata = source?.metadata;
+  if (!metadata) return undefined;
+  if (typeof metadata.get === 'function') return metadata.get(key);
+  return metadata[key];
+};
+const getLogisticsPreference = (order = {}) => {
+  const preference = order.logisticsPreference || {};
+  const provider = preference.requestedProvider;
+  const providerObject = provider && typeof provider === 'object' ? provider : null;
+  const logistics = order.logistics || {};
+  const profile = providerObject?.logisticsProfile || {};
+
+  return {
+    id: providerObject?._id || providerObject?.id || provider || readMetadata(logistics, 'selectedProviderId') || '',
+    name:
+      preference.providerName ||
+      providerObject?.businessName ||
+      providerObject?.fullName ||
+      providerObject?.name ||
+      readMetadata(logistics, 'selectedProviderName') ||
+      logistics.driverName ||
+      '',
+    phone: preference.providerPhone || providerObject?.phone || readMetadata(logistics, 'selectedProviderPhone') || logistics.driverPhone || '',
+    hub: preference.providerHub || profile.baseHub || profile.locationHub || '',
+    source: preference.selectionSource || readMetadata(logistics, 'selectedBy') || 'default',
+  };
+};
+const sellerCsvExportTypes = [
+  'products',
+  'orders',
+  'rfqs',
+  'reviews',
+  'transactions',
+  'payments',
+  'subscriptions',
+  'documents',
+];
+const formatSellerExportLabel = (value) => String(value || '')
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+const sellerCsvExportMeta = {
+  products: { label: 'Products CSV', detail: 'Catalog, stock and pricing records' },
+  orders: { label: 'All Orders CSV', detail: 'Buyer, payment, escrow and delivery records' },
+  rfqs: { label: 'RFQs CSV', detail: 'Quote requests and offer activity' },
+  reviews: { label: 'Reviews CSV', detail: 'Ratings and verified buyer feedback' },
+  transactions: { label: 'Transactions CSV', detail: 'Wallet movement and balances' },
+  payments: { label: 'Payments CSV', detail: 'Payment references and settlement status' },
+  subscriptions: { label: 'Subscriptions CSV', detail: 'Plan billing and renewal history' },
+  documents: { label: 'Documents CSV', detail: 'Verification and seller document records' },
+};
+const getSellerExportMeta = (type) => sellerCsvExportMeta[type] || {
+  label: formatSellerExportLabel(type),
+  detail: 'Download seller report',
+};
+const buildDashboardDateRange = (range) => {
+  const end = new Date();
+  const start = new Date(end);
+
+  if (range === 'today') {
+    start.setHours(0, 0, 0, 0);
+  } else if (range === '7d') {
+    start.setDate(end.getDate() - 7);
+  } else if (range === '30d') {
+    start.setDate(end.getDate() - 30);
+  } else if (range === '90d') {
+    start.setDate(end.getDate() - 90);
+  } else if (range === 'year') {
+    start.setFullYear(end.getFullYear() - 1);
+  }
+
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+};
+const initialSellerJournalForm = {
+  entryType: 'offline_sale',
+  productId: '',
+  adjustmentMode: 'subtract',
+  inventoryAction: 'increase',
+  quantity: '',
+  unitCost: '',
+  unitPrice: '',
+  amount: '',
+  affectsMainAccount: true,
+  returnSettlement: 'customer_refund',
+  supplierName: '',
+  partyName: '',
+  partyPhone: '',
+  partyType: '',
+  paymentMethod: 'cash',
+  category: '',
+  reference: '',
+  notes: '',
+};
+const sellerJournalTabs = [
+  { key: 'offline_sale', label: 'Sales', icon: FaShoppingCart },
+  { key: 'offline_purchase', label: 'Purchases', icon: FaReceipt },
+  { key: 'expense', label: 'Expenses', icon: FaFileInvoiceDollar },
+  { key: 'return', label: 'Returns', icon: FaUndo },
+  { key: 'stock_adjustment', label: 'Adjustments', icon: FaWarehouse },
+  { key: 'reports', label: 'Reports', icon: FaFileExport },
+];
 
 const SellerDashboard = () => {
   const navigate = useNavigate();
@@ -48,18 +137,21 @@ const SellerDashboard = () => {
   const [products, setProducts] = useState([]);
   const [planUsage, setPlanUsage] = useState(null);
   const [recentOrders, setRecentOrders] = useState([]);
-  const [logisticsByOrder, setLogisticsByOrder] = useState({});
-  const [dashboardMapTracking, setDashboardMapTracking] = useState(null);
-  const [dashboardMapLoading, setDashboardMapLoading] = useState(false);
+  const [sellerLogisticsRequests, setSellerLogisticsRequests] = useState([]);
   const [sellerRfqs, setSellerRfqs] = useState([]);
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [journalSummary, setJournalSummary] = useState(null);
+  const [journalForm, setJournalForm] = useState(initialSellerJournalForm);
+  const [activeJournalTab, setActiveJournalTab] = useState('offline_sale');
+  const [journalSaving, setJournalSaving] = useState(false);
   const [pendingSubscriptionPayments, setPendingSubscriptionPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dashboardRange, setDashboardRange] = useState('30d');
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [dateRange, setDateRange] = useState(() => buildDashboardDateRange('30d'));
 
   useEffect(() => {
     fetchSellerData();
-  }, []);
+  }, [dashboardRange]);
 
   useEffect(() => {
     setPendingSubscriptionPayments(listPendingSubscriptionPayments(user));
@@ -68,12 +160,23 @@ const SellerDashboard = () => {
   const fetchSellerData = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const productsRes = await productService.getMyProducts({ page: 1, limit: 20 });
+      const productsRes = await productService.getMyProducts({ page: 1, limit: 100 });
       const myProducts = productsRes?.data || [];
       const usage = productsRes?.planUsage || null;
-      const ordersRes = await orderService.getAll({ role: 'seller', page: 1, limit: 50 });
+      const ordersRes = await orderService.getAll({ role: 'seller', page: 1, limit: 100, range: dashboardRange });
       const sellerOrders = ordersRes?.data || [];
+      const orderSummary = ordersRes?.summary || {};
       let rfqRows = [];
+      let logisticsRequestRows = [];
+      let journalRows = [];
+      let nextJournalSummary = null;
+      try {
+        logisticsRequestRows = await logisticsService.getSellerBuyerRequests({ limit: 8 });
+      } catch (error) {
+        if (error.response?.status !== 404 && error.response?.status !== 403) {
+          console.error('Error fetching buyer logistics requests:', error);
+        }
+      }
       try {
         const rfqRes = await rfqService.getMy({ mode: 'seller', limit: 20 });
         rfqRows = rfqRes?.data || [];
@@ -82,28 +185,17 @@ const SellerDashboard = () => {
           console.error('Error fetching seller RFQs:', error);
         }
       }
-      const logisticsEntries = await Promise.allSettled(
-        sellerOrders
-          .map((order) => getOrderId(order))
-          .filter(Boolean)
-          .map(async (orderId) => {
-            try {
-              return [orderId, await logisticsService.getByOrder(orderId)];
-            } catch (error) {
-              if (error.response?.status === 404) return [orderId, null];
-              throw error;
-            }
-          })
-      );
-      const nextLogisticsByOrder = {};
-      logisticsEntries.forEach((entry) => {
-        if (entry.status === 'fulfilled' && Array.isArray(entry.value)) {
-          const [orderId, logistics] = entry.value;
-          nextLogisticsByOrder[orderId] = logistics;
+      try {
+        const journalRes = await sellerJournalService.list({ limit: 8 });
+        journalRows = journalRes?.data || [];
+        nextJournalSummary = journalRes?.summary || null;
+      } catch (error) {
+        if (error.response?.status !== 404) {
+          console.error('Error fetching seller journal:', error);
         }
-      });
-      const totalRevenue = sellerOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
-      const pendingOrders = sellerOrders.filter((o) =>
+      }
+      const visibleRevenue = sellerOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+      const visiblePendingOrders = sellerOrders.filter((o) =>
         ['pending_payment', 'payment_escrowed', 'processing', 'dispatched'].includes(o.status)
       ).length;
 
@@ -111,13 +203,15 @@ const SellerDashboard = () => {
       setPlanUsage(usage);
       setStats({
         totalProducts: usage?.totalProducts ?? myProducts.length,
-        totalOrders: Number(ordersRes?.pagination?.total || sellerOrders.length),
-        totalRevenue,
-        pendingOrders,
+        totalOrders: Number(orderSummary.totalOrders ?? ordersRes?.pagination?.total ?? sellerOrders.length),
+        totalRevenue: Number(orderSummary.totalRevenue ?? visibleRevenue),
+        pendingOrders: Number(orderSummary.pendingOrders ?? visiblePendingOrders),
       });
       setRecentOrders(sellerOrders);
-      setLogisticsByOrder(nextLogisticsByOrder);
+      setSellerLogisticsRequests(Array.isArray(logisticsRequestRows) ? logisticsRequestRows : []);
       setSellerRfqs(rfqRows);
+      setJournalEntries(journalRows);
+      setJournalSummary(nextJournalSummary);
     } catch (error) {
       console.error('Error fetching seller data:', error);
     } finally {
@@ -127,8 +221,27 @@ const SellerDashboard = () => {
 
   const { lastUpdated, isRefreshing: isRealtimeRefreshing } = useRealtimeRefresh(
     () => fetchSellerData({ silent: true }),
-    { enabled: true, intervalMs: 12000 }
+    { enabled: true, intervalMs: 12000, immediate: true, deps: [dashboardRange] }
   );
+
+  const handleSellerExport = async (type) => {
+    try {
+      const response = await api.get(`/v1/seller/export/${type}`, {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `seller_${type}_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting seller data:', error);
+      alert(error.response?.data?.message || 'Failed to export seller data');
+    }
+  };
 
   const handleDeleteProduct = async (productId) => {
     if (window.confirm('Are you sure you want to delete this product?')) {
@@ -143,25 +256,138 @@ const SellerDashboard = () => {
 
   const applyDashboardRange = (range) => {
     setDashboardRange(range);
-    const end = new Date();
-    const start = new Date();
+    setDateRange(buildDashboardDateRange(range));
+  };
 
-    if (range === 'today') {
-      start.setHours(0, 0, 0, 0);
-    } else if (range === '7d') {
-      start.setDate(end.getDate() - 7);
-    } else if (range === '30d') {
-      start.setDate(end.getDate() - 30);
-    } else if (range === '90d') {
-      start.setDate(end.getDate() - 90);
-    } else if (range === 'year') {
-      start.setFullYear(end.getFullYear() - 1);
+  const selectedJournalProduct = products.find((product) => String(product.id || product._id) === String(journalForm.productId));
+  const journalQuantity = Number(journalForm.quantity || 0);
+  const journalUnitCost = Number(journalForm.unitCost || 0);
+  const journalUnitPrice = Number(journalForm.unitPrice || 0);
+  const journalAmount = Number(journalForm.amount || 0);
+  const journalReturnUnitValue = journalUnitPrice || journalUnitCost;
+  const journalTotalCost = activeJournalTab === 'expense'
+    ? Math.max(0, journalAmount)
+    : activeJournalTab === 'return'
+      ? Math.max(0, journalAmount || (journalQuantity * journalReturnUnitValue))
+    : activeJournalTab === 'offline_sale'
+      ? Math.max(0, journalQuantity * journalUnitPrice)
+      : Math.max(0, journalQuantity * journalUnitCost);
+  const currentJournalStock = Number(selectedJournalProduct?.quantityAvailable ?? selectedJournalProduct?.stock ?? 0);
+  const previewJournalStock = selectedJournalProduct
+    ? activeJournalTab === 'offline_purchase'
+      ? currentJournalStock + journalQuantity
+      : activeJournalTab === 'offline_sale'
+        ? Math.max(0, currentJournalStock - journalQuantity)
+        : activeJournalTab === 'stock_adjustment'
+          ? journalForm.adjustmentMode === 'set'
+            ? journalQuantity
+            : journalForm.adjustmentMode === 'add'
+              ? currentJournalStock + journalQuantity
+              : Math.max(0, currentJournalStock - journalQuantity)
+          : activeJournalTab === 'return'
+            ? journalForm.inventoryAction === 'none'
+              ? currentJournalStock
+              : journalForm.inventoryAction === 'decrease'
+                ? Math.max(0, currentJournalStock - journalQuantity)
+                : currentJournalStock + journalQuantity
+            : currentJournalStock
+    : 0;
+  const journalAccountSummary = journalSummary?.account || {};
+  const journalWithdrawableBalance = Number(journalAccountSummary.withdrawableBalance || 0);
+  const journalAccountCredits = Number(journalAccountSummary.month?.credits ?? journalAccountSummary.credits ?? 0);
+  const journalAccountDebits = Number(journalAccountSummary.month?.debits ?? journalAccountSummary.debits ?? 0);
+  const journalAccountNet = Number(journalAccountSummary.month?.net ?? journalAccountSummary.net ?? 0);
+  const journalPostsToAccount = Boolean(journalForm.affectsMainAccount) && activeJournalTab !== 'stock_adjustment' && journalForm.paymentMethod !== 'credit';
+  const journalAccountImpact = !journalPostsToAccount
+    ? 'none'
+    : activeJournalTab === 'offline_sale'
+      ? 'credit'
+      : activeJournalTab === 'return'
+        ? journalForm.returnSettlement === 'supplier_refund'
+          ? 'credit'
+          : journalForm.returnSettlement === 'customer_refund'
+            ? 'debit'
+            : 'none'
+        : ['offline_purchase', 'expense'].includes(activeJournalTab)
+          ? 'debit'
+          : 'none';
+
+  const handleJournalFormChange = (event) => {
+    const { name, type, checked, value } = event.target;
+    setJournalForm((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+      ...(name === 'returnSettlement' && value === 'customer_refund' ? { affectsMainAccount: true } : {}),
+      ...(name === 'paymentMethod' && value === 'credit' && prev.returnSettlement === 'customer_refund' ? { returnSettlement: 'no_cash' } : {}),
+    }));
+  };
+
+  const handleJournalTabChange = (tab) => {
+    setActiveJournalTab(tab);
+    setJournalForm((prev) => ({
+      ...prev,
+      entryType: tab === 'reports' ? prev.entryType : tab,
+      adjustmentMode: tab === 'offline_sale' ? 'subtract' : tab === 'offline_purchase' ? 'add' : tab === 'stock_adjustment' ? 'set' : prev.adjustmentMode,
+      inventoryAction: tab === 'return' ? 'increase' : prev.inventoryAction,
+      affectsMainAccount: tab !== 'stock_adjustment',
+      returnSettlement: tab === 'return' ? 'customer_refund' : prev.returnSettlement,
+    }));
+  };
+
+  const handleJournalSubmit = async (event) => {
+    event.preventDefault();
+    if (activeJournalTab === 'reports') return;
+    const needsProduct = activeJournalTab !== 'expense';
+    if ((needsProduct && !journalForm.productId) || (needsProduct && journalQuantity <= 0)) {
+      window.alert('Choose a product and enter a quantity greater than zero.');
+      return;
+    }
+    if (activeJournalTab === 'expense' && journalAmount <= 0) {
+      window.alert('Enter an expense amount greater than zero.');
+      return;
+    }
+    if (activeJournalTab === 'return' && journalForm.returnSettlement !== 'no_cash' && journalTotalCost <= 0) {
+      window.alert('Enter the customer refund or supplier refund amount.');
+      return;
     }
 
-    setDateRange({
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
-    });
+    setJournalSaving(true);
+    try {
+      await sellerJournalService.create({
+        entryType: activeJournalTab,
+        productId: journalForm.productId,
+        adjustmentMode: journalForm.adjustmentMode,
+        inventoryAction: journalForm.inventoryAction,
+        quantity: journalQuantity,
+        unitCost: journalUnitCost,
+        unitPrice: journalUnitPrice,
+        amount: journalAmount,
+        affectsMainAccount: journalPostsToAccount,
+        returnSettlement: journalForm.returnSettlement,
+        supplierName: journalForm.supplierName,
+        partyName: journalForm.partyName,
+        partyPhone: journalForm.partyPhone,
+        partyType: journalForm.partyType,
+        paymentMethod: journalForm.paymentMethod,
+        category: journalForm.category,
+        reference: journalForm.reference,
+        notes: journalForm.notes,
+      });
+      setJournalForm((prev) => ({
+        ...initialSellerJournalForm,
+        entryType: activeJournalTab,
+        productId: prev.productId,
+        supplierName: prev.supplierName,
+        partyName: prev.partyName,
+        paymentMethod: prev.paymentMethod,
+      }));
+      await fetchSellerData({ silent: true });
+    } catch (error) {
+      console.error('Error saving seller journal:', error);
+      window.alert(error.response?.data?.message || 'Failed to save seller journal entry');
+    } finally {
+      setJournalSaving(false);
+    }
   };
 
   const isSectionLoading = loading;
@@ -175,7 +401,7 @@ const SellerDashboard = () => {
     {
       key: SUBSCRIPTION_FEATURES.CFO_LITE_HOOK,
       title: 'CFO Hook',
-      description: 'Tracks logistics and SMS cost impact against your profit flow.',
+      description: 'Tracks fees, SMS cost, and payment impact against your profit flow.',
     },
     {
       key: SUBSCRIPTION_FEATURES.CLEARANCE_AGENT,
@@ -233,36 +459,6 @@ const SellerDashboard = () => {
   const paidSellerOrders = recentOrders.filter(isPaidOrder);
   const salesByLocationRows = buildSalesByLocation(recentOrders);
   const reviewSummary = buildReviewSummary(products, paidSellerOrders.length);
-  const logisticsRecords = Object.values(logisticsByOrder).filter(Boolean);
-  const dispatchReadyOrders = recentOrders.filter((order) => {
-    const orderId = getOrderId(order);
-    const status = String(order.status || '').toLowerCase();
-    return orderId
-      && orderDispatchReadyStatuses.has(status)
-      && !orderClosedStatuses.has(status)
-      && !logisticsByOrder[orderId];
-  });
-  const activeDeliveries = logisticsRecords.filter((record) => logisticsActiveStatuses.has(String(record.status || 'pending').toLowerCase()));
-  const qrHandoffPending = activeDeliveries.filter((record) => {
-    const scans = Array.isArray(record.qrScans) ? record.qrScans : [];
-    const pickupDone = Boolean(record.pickupQrConfirmed || scans.some((scan) => scan.step === 'pickup' && scan.verified !== false));
-    const deliveryDone = Boolean(record.deliveryQrConfirmed || scans.some((scan) => scan.step === 'delivery' && scan.verified !== false));
-    return !pickupDone || !deliveryDone;
-  });
-  const escrowWindows = logisticsRecords.filter((record) => record.escrowReleaseDue);
-  const logisticsCostTotal = logisticsRecords.reduce((sum, record) => sum + Number(record.shippingCost || 0), 0);
-  const escrowSplitRows = logisticsRecords
-    .filter((record) => record.escrowReleaseDue || record.settlement || Number(record.shippingCost || 0) > 0)
-    .slice(0, 5)
-    .map((record) => {
-      const order = recentOrders.find((item) => String(getOrderId(item)) === String(record.order?._id || record.order));
-      const totalEscrowed = Number(record.settlement?.totalEscrowed || order?.totalAmount || 0);
-      const driverPayout = Number(record.settlement?.driverPayout || record.shippingCost || 0);
-      const sinkingFund = Number(record.settlement?.sinkingFund || (driverPayout > 0 ? driverPayout * 0.1 : 0));
-      const platformFee = Number(record.settlement?.platformFee || 0);
-      const sellerPayout = Number(record.settlement?.sellerPayout || Math.max(0, totalEscrowed - driverPayout - platformFee));
-      return { record, totalEscrowed, sellerPayout, driverPayout, sinkingFund, platformFee };
-    });
   const inventoryBySkuRows = [...products]
     .map((product) => {
       const stock = Number(product.quantityAvailable ?? product.stock ?? 0);
@@ -274,43 +470,32 @@ const SellerDashboard = () => {
     })
     .sort((a, b) => a.riskScore - b.riskScore)
     .slice(0, 7);
-  const verifiedTrips = logisticsRecords.filter((record) => {
-    const status = String(record.status || '').toLowerCase();
-    const scans = Array.isArray(record.qrScans) ? record.qrScans : [];
-    const pickupDone = Boolean(record.pickupQrConfirmed || scans.some((scan) => scan.step === 'pickup' && scan.verified !== false));
-    const deliveryDone = Boolean(record.deliveryQrConfirmed || scans.some((scan) => scan.step === 'delivery' && scan.verified !== false));
-    return ['delivered', 'auto_released'].includes(status) && pickupDone && deliveryDone;
-  });
   const feedbackQueue = filteredOrders
     .filter((order) => ['delivered', 'completed'].includes(String(order.status || '').toLowerCase()))
     .map((order) => {
-      const orderId = getOrderId(order);
-      const logistics = logisticsByOrder[orderId] || null;
       const sellerDone = Boolean(order.sellerRating || order.sellerFeedback || order.feedback?.seller);
       const buyerDone = Boolean(order.buyerRating || order.buyerFeedback || order.feedback?.buyer);
-      const driverDone = Boolean(logistics?.driverRating || logistics?.driverFeedback || logistics?.feedback?.driver);
-      return { order, logistics, sellerDone, buyerDone, driverDone };
+      return { order, sellerDone, buyerDone };
     })
-    .filter((entry) => !entry.sellerDone || !entry.buyerDone || (entry.logistics && !entry.driverDone))
+    .filter((entry) => !entry.sellerDone || !entry.buyerDone)
     .slice(0, 5);
-  const topActiveDeliveries = activeDeliveries.slice(0, 4);
-  const dashboardLiveDelivery = activeDeliveries.find((record) => (
-    hasGpsPoint(record.liveTracking?.driver) ||
-    hasGpsPoint(record.gpsTracking?.current) ||
-    hasGpsPoint(record.driver?.logisticsProfile?.currentLocation)
-  )) || topActiveDeliveries[0] || logisticsRecords.find((record) => (
-    hasGpsPoint(record.shippingAddress) ||
-    hasGpsPoint(record.pickupAddress)
-  )) || null;
-  const dashboardLiveDeliveryId = getLogisticsId(dashboardLiveDelivery);
-  const dashboardLiveOrderId = getLogisticsOrderId(dashboardLiveDelivery);
-  const dashboardLiveOrder = recentOrders.find((order) => String(getOrderId(order)) === String(dashboardLiveOrderId)) || null;
-  const dashboardDeliveryReached = Boolean(
-    dashboardLiveDelivery?.deliveryQrConfirmed ||
-    dashboardLiveDelivery?.qrScans?.some((scan) => scan.step === 'delivery' && scan.verified !== false) ||
-    dashboardLiveDelivery?.actualDelivery ||
-    dashboardLiveOrder?.deliveredAt
-  );
+  const buyerLogisticsRequests = filteredOrders
+    .map((order) => ({ order, provider: getLogisticsPreference(order) }))
+    .filter(({ provider }) => provider.source === 'buyer' && (provider.id || provider.name))
+    .slice(0, 4);
+  const visibleBuyerLogisticsRequests = sellerLogisticsRequests.length
+    ? sellerLogisticsRequests.slice(0, 4).map((request) => ({
+      request,
+      order: {
+        id: request.orderId,
+        _id: request.orderId,
+        orderNumber: request.orderNumber,
+        deliveryAddress: request.destination,
+        shippingAddress: request.destination,
+      },
+      provider: request.logisticsProvider || {},
+    }))
+    : buyerLogisticsRequests;
   const openRfqs = sellerRfqs.filter((rfq) => rfq.status === 'open');
   const quotedRfqs = sellerRfqs.filter((rfq) => rfq.status === 'quoted');
   const latestRfqs = sellerRfqs.slice(0, 4);
@@ -356,11 +541,10 @@ const SellerDashboard = () => {
   const productSlotPct = planUsage?.productLimit
     ? Math.min(100, Math.round((Number(planUsage.visibleProducts || 0) / Number(planUsage.productLimit || 1)) * 100))
     : 0;
-  const logisticsStatusLabel = (status) => String(status || 'pending').replace(/_/g, ' ');
   const statusTone = (status) => {
     const normalized = String(status || '').toLowerCase();
     if (['delivered', 'completed', 'paid'].includes(normalized)) return 'green';
-    if (['processing', 'payment_escrowed', 'shipped', 'driver_assigned', 'en_route_to_pickup', 'picked_up', 'in_transit', 'out_for_delivery'].includes(normalized)) return 'blue';
+    if (['processing', 'payment_escrowed', 'shipped', 'in_transit'].includes(normalized)) return 'blue';
     if (['dispatched', 'pending_payment', 'pending'].includes(normalized)) return 'amber';
     if (['cancelled', 'refunded', 'failed'].includes(normalized)) return 'red';
     return 'gray';
@@ -378,93 +562,17 @@ const SellerDashboard = () => {
     clearPendingSubscriptionPayment(user, payment.planId);
     setPendingSubscriptionPayments(listPendingSubscriptionPayments(user));
   };
-  const fetchDashboardLiveMap = async ({ silent = false } = {}) => {
-    if (!dashboardLiveDeliveryId) {
-      setDashboardMapTracking(null);
-      return;
-    }
-
-    if (!silent) setDashboardMapLoading(true);
-    try {
-      const mapData = await logisticsService.getMapData(dashboardLiveDeliveryId);
-      setDashboardMapTracking(mapData);
-    } catch (error) {
-      if (error.response?.status !== 404) {
-        console.error('Error loading seller dashboard GPS map:', error);
-      }
-      setDashboardMapTracking(null);
-    } finally {
-      if (!silent) setDashboardMapLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDashboardLiveMap({ silent: true });
-  }, [dashboardLiveDeliveryId]);
-
-  const refreshDashboardGps = async () => {
-    await Promise.all([
-      fetchSellerData({ silent: true }),
-      fetchDashboardLiveMap(),
-    ]);
-  };
-
-  const handlePrintVerifiedTripReport = (record) => {
-    const order = recentOrders.find((item) => String(getOrderId(item)) === String(record.order?._id || record.order));
-    const driverName = record.driver?.fullName || record.driver?.name || record.driverName || 'Driver';
-    const pickupTown = record.pickupAddress?.town || record.pickupAddress?.city || record.pickupAddress?.address || 'Origin';
-    const destinationTown = record.shippingAddress?.town || record.shippingAddress?.city || record.shippingAddress?.address || 'Destination';
-    const reportWindow = window.open('', '_blank');
-    if (!reportWindow) return;
-    const orderLabel = order?.orderNumber || record.orderNumber || String(record.order || '').slice(-8);
-    const tripLabel = record.tripId || record.bookingReference || '-';
-    const deliveredLabel = record.actualDelivery || order?.deliveredAt ? new Date(record.actualDelivery || order?.deliveredAt).toLocaleString() : '-';
-    reportWindow.document.write(`
-      <html>
-        <head>
-          <title>Verified trip ${escapeReportText(tripLabel)}</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 32px; color: #111827; }
-            h1 { font-size: 22px; margin-bottom: 4px; }
-            .muted { color: #6B7280; font-size: 12px; }
-            table { border-collapse: collapse; width: 100%; margin-top: 24px; }
-            td { border: 1px solid #E5E7EB; padding: 10px; font-size: 13px; }
-            td:first-child { font-weight: 700; width: 34%; background: #F9FAFB; }
-          </style>
-        </head>
-        <body>
-          <h1>Verified Trip Report</h1>
-          <p class="muted">Generated ${new Date().toLocaleString()}</p>
-          <table>
-            <tr><td>Order</td><td>${escapeReportText(orderLabel)}</td></tr>
-            <tr><td>Trip</td><td>${escapeReportText(tripLabel)}</td></tr>
-            <tr><td>Route</td><td>${escapeReportText(pickupTown)} to ${escapeReportText(destinationTown)}</td></tr>
-            <tr><td>Driver</td><td>${escapeReportText(driverName)}</td></tr>
-            <tr><td>Status</td><td>${escapeReportText(logisticsStatusLabel(record.status))}</td></tr>
-            <tr><td>Pickup QR</td><td>${record.pickupQrConfirmed ? 'Confirmed' : 'Confirmed by scan log'}</td></tr>
-            <tr><td>Delivery QR</td><td>${record.deliveryQrConfirmed ? 'Confirmed' : 'Confirmed by scan log'}</td></tr>
-            <tr><td>Shipping Cost</td><td>${escapeReportText(formatCurrency(record.shippingCost || 0))}</td></tr>
-            <tr><td>Delivered</td><td>${escapeReportText(deliveredLabel)}</td></tr>
-          </table>
-        </body>
-      </html>
-    `);
-    reportWindow.document.close();
-    reportWindow.focus();
-    reportWindow.print();
-  };
-
   return (
-    <div className="min-h-screen bg-[#F7F8FA] px-4 py-6 sm:px-6">
+    <div className="dashboard-shell min-h-screen bg-[#F7F8FA] px-4 py-6 sm:px-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Seller workspace</p>
-          <h1 className="mt-1 text-2xl font-bold text-[#111827]">Performance Dashboard</h1>
+          <h1 className="mt-1 truncate text-2xl font-bold text-[#111827]">Performance Dashboard</h1>
           <p className="mt-1 text-sm text-gray-500">
             {activePlan ? `${activePlan.name} plan, ${activePlan.priceLabel}` : 'Inventory, revenue, and order performance'}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="dashboard-actionbar">
           <div className="inline-flex h-10 items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 text-xs font-medium text-green-700">
             <span className={`h-2 w-2 rounded-full bg-green-500 ${isRealtimeRefreshing ? 'animate-pulse' : ''}`} />
             Live - {formatRealtimeStamp(lastUpdated)}
@@ -488,7 +596,7 @@ const SellerDashboard = () => {
             ))}
           </div>
           {canManageInventory ? (
-            <Link to="/seller/add-product" className="inline-flex h-10 items-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-medium text-white hover:bg-[#EA580C]">
+            <Link to="/seller/add-product" className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-medium text-white hover:bg-[#EA580C]">
               <FaPlus />
               Add Product
             </Link>
@@ -496,7 +604,7 @@ const SellerDashboard = () => {
             <Link
               to="/seller/subscription-plans"
               title={FEATURE_TOOLTIPS[SUBSCRIPTION_FEATURES.INVENTORY_LEDGER] || 'Upgrade subscription to unlock inventory tools'}
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-300"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-300"
             >
               <FaLock />
               Upgrade
@@ -597,201 +705,383 @@ const SellerDashboard = () => {
             )}
           </div>
         </Panel>
+        <Panel
+          title="Seller Journal"
+          action={<Link to="/seller/add-product" className="inline-flex items-center gap-1 text-xs font-medium text-[#F97316]"><FaPlus /> Create product</Link>}
+          className="xl:col-span-12"
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+              <div className="rounded-md border border-green-100 bg-green-50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-green-700">Sales Today</p>
+                <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(journalSummary?.today?.sales || 0)}</p>
+                <p className="text-xs text-green-700">{journalSummary?.today?.salesCount || 0} transactions</p>
+              </div>
+              <div className="rounded-md border border-blue-100 bg-blue-50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-blue-700">Purchases Today</p>
+                <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(journalSummary?.today?.purchases || 0)}</p>
+                <p className="text-xs text-blue-700">{journalSummary?.today?.purchaseCount || 0} purchases</p>
+              </div>
+              <div className="rounded-md border border-red-100 bg-red-50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-red-700">Expenses Today</p>
+                <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(journalSummary?.today?.expenses || 0)}</p>
+                <p className="text-xs text-red-700">{journalSummary?.today?.expenseCount || 0} records</p>
+              </div>
+              <div className="rounded-md border border-orange-100 bg-orange-50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-orange-700">Profit Today</p>
+                <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(journalSummary?.today?.profit || 0)}</p>
+                <p className="text-xs text-orange-700">Sales minus purchases and expenses</p>
+              </div>
+              <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Inventory Value</p>
+                <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(products.reduce((sum, product) => sum + (Number(product.quantityAvailable ?? product.stock ?? 0) * Number(product.price || 0)), 0))}</p>
+                <p className="text-xs text-gray-500">{totalStock} units on hand</p>
+              </div>
+              <div className="rounded-md border border-sky-100 bg-sky-50 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-sky-700">Main Account</p>
+                <p className="mt-1 text-xl font-bold text-[#111827]">{formatCurrency(journalWithdrawableBalance)}</p>
+                <p className="text-xs text-sky-700">Withdrawable balance</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 rounded-md border border-gray-100 bg-white p-3 lg:grid-cols-[1.2fr_0.8fr_auto]">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[#111827] text-white">
+                  <FaWallet />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-[#111827]">Journal posts to seller main account</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">Cash, M-Pesa, bank, card, and mixed journal payments update wallet balance so released money can be withdrawn from the payout center.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="rounded-md bg-green-50 p-2">
+                  <p className="text-green-700">Credits</p>
+                  <p className="mt-1 font-semibold text-[#111827]">{formatCurrency(journalAccountCredits)}</p>
+                </div>
+                <div className="rounded-md bg-red-50 p-2">
+                  <p className="text-red-700">Debits</p>
+                  <p className="mt-1 font-semibold text-[#111827]">{formatCurrency(journalAccountDebits)}</p>
+                </div>
+                <div className="rounded-md bg-gray-50 p-2">
+                  <p className="text-gray-500">Net</p>
+                  <p className="mt-1 font-semibold text-[#111827]">{formatCurrency(journalAccountNet)}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => document.getElementById('seller-wallet')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-200 px-4 text-sm font-semibold text-[#111827] hover:border-[#F97316] hover:text-[#F97316]"
+              >
+                <FaDollarSign /> Withdraw
+              </button>
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto rounded-md border border-gray-100 bg-gray-50 p-2">
+              {sellerJournalTabs.map((tab) => {
+                const TabIcon = tab.icon;
+                const active = activeJournalTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => handleJournalTabChange(tab.key)}
+                    className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-semibold ${
+                      active ? 'bg-[#111827] text-white' : 'bg-white text-gray-600 hover:text-[#111827]'
+                    }`}
+                  >
+                    <TabIcon /> {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeJournalTab === 'reports' ? (
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+                <div className="rounded-md border border-gray-100 bg-gray-50 p-4 xl:col-span-5">
+                  <p className="text-sm font-semibold text-[#111827]">Monthly Summary</p>
+                  <div className="mt-3 space-y-2 text-sm">
+                    <div className="flex justify-between gap-3"><span className="text-gray-500">Sales</span><strong>{formatCurrency(journalSummary?.month?.sales || 0)}</strong></div>
+                    <div className="flex justify-between gap-3"><span className="text-gray-500">Purchases</span><strong>{formatCurrency(journalSummary?.month?.purchases || 0)}</strong></div>
+                    <div className="flex justify-between gap-3"><span className="text-gray-500">Expenses</span><strong>{formatCurrency(journalSummary?.month?.expenses || 0)}</strong></div>
+                    <div className="flex justify-between gap-3 border-t border-gray-200 pt-2"><span className="text-gray-500">Profit</span><strong>{formatCurrency(journalSummary?.month?.profit || 0)}</strong></div>
+                    <div className="flex justify-between gap-3"><span className="text-gray-500">Inventory movement</span><strong>{journalSummary?.month?.inventoryMovement || 0}</strong></div>
+                  </div>
+                </div>
+                <div className="rounded-md border border-gray-100 bg-white p-4 xl:col-span-7">
+                  <p className="text-sm font-semibold text-[#111827]">Available Exports</p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {['Sales Summary', 'Purchase Summary', 'Inventory Movement'].map((label) => (
+                      <button key={label} type="button" onClick={() => handleSellerExport('products')} className="rounded-md border border-gray-200 px-3 py-3 text-left text-sm font-medium text-[#111827] hover:bg-gray-50">
+                        <FaDownload className="mb-2 text-[#F97316]" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+                <form onSubmit={handleJournalSubmit} className="space-y-3 rounded-md border border-gray-100 bg-gray-50 p-3 xl:col-span-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-[#111827]">
+                        {sellerJournalTabs.find((tab) => tab.key === activeJournalTab)?.label || 'Journal'} Entry
+                      </p>
+                      <p className="text-xs text-gray-500">{journalSummary?.entries || journalEntries.length || 0} total journal records</p>
+                    </div>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-md bg-white text-[#F97316] shadow-sm">
+                      <FaBook />
+                    </span>
+                  </div>
+
+                  {activeJournalTab !== 'expense' && (
+                    <label className="block text-xs font-medium text-gray-600">
+                      Product
+                      <select
+                        name="productId"
+                        value={journalForm.productId}
+                        onChange={handleJournalFormChange}
+                        className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]"
+                        required
+                      >
+                        <option value="">Select product</option>
+                        {products.map((product) => (
+                          <option key={product.id || product._id} value={product.id || product._id}>
+                            {product.name} - stock {product.quantityAvailable ?? product.stock ?? 0} {product.unit || ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="block text-xs font-medium text-gray-600">
+                      {activeJournalTab === 'offline_sale' ? 'Customer/Supplier' : activeJournalTab === 'expense' ? 'Vendor' : 'Supplier/Party'}
+                      <input
+                        name="partyName"
+                        value={journalForm.partyName}
+                        onChange={handleJournalFormChange}
+                        className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]"
+                        placeholder="Name"
+                      />
+                    </label>
+                    <label className="block text-xs font-medium text-gray-600">
+                      Phone
+                      <input
+                        name="partyPhone"
+                        value={journalForm.partyPhone}
+                        onChange={handleJournalFormChange}
+                        className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]"
+                        placeholder="Optional"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {activeJournalTab !== 'expense' && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Quantity
+                        <input type="number" min="0.001" step="0.001" name="quantity" value={journalForm.quantity} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]" required />
+                      </label>
+                    )}
+                    {activeJournalTab === 'offline_sale' && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Selling price
+                        <input type="number" min="0" step="0.01" name="unitPrice" value={journalForm.unitPrice} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]" />
+                      </label>
+                    )}
+                    {['offline_purchase', 'stock_adjustment'].includes(activeJournalTab) && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Buying cost
+                        <input type="number" min="0" step="0.01" name="unitCost" value={journalForm.unitCost} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]" />
+                      </label>
+                    )}
+                    {activeJournalTab === 'return' && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Refund amount
+                        <input type="number" min="0" step="0.01" name="amount" value={journalForm.amount} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]" placeholder="Money returned" />
+                      </label>
+                    )}
+                    {activeJournalTab === 'expense' && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Amount
+                        <input type="number" min="0.01" step="0.01" name="amount" value={journalForm.amount} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]" required />
+                      </label>
+                    )}
+                    {activeJournalTab === 'stock_adjustment' && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Mode
+                        <select name="adjustmentMode" value={journalForm.adjustmentMode} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]">
+                          <option value="set">Set stock</option>
+                          <option value="add">Add stock</option>
+                          <option value="subtract">Reduce stock</option>
+                        </select>
+                      </label>
+                    )}
+                    {activeJournalTab === 'return' && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Inventory action
+                        <select name="inventoryAction" value={journalForm.inventoryAction} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]">
+                          <option value="increase">Return to stock</option>
+                          <option value="decrease">Supplier return</option>
+                          <option value="none">Dispose / no stock change</option>
+                        </select>
+                      </label>
+                    )}
+                    {activeJournalTab === 'return' && (
+                      <label className="block text-xs font-medium text-gray-600">
+                        Settlement
+                        <select name="returnSettlement" value={journalForm.returnSettlement} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]">
+                          <option value="customer_refund">Refund customer</option>
+                          <option value="supplier_refund">Supplier refunded seller</option>
+                          <option value="no_cash">No cash movement</option>
+                        </select>
+                      </label>
+                    )}
+                    <label className="block text-xs font-medium text-gray-600">
+                      Payment
+                      <select name="paymentMethod" value={journalForm.paymentMethod} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]">
+                        <option value="cash">Cash</option>
+                        <option value="mpesa">M-Pesa</option>
+                        <option value="bank">Bank</option>
+                        <option value="credit">Credit</option>
+                        <option value="mixed">Mixed</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  {activeJournalTab !== 'stock_adjustment' && (
+                    <label className="flex items-start gap-3 rounded-md border border-gray-200 bg-white p-3 text-sm">
+                      <input
+                        type="checkbox"
+                        name="affectsMainAccount"
+                        checked={Boolean(journalForm.affectsMainAccount)}
+                        onChange={handleJournalFormChange}
+                        disabled={activeJournalTab === 'return' && journalForm.returnSettlement === 'customer_refund'}
+                        className="mt-1 h-4 w-4 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]"
+                      />
+                      <span>
+                        <span className="block font-semibold text-[#111827]">Post this entry to seller main account</span>
+                        <span className="mt-1 block text-xs leading-5 text-gray-500">Credit sales and supplier refunds, debit purchases, expenses, and customer refunds before withdrawal.</span>
+                      </span>
+                    </label>
+                  )}
+
+                  {activeJournalTab === 'return' && journalForm.returnSettlement === 'customer_refund' && (
+                    <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                      <FaShieldAlt className="mt-0.5 shrink-0" />
+                      Customer refund entries debit the main account first. The backend blocks the entry if withdrawable balance cannot cover the refund.
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="block text-xs font-medium text-gray-600">
+                      Category / Type
+                      <input name="category" value={journalForm.category} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]" placeholder={activeJournalTab === 'expense' ? 'Transport, rent, fuel...' : 'Walk-in, wholesaler...'} />
+                    </label>
+                    <label className="block text-xs font-medium text-gray-600">
+                      Reference
+                      <input name="reference" value={journalForm.reference} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]" placeholder="Invoice, receipt or note" />
+                    </label>
+                  </div>
+
+                  <label className="block text-xs font-medium text-gray-600">
+                    Notes
+                    <textarea name="notes" value={journalForm.notes} onChange={handleJournalFormChange} rows={3} className="mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#F97316]" placeholder="Customer, supplier, batch, location, reason, or payment notes" />
+                  </label>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-2 text-sm">
+                    <div>
+                      <p className="text-xs text-gray-500">{activeJournalTab === 'expense' ? 'Record amount' : 'New stock'}</p>
+                      <p className="font-semibold text-[#111827]">
+                        {activeJournalTab === 'expense'
+                          ? formatCurrency(journalTotalCost)
+                          : selectedJournalProduct ? `${previewJournalStock} ${selectedJournalProduct.unit || ''}` : '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Financial total</p>
+                      <p className="font-semibold text-[#111827]">{formatCurrency(journalTotalCost)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Account impact</p>
+                      <p className={`font-semibold ${journalAccountImpact === 'credit' ? 'text-green-700' : journalAccountImpact === 'debit' ? 'text-red-700' : 'text-gray-500'}`}>
+                        {journalAccountImpact === 'none' ? 'No post' : `${journalAccountImpact === 'credit' ? '+' : '-'}${formatCurrency(journalTotalCost)}`}
+                      </p>
+                    </div>
+                    <button type="submit" disabled={journalSaving} className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-semibold text-white hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60">
+                      <FaSave /> {journalSaving ? 'Saving...' : 'Save Entry'}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="xl:col-span-7">
+                  <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Month profit</p>
+                      <p className="mt-1 font-semibold text-[#111827]">{formatCurrency(journalSummary?.month?.profit || 0)}</p>
+                    </div>
+                    <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Units moved</p>
+                      <p className="mt-1 font-semibold text-[#111827]">{Number(journalSummary?.totalQuantity || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Last record</p>
+                      <p className="mt-1 font-semibold text-[#111827]">{journalEntries[0]?.purchasedAt ? new Date(journalEntries[0].purchasedAt).toLocaleDateString() : '-'}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {journalEntries.map((entry) => (
+                      <div key={entry.id || entry._id} className="rounded-md border border-gray-100 px-3 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[#111827]">{entry.reference || entry.typeLabel}</p>
+                            <p className="text-xs text-gray-500">{entry.typeLabel} - {entry.product?.name || entry.partyName || entry.category || 'General'} {entry.partyName ? `- ${entry.partyName}` : ''}</p>
+                          </div>
+                          <StatusPill tone={entry.entryType === 'offline_sale' ? 'green' : entry.entryType === 'expense' ? 'red' : Number(entry.stockDelta || 0) >= 0 ? 'blue' : 'amber'}>
+                            {entry.entryType === 'expense' ? formatCurrency(entry.totalAmount || 0) : `${Number(entry.stockDelta || 0) >= 0 ? '+' : ''}${entry.stockDelta || 0} ${entry.unit || entry.product?.unit || ''}`}
+                          </StatusPill>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-500 sm:grid-cols-5">
+                          <span>Payment <strong className="text-[#111827]">{entry.paymentMethod || '-'}</strong></span>
+                          <span>Amount <strong className="text-[#111827]">{formatCurrency(entry.totalAmount || entry.totalCost || 0)}</strong></span>
+                          <span>Stock <strong className="text-[#111827]">{entry.stockBefore} to {entry.stockAfter}</strong></span>
+                          <span>Account <strong className={entry.accountImpact === 'credit' ? 'text-green-700' : entry.accountImpact === 'debit' ? 'text-red-700' : 'text-[#111827]'}>
+                            {entry.accountImpact === 'none' ? 'No post' : `${entry.accountImpact === 'credit' ? '+' : '-'}${formatCurrency(entry.accountAmount || 0)}`}
+                          </strong></span>
+                          <span>{entry.purchasedAt ? new Date(entry.purchasedAt).toLocaleDateString() : '-'}</span>
+                        </div>
+                        {entry.notes && <p className="mt-2 text-xs text-gray-500">{entry.notes}</p>}
+                      </div>
+                    ))}
+                    {!journalEntries.length && (
+                      <div className="rounded-md border border-dashed border-gray-200 bg-gray-50 px-3 py-8 text-center">
+                        <FaReceipt className="mx-auto mb-2 text-[#F97316]" />
+                        <p className="text-sm font-medium text-[#111827]">No journal records yet.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </Panel>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <NotificationPreferencesCard
           className="xl:col-span-12"
           title="Notification Preferences"
-          description="Keep seller alerts inside the dashboard so you can receive order, stock, and account notifications without leaving your workspace."
+          badgeLabel="Seller alerts"
+          pushDescription="Show dashboard and browser alerts for urgent seller activity."
+          description="Control how seller alerts reach you for orders, payments, stock pressure, and account activity."
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
+      <div id="seller-wallet" className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <SellerWalletConsole className="xl:col-span-12" />
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-        {dashboardLiveDelivery ? (
-          <LiveLogisticsMapPanel
-            trip={dashboardLiveDelivery}
-            tracking={dashboardMapTracking}
-            order={dashboardLiveOrder}
-            title="Seller GPS Delivery Map"
-            subtitle={dashboardDeliveryReached
-              ? 'Delivery proof is recorded. Review the final driver GPS and buyer destination.'
-              : 'Track the logistics driver live from pickup until the shipment reaches the buyer.'}
-            eyebrow={dashboardDeliveryReached ? 'Reached buyer' : 'Seller live Google GPS'}
-            onRefresh={refreshDashboardGps}
-            refreshing={dashboardMapLoading || isRealtimeRefreshing}
-            trackingHref={dashboardLiveOrder ? `/orders/${getOrderId(dashboardLiveOrder)}/track` : '/seller/orders'}
-            emptyText="Live GPS appears here after the logistics driver starts sharing location."
-            className="xl:col-span-12"
-          />
-        ) : (
-          <section className="rounded-lg border border-dashed border-gray-300 bg-white p-5 text-center shadow-sm xl:col-span-12">
-            <FaMapMarkerAlt className="mx-auto text-3xl text-[#F97316]" />
-            <h3 className="mt-3 text-lg font-bold text-gray-950">Seller GPS Delivery Map</h3>
-            <p className="mt-1 text-sm text-gray-600">
-              Live Google GPS will show here once a paid order has a logistics shipment and the driver starts sharing location.
-            </p>
-            <Link
-              to="/seller/orders"
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
-            >
-              <FaTruck />
-              Open seller orders
-            </Link>
-          </section>
-        )}
-
-        <SharedGroupTripPanel
-          title="Kenya Shared Logistics"
-          description="Start or join shared routes across Kenya so buyers and sellers going the same direction can split one logistics vehicle by cargo weight."
-          canCreate
-          className="xl:col-span-12"
-        />
-
-        <Panel
-          title="Logistics Command Center"
-          action={<Link to="/seller/orders" className="text-xs font-medium text-[#F97316]">Manage dispatch</Link>}
-          className="xl:col-span-12"
-        >
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <div className="rounded-md border border-amber-100 bg-amber-50 p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-amber-100 text-amber-700">
-                <FaShippingFast />
-              </div>
-              <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Pending dispatch</p>
-              <p className="mt-1 text-2xl font-bold text-[#111827]">{dispatchReadyOrders.length}</p>
-              <p className="mt-1 text-xs text-amber-700">Paid orders without shipment records</p>
-            </div>
-            <div className="rounded-md border border-blue-100 bg-blue-50 p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-blue-100 text-blue-700">
-                <FaTruck />
-              </div>
-              <p className="text-xs font-medium uppercase tracking-wide text-blue-700">Active deliveries</p>
-              <p className="mt-1 text-2xl font-bold text-[#111827]">{activeDeliveries.length}</p>
-              <p className="mt-1 text-xs text-blue-700">Live logistics records in motion</p>
-            </div>
-            <div className="rounded-md border border-purple-100 bg-purple-50 p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-purple-100 text-purple-700">
-                <FaQrcode />
-              </div>
-              <p className="text-xs font-medium uppercase tracking-wide text-purple-700">QR handoff</p>
-              <p className="mt-1 text-2xl font-bold text-[#111827]">{qrHandoffPending.length}</p>
-              <p className="mt-1 text-xs text-purple-700">Pickup or delivery scans pending</p>
-            </div>
-            <div className="rounded-md border border-green-100 bg-green-50 p-4">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-green-100 text-green-700">
-                <FaLock />
-              </div>
-              <p className="text-xs font-medium uppercase tracking-wide text-green-700">Escrow windows</p>
-              <p className="mt-1 text-2xl font-bold text-[#111827]">{escrowWindows.length}</p>
-              <p className="mt-1 text-xs text-green-700">{formatCurrency(logisticsCostTotal)} logistics cost tracked</p>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-md border border-gray-100 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-[#111827]">Dispatch Queue</p>
-                <span className="text-xs text-gray-500">{dispatchReadyOrders.length} ready</span>
-              </div>
-              <div className="space-y-3">
-                {dispatchReadyOrders.slice(0, 4).map((order) => (
-                  <div key={`dispatch-${getOrderId(order)}`} className="flex items-center justify-between gap-3 rounded-md bg-gray-50 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[#111827]">Order #{String(getOrderId(order)).slice(-8)}</p>
-                      <p className="text-xs text-gray-500">{order.buyer?.fullName || order.customer?.fullName || 'Customer'} - {formatCurrency(order.totalAmount || 0)}</p>
-                    </div>
-                    <Link to="/seller/orders" className="shrink-0 rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-[#F97316] hover:bg-white">
-                      Open
-                    </Link>
-                  </div>
-                ))}
-                {!dispatchReadyOrders.length && (
-                  <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No paid orders waiting for shipment.</p>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-md border border-gray-100 p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-[#111827]">Active Route Tracking</p>
-                <span className="text-xs text-gray-500">{topActiveDeliveries.length} shown</span>
-              </div>
-              <div className="space-y-3">
-                {topActiveDeliveries.map((record) => {
-                  const pickupTown = record.pickupAddress?.town || record.pickupAddress?.city || record.pickupAddress?.address || 'Origin';
-                  const destinationTown = record.shippingAddress?.town || record.shippingAddress?.city || record.shippingAddress?.address || 'Destination';
-                  const driverName = record.driver?.fullName || record.driver?.name || 'Driver pending';
-                  return (
-                    <div key={`route-${record._id || record.id || record.order}`} className="rounded-md bg-gray-50 px-3 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-[#111827]">#{String(record.orderNumber || record.order || record._id || '').slice(-8)}</p>
-                          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500">
-                            <FaMapMarkerAlt className="shrink-0 text-[#F97316]" />
-                            <span className="truncate">{pickupTown} to {destinationTown}</span>
-                          </p>
-                        </div>
-                        <StatusPill tone={statusTone(record.status)}>{logisticsStatusLabel(record.status)}</StatusPill>
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                        <span>{driverName}</span>
-                        {record.routeInfo?.distanceKm ? <span>{Number(record.routeInfo.distanceKm).toFixed(1)} km</span> : null}
-                        {record.escrowReleaseDue ? <span>72h freeze active</span> : null}
-                      </div>
-                    </div>
-                  );
-                })}
-                {!topActiveDeliveries.length && (
-                  <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No active delivery routes yet.</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-md border border-gray-100 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-[#111827]">Escrow Payout Split</p>
-                <p className="mt-1 text-xs text-gray-500">Seller net, logistics cost, sinking fund, and platform fee per tracked shipment.</p>
-              </div>
-              <span className="text-xs text-gray-500">{escrowSplitRows.length} rows</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
-                    <th className="pb-2">Shipment</th>
-                    <th className="pb-2">Escrowed</th>
-                    <th className="pb-2">Seller</th>
-                    <th className="pb-2">Driver</th>
-                    <th className="pb-2">Sinking fund</th>
-                    <th className="pb-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {escrowSplitRows.map(({ record, totalEscrowed, sellerPayout, driverPayout, sinkingFund }) => (
-                    <tr key={`escrow-${record._id || record.id || record.order}`} className="border-b last:border-0">
-                      <td className="py-3 font-mono">#{String(record.orderNumber || record.order || record._id || '').slice(-8)}</td>
-                      <td className="py-3 font-semibold">{formatCurrency(totalEscrowed)}</td>
-                      <td className="py-3">{formatCurrency(sellerPayout)}</td>
-                      <td className="py-3">{formatCurrency(driverPayout)}</td>
-                      <td className="py-3">{formatCurrency(sinkingFund)}</td>
-                      <td className="py-3"><StatusPill tone={record.settlement?.releasedAt ? 'green' : record.escrowReleaseDue ? 'amber' : 'gray'}>{record.settlement?.releasedAt ? 'released' : record.escrowReleaseDue ? 'freeze window' : 'pending'}</StatusPill></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!escrowSplitRows.length && (
-              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No escrow payout splits available yet.</p>
-            )}
-          </div>
-        </Panel>
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -890,7 +1180,7 @@ const SellerDashboard = () => {
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
         <Panel title="Product Views And Clicks" className="xl:col-span-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
             <div className="rounded-md bg-gray-50 p-3">
               <p className="text-xs text-gray-500">Product views</p>
               <p className="mt-1 text-xl font-bold text-[#111827]">0</p>
@@ -991,7 +1281,25 @@ const SellerDashboard = () => {
                 <p className="text-xs text-amber-700">Expires in {daysToExpiry(item?.attributes?.expiry)} day(s).</p>
               </div>
             ))}
-            {!lowStockItems.length && !expiringSoonItems.length && <p className="text-sm text-gray-500">No active inventory alerts.</p>}
+            {visibleBuyerLogisticsRequests.map(({ request, order, provider }) => (
+              <div key={`logistics-${getOrderId(order)}`} className="rounded-md border border-sky-100 bg-sky-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="flex items-center gap-2 text-sm font-semibold text-sky-800">
+                      <FaTruck />
+                      Buyer chose {provider.name || 'a logistics company'}
+                    </p>
+                    <p className="mt-1 text-xs text-sky-700">
+                      {request?.message || `Order #${String(getOrderId(order)).slice(-8)} should start transport with this provider to ${order.deliveryAddress?.town || order.shippingAddress?.city || 'the buyer location'}.`}
+                    </p>
+                  </div>
+                  <Link to="/seller/logistics-requests" className="shrink-0 text-xs font-semibold text-sky-700 hover:text-sky-900">
+                    View
+                  </Link>
+                </div>
+              </div>
+            ))}
+            {!lowStockItems.length && !expiringSoonItems.length && !visibleBuyerLogisticsRequests.length && <p className="text-sm text-gray-500">No active inventory or logistics alerts.</p>}
             {planUsage && <ProgressRow label="Product slots" value={productSlotPct} max={100} detail={`${planUsage.visibleProducts}/${planUsage.productLimit}`} color="#F97316" />}
           </div>
         </Panel>
@@ -1004,27 +1312,35 @@ const SellerDashboard = () => {
           ) : filteredOrders.length === 0 ? (
             <p className="py-8 text-center text-sm text-gray-500">No orders yet.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-md border border-gray-100">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
                     <th className="pb-3">Order</th>
                     <th className="pb-3">Customer</th>
+                    <th className="pb-3">Logistics</th>
                     <th className="pb-3">Total</th>
                     <th className="pb-3">Status</th>
                     <th className="pb-3">Date</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredOrders.slice(0, 8).map((order) => (
-                    <tr key={order.id || order._id} className="border-b last:border-0">
-                      <td className="py-3 font-mono">#{String(order.id || order._id).slice(-8)}</td>
-                      <td className="py-3">{order.buyer?.fullName || 'N/A'}</td>
-                      <td className="py-3 font-semibold">{formatCurrency(order.totalAmount)}</td>
-                      <td className="py-3"><StatusPill tone={statusTone(order.status)}>{String(order.status || 'pending').replace(/_/g, ' ')}</StatusPill></td>
-                      <td className="py-3 text-gray-500">{order.createdAt ? new Date(order.createdAt).toLocaleDateString() : '-'}</td>
-                    </tr>
-                  ))}
+                  {filteredOrders.slice(0, 8).map((order) => {
+                    const provider = getLogisticsPreference(order);
+                    return (
+                      <tr key={order.id || order._id} className="border-b last:border-0">
+                        <td className="py-3 font-mono">#{String(order.id || order._id).slice(-8)}</td>
+                        <td className="py-3">{order.buyer?.fullName || 'N/A'}</td>
+                        <td className="py-3">
+                          <p className="max-w-[160px] truncate text-xs font-semibold text-[#111827]">{provider.name || 'Seller preferred'}</p>
+                          <p className="text-[11px] capitalize text-gray-500">{provider.source === 'buyer' ? 'Buyer selected' : 'Default option'}</p>
+                        </td>
+                        <td className="py-3 font-semibold">{formatCurrency(order.totalAmount)}</td>
+                        <td className="py-3"><StatusPill tone={statusTone(order.status)}>{String(order.status || 'pending').replace(/_/g, ' ')}</StatusPill></td>
+                        <td className="py-3 text-gray-500">{order.createdAt ? new Date(order.createdAt).toLocaleDateString() : '-'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1060,37 +1376,9 @@ const SellerDashboard = () => {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <Panel title="Verified Trip Reports" className="xl:col-span-6">
+        <Panel title="Feedback Queue" className="xl:col-span-12">
           <div className="space-y-3">
-            {verifiedTrips.slice(0, 5).map((record) => {
-              const pickupTown = record.pickupAddress?.town || record.pickupAddress?.city || record.pickupAddress?.address || 'Origin';
-              const destinationTown = record.shippingAddress?.town || record.shippingAddress?.city || record.shippingAddress?.address || 'Destination';
-              return (
-                <div key={`verified-${record._id || record.id || record.order}`} className="flex items-center justify-between gap-3 rounded-md border border-gray-100 p-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-[#111827]">#{String(record.orderNumber || record.order || record._id || '').slice(-8)}</p>
-                    <p className="mt-1 truncate text-xs text-gray-500">{pickupTown} to {destinationTown}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintVerifiedTripReport(record)}
-                    className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-gray-200 px-3 text-xs font-medium text-[#F97316] hover:bg-gray-50"
-                  >
-                    <FaDownload />
-                    Print PDF
-                  </button>
-                </div>
-              );
-            })}
-            {!verifiedTrips.length && (
-              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">Verified pickup and delivery trips will appear after both QR handoffs are confirmed.</p>
-            )}
-          </div>
-        </Panel>
-
-        <Panel title="3-Way Feedback Queue" className="xl:col-span-6">
-          <div className="space-y-3">
-            {feedbackQueue.map(({ order, logistics, sellerDone, buyerDone, driverDone }) => (
+            {feedbackQueue.map(({ order, sellerDone, buyerDone }) => (
               <div key={`feedback-${getOrderId(order)}`} className="rounded-md border border-gray-100 p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -1099,7 +1387,7 @@ const SellerDashboard = () => {
                   </div>
                   <Link to="/seller/orders" className="text-xs font-medium text-[#F97316]">Open</Link>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="grid grid-cols-1 gap-2 text-xs min-[420px]:grid-cols-2">
                   <span className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-2 ${sellerDone ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
                     {sellerDone ? <FaCheckCircle /> : <FaComments />}
                     Seller
@@ -1108,15 +1396,11 @@ const SellerDashboard = () => {
                     {buyerDone ? <FaCheckCircle /> : <FaComments />}
                     Buyer
                   </span>
-                  <span className={`inline-flex items-center justify-center gap-1 rounded-md px-2 py-2 ${!logistics || driverDone ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
-                    {!logistics || driverDone ? <FaCheckCircle /> : <FaComments />}
-                    Driver
-                  </span>
                 </div>
               </div>
             ))}
             {!feedbackQueue.length && (
-              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No delivered orders are waiting for seller, buyer, or driver feedback.</p>
+              <p className="rounded-md bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">No delivered orders are waiting for seller or buyer feedback.</p>
             )}
           </div>
         </Panel>
@@ -1148,11 +1432,29 @@ const SellerDashboard = () => {
           </div>
         </Panel>
         <Panel title="Reports Center" className="xl:col-span-4">
-          <div className="grid grid-cols-2 gap-3">
-            <Link to="/seller/orders" className="rounded-md border border-gray-200 px-3 py-3 text-sm font-medium text-[#111827] hover:bg-gray-50"><FaFileExport className="mb-2 text-[#F97316]" />Orders</Link>
-            <Link to="/seller/products" className="rounded-md border border-gray-200 px-3 py-3 text-sm font-medium text-[#111827] hover:bg-gray-50"><FaFileExport className="mb-2 text-[#F97316]" />Products</Link>
-            <Link to="/seller/scarcity-board" className="rounded-md border border-gray-200 px-3 py-3 text-sm font-medium text-[#111827] hover:bg-gray-50"><FaEye className="mb-2 text-[#F97316]" />Scarcity</Link>
-            <Link to="/seller/subscription-plans" className="rounded-md border border-gray-200 px-3 py-3 text-sm font-medium text-[#111827] hover:bg-gray-50"><FaWarehouse className="mb-2 text-[#F97316]" />Plan</Link>
+          <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
+            {sellerCsvExportTypes.map((type) => {
+              const meta = getSellerExportMeta(type);
+              const isPrimaryReport = type === 'orders';
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => handleSellerExport(type)}
+                  className={`rounded-md border px-3 py-3 text-left text-sm transition hover:-translate-y-0.5 hover:shadow-sm ${
+                    isPrimaryReport
+                      ? 'border-orange-200 bg-orange-50 text-[#7C2D12]'
+                      : 'border-gray-200 bg-white text-[#111827] hover:bg-gray-50'
+                  }`}
+                >
+                  <span className="mb-2 flex h-9 w-9 items-center justify-center rounded-md bg-white text-[#F97316] shadow-sm">
+                    {isPrimaryReport ? <FaDownload /> : <FaFileExport />}
+                  </span>
+                  <span className="block font-semibold">{meta.label}</span>
+                  <span className="mt-1 block text-xs leading-4 text-gray-500">{meta.detail}</span>
+                </button>
+              );
+            })}
           </div>
         </Panel>
       </div>

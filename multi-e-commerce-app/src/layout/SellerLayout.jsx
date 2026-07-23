@@ -1,7 +1,7 @@
 // src/layouts/SellerLayout.jsx
 import React, { Suspense, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { FaTachometerAlt, FaPlus, FaBox, FaShoppingCart, FaCrown, FaBroadcastTower, FaUser, FaSignOutAlt, FaAngleDoubleLeft, FaAngleDoubleRight, FaFileInvoiceDollar, FaWallet, FaEnvelopeOpenText } from 'react-icons/fa';
+import { FaTachometerAlt, FaPlus, FaBox, FaShoppingCart, FaCrown, FaBroadcastTower, FaUser, FaSignOutAlt, FaAngleDoubleLeft, FaAngleDoubleRight, FaFileInvoiceDollar, FaWallet, FaEnvelopeOpenText, FaTruck } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/NotificationBell';
 
@@ -16,12 +16,14 @@ const SellerLayout = () => {
     { path: '/seller/add-product', label: 'Add Product', icon: FaPlus },
     { path: '/seller/products', label: 'My Products', icon: FaBox },
     { path: '/seller/orders', label: 'Orders', icon: FaShoppingCart },
+    { path: '/seller/logistics-requests', label: 'Buyer Logistics', icon: FaTruck },
     { path: '/seller/rfqs', label: 'RFQs', icon: FaFileInvoiceDollar },
     { path: '/seller/finance', label: 'Finance', icon: FaWallet },
-    { path: '/seller/support', label: 'Message Admin', icon: FaEnvelopeOpenText },
+    { path: '/seller/support', label: 'Support Message', icon: FaEnvelopeOpenText },
     { path: '/seller/scarcity-board', label: 'Scarcity Board', icon: FaBroadcastTower },
     { path: '/seller/subscription-plans', label: 'Subscription', icon: FaCrown },
   ];
+  const mobileNavItems = [navItems[0], navItems[2], navItems[3], navItems[4], navItems[5]];
   const currentNav = navItems.find((item) => item.path === location.pathname);
   const pageTitle = currentNav?.label || 'Seller Workspace';
   const sidebarLabelClass = isSidebarOpen
@@ -34,9 +36,9 @@ const SellerLayout = () => {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex min-h-dvh overflow-hidden bg-gray-50 md:h-screen">
       {/* Sidebar */}
-      <aside className={`sticky top-0 h-screen shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
+      <aside className={`sticky top-0 hidden h-screen shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 md:block ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
         <div className="border-b border-white/15 p-4">
           <div className={`flex h-8 items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
             <h2 className={`min-w-0 items-center whitespace-nowrap text-xl font-bold ${isSidebarOpen ? 'flex justify-start' : 'sr-only'}`}>
@@ -102,11 +104,11 @@ const SellerLayout = () => {
       
       {/* Main Content */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <header className="sticky top-0 z-20 flex items-center justify-between gap-4 bg-white border-b border-gray-200 px-6 py-3">
-          <h1 className="text-xl font-semibold text-gray-900">{pageTitle}</h1>
+        <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
+          <h1 className="truncate text-xl font-semibold text-gray-900">{pageTitle}</h1>
           <NotificationBell />
         </header>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto pb-24 md:pb-0">
           <Suspense
             fallback={
               <div className="p-6">
@@ -123,6 +125,25 @@ const SellerLayout = () => {
           </Suspense>
         </div>
       </div>
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+        <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`flex min-h-14 flex-col items-center justify-center rounded-md px-1 text-[11px] font-semibold transition ${isActive ? 'bg-[#F97316] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                aria-label={item.label}
+              >
+                <Icon className="mb-1 text-lg" />
+                <span className="max-w-full truncate">{item.label.replace('My ', '')}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 };

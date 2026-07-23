@@ -73,12 +73,12 @@ const Navbar = () => {
   };
 
   return (
-    <header ref={menuRef} className="fixed top-0 inset-x-0 z-50 w-full shadow-sm">
+    <header ref={menuRef} className="fixed inset-x-0 top-0 z-50 w-full pt-[env(safe-area-inset-top)] shadow-sm">
       <div className="bg-[#F2871A] text-white">
-        <div className="mx-auto max-w-341.5 px-3 py-2 flex flex-wrap md:flex-nowrap items-center gap-3 text-sm">
-          <Link to="/" className="flex items-center gap-2 min-w-max hover:opacity-90" onClick={closeAllMenus}>
-            <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-[#0B2D55] border-2 border-[#06182f]" />
-            <span className="font-extrabold text-sm sm:text-lg leading-none tracking-wide bg-[#0B2D55] px-2 py-1 rounded-sm">
+        <div className="mx-auto flex max-w-[1366px] items-center gap-3 px-3 py-2 text-sm md:flex-nowrap">
+          <Link to="/" className="flex min-w-0 items-center gap-2 hover:opacity-90" onClick={closeAllMenus}>
+            <div className="h-8 w-8 shrink-0 rounded-full border-2 border-[#06182f] bg-[#0B2D55] sm:h-9 sm:w-9" />
+            <span className="truncate rounded-sm bg-[#0B2D55] px-2 py-1 text-xs font-extrabold leading-none tracking-wide min-[380px]:text-sm sm:text-lg">
               LANGO <span className="text-[#F9B233]">MARKET PULSE</span>
             </span>
           </Link>
@@ -189,7 +189,7 @@ const Navbar = () => {
             </Link>
           </div>
 
-          <div className="md:hidden ml-auto flex items-center gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-2 md:hidden">
             <Link to="/cart" className="relative hover:opacity-90" onClick={closeAllMenus}>
               <FaShoppingCart size={20} />
               {cartCount > 0 && (
@@ -198,7 +198,11 @@ const Navbar = () => {
                 </span>
               )}
             </Link>
-            <button onClick={() => setIsMobileMenuOpen((prev) => !prev)} className="p-2 rounded bg-[#E97A12]">
+            <button
+              onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded bg-[#E97A12]"
+              aria-label={isMobileMenuOpen ? 'Close mobile menu' : 'Open mobile menu'}
+            >
               {isMobileMenuOpen ? <FaTimes size={16} /> : <FaBars size={16} />}
             </button>
           </div>
@@ -206,16 +210,16 @@ const Navbar = () => {
       </div>
 
       <div className="bg-[#2F4258] px-3 py-3">
-        <div className="mx-auto max-w-341.5">
-          <form onSubmit={handleSubmit} className="mx-auto w-full max-w-xl bg-white rounded-full h-11 flex items-center pl-4 pr-2">
+        <div className="mx-auto max-w-[1366px]">
+          <form onSubmit={handleSubmit} className="mx-auto flex h-11 w-full max-w-xl items-center rounded-full bg-white pl-4 pr-2 shadow-sm">
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="flex-1 bg-transparent outline-none text-sm text-gray-700"
+              className="min-w-0 flex-1 bg-transparent text-sm text-gray-700 outline-none"
               placeholder="Search products..."
               type="text"
             />
-            <button type="submit" className="h-8 w-8 rounded-full bg-[#F2871A] text-white flex items-center justify-center">
+            <button type="submit" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F2871A] text-white">
               <FaSearch size={14} />
             </button>
           </form>
@@ -223,10 +227,10 @@ const Navbar = () => {
       </div>
 
       {isMobileMenuOpen && (
-        <div className="md:hidden bg-[#F2871A] text-white border-t border-[#E97A12]">
-          <div className="px-4 py-3 space-y-3">
-            <button onClick={() => toggleDropdown('accountMobile')} className="w-full bg-[#E97A12] px-3 py-2 rounded flex items-center justify-between font-semibold">
-              <span>{isAuthenticated ? user?.name || 'My Account' : 'My Account'}</span>
+        <div className="max-h-[calc(100dvh-112px)] overflow-y-auto border-t border-[#E97A12] bg-[#F2871A] text-white md:hidden">
+          <div className="space-y-3 px-4 py-3">
+            <button onClick={() => toggleDropdown('accountMobile')} className="flex w-full items-center justify-between rounded bg-[#E97A12] px-3 py-2 font-semibold">
+              <span className="truncate">{isAuthenticated ? user?.name || 'My Account' : 'My Account'}</span>
               <FaChevronDown size={12} />
             </button>
             {openDropdown === 'accountMobile' && (

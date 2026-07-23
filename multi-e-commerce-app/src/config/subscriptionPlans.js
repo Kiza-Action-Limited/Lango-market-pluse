@@ -48,13 +48,13 @@ export const SUBSCRIPTION_FEATURES = {
   BILL_GUARDIAN: 'bill_guardian',
   DAILY_BURN_TRACKER: 'daily_burn_tracker',
   ASSET_TRACKING: 'asset_tracking',
-  AUDIT_PDF: 'audit_pdf',
+  AUDIT_PDF: 'audit_csv',
   MIZIGO_QR_HANDSHAKE: 'mizigo_qr_handshake',
   MIZIGO_GROUP_MATCHER: 'mizigo_group_matcher',
   MIZIGO_EXPRESS_ALERT: 'mizigo_express_alert',
   TAKE_HOME_GAUGE: 'take_home_gauge',
   SINKING_FUND: 'sinking_fund',
-  VERIFIED_TRIP_PDF: 'verified_trip_pdf',
+  VERIFIED_TRIP_PDF: 'verified_trip_csv',
 
   // Dashboard aliases used across older UI blocks.
   GUARDIAN_REGIONAL_ALARM: 'regional_guardian',
@@ -208,13 +208,13 @@ export const FEATURE_LABELS = {
   [F.BILL_GUARDIAN]: 'Bill Guardian alerts',
   [F.DAILY_BURN_TRACKER]: 'Daily operational burn tracker',
   [F.ASSET_TRACKING]: 'Asset and net worth tracking',
-  [F.AUDIT_PDF]: 'Full audit PDF reporting',
+  [F.AUDIT_PDF]: 'Full audit CSV reporting',
   [F.MIZIGO_QR_HANDSHAKE]: '3-way QR logistics handshake',
   [F.MIZIGO_GROUP_MATCHER]: 'Group trip matcher',
   [F.MIZIGO_EXPRESS_ALERT]: 'Radial express alert (10km)',
   [F.TAKE_HOME_GAUGE]: 'Driver take-home gauge',
   [F.SINKING_FUND]: '10% sinking fund auto-lock',
-  [F.VERIFIED_TRIP_PDF]: 'Verified trip PDF',
+  [F.VERIFIED_TRIP_PDF]: 'Verified trip CSV',
 };
 
 export const FEATURE_TOOLTIPS = {

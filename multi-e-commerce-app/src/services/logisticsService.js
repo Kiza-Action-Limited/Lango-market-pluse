@@ -111,6 +111,22 @@ export const logisticsService = {
     throw lastError;
   },
 
+  getBuyerPreference: async () => {
+    const response = await api.get('/v1/logistics/buyer/preference');
+    return unwrap(response);
+  },
+
+  updateBuyerPreference: async (payload) => {
+    const response = await api.put('/v1/logistics/buyer/preference', payload);
+    return unwrap(response);
+  },
+
+  getSellerBuyerRequests: async (params = {}) => {
+    const response = await api.get('/v1/logistics/seller/buyer-requests', { params });
+    const payload = unwrap(response);
+    return payload?.requests || payload || [];
+  },
+
   acceptTrip: async (logisticsId) => {
     const response = await api.put(`/v1/logistics/${logisticsId}/accept`);
     return unwrap(response);

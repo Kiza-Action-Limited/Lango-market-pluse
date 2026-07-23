@@ -1,5 +1,6 @@
 const escrowService = require('../services/order/escrow.service');
 const { validationResult } = require('express-validator');
+const { isSellerUser } = require('../utils/userCategory');
 
 const sendValidationErrors = (req, res) => {
   const errors = validationResult(req);
@@ -113,7 +114,7 @@ exports.partialRelease = async (req, res, next) => {
     const { amount, reason } = req.body;
 
     // Only admin or seller can request partial release
-    if (req.user.role !== 'admin' && req.user.role !== 'seller') {
+    if (req.user.role !== 'admin' && !isSellerUser(req.user)) {
       return res.status(403).json({
         success: false,
         message: 'Only admin or seller can request partial release',

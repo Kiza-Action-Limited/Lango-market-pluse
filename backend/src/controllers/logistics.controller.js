@@ -133,38 +133,60 @@ const buildRouteId = (value) => String(value || '')
   .replace(/^-+|-+$/g, '')
   .slice(0, 80);
 
+const omitUndefinedFields = (value = {}) => Object.fromEntries(
+  Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined)
+);
+
 const ensureDefaultGroupTripRoutes = async () => {
   const activeDefaultRouteIds = DEFAULT_GROUP_TRIP_ROUTES.map((route) => route.routeId);
-  const operations = DEFAULT_GROUP_TRIP_ROUTES.map((route) => ({
-    updateOne: {
-      filter: { routeId: route.routeId },
-      update: {
-        $setOnInsert: route,
-        $set: {
-          routeCode: route.routeCode,
-          label: route.label,
-          originName: route.originName,
-          destinationName: route.destinationName,
-          origin: route.origin,
-          destination: route.destination,
-          stops: route.stops,
-          cargoType: route.cargoType,
-          isDefault: true,
-        },
-      },
-      upsert: true,
-    },
-  }));
+  const operations = DEFAULT_GROUP_TRIP_ROUTES.map((route) => {
+    const setFields = omitUndefinedFields({
+      routeCode: route.routeCode,
+      label: route.label,
+      originName: route.originName,
+      destinationName: route.destinationName,
+      origin: route.origin,
+      destination: route.destination,
+      stops: route.stops,
+      cargoType: route.cargoType,
+      isDefault: true,
+      isActive: true,
+    });
+    const update = {
+      $setOnInsert: { routeId: route.routeId },
+      $set: setFields,
+    };
 
-  if (operations.length) {
-    await GroupTripRoute.bulkWrite(operations, { ordered: false });
-    await GroupTripRoute.updateMany(
-      {
-        isDefault: true,
-        routeId: { $nin: activeDefaultRouteIds },
+    if (!route.routeCode) {
+      update.$unset = { routeCode: '' };
+    }
+
+    return {
+      updateOne: {
+        filter: { routeId: route.routeId },
+        update,
+        upsert: true,
       },
-      { $set: { isActive: false } }
-    );
+    };
+  });
+
+  try {
+    if (operations.length) {
+      await GroupTripRoute.bulkWrite(operations, { ordered: false });
+      await GroupTripRoute.updateMany(
+        {
+          isDefault: true,
+          routeId: { $nin: activeDefaultRouteIds },
+        },
+        { $set: { isActive: false } }
+      );
+    }
+  } catch (error) {
+    logger.warn('Default group trip route sync failed; continuing with available routes', {
+      message: error.message,
+      code: error.code,
+      keyValue: error.keyValue,
+    });
   }
 };
 
@@ -478,6 +500,35 @@ const findNearestDrivers = async (pickupLat, pickupLng, maxRadiusKm = 10, limit 
     .filter(d => d.distance <= maxRadiusKm)
     .sort((a, b) => a.distance - b.distance)
     .slice(0, limit);
+};
+
+const getVerifiedLogisticsProvider = async (providerId) => {
+  if (!providerId) return null;
+  const provider = await User.findOne({
+    _id: providerId,
+    role: 'logistics',
+    $or: [
+      { verificationStatus: { $in: ['verified', 'gold'] } },
+      { 'logisticsProfile.verificationStatus': 'verified' },
+    ],
+  }).select('fullName name businessName phone email locationHub city verificationStatus logisticsProfile employer ownerAccount role');
+
+  return provider || null;
+};
+
+const buildProviderAssignment = (provider) => {
+  if (!provider?._id) return {};
+  const driverMode = String(provider.logisticsProfile?.driverMode || '').toLowerCase();
+  const fleetOwner = provider.employer || provider.ownerAccount || provider.logisticsProfile?.fleetOwner;
+  const isFleetManaged = driverMode === 'hired_driver' || Boolean(fleetOwner);
+
+  return {
+    driver: provider._id,
+    ...(isFleetManaged && fleetOwner ? { fleetOwner } : {}),
+    driverName: provider.businessName || provider.fullName || provider.name || 'Logistics provider',
+    driverPhone: provider.phone || '',
+    carrier: isFleetManaged ? 'fleet_managed' : 'solo_owner_operator',
+  };
 };
 
 const getOrderNumber = (order) => (
@@ -824,10 +875,28 @@ exports.applyAsLogistics = async (req, res, next) => {
     // Create sinking fund for driver
     await SinkingFund.getOrCreateFund(user._id);
 
+    const isResubmission = existingProfile.verificationStatus === 'rejected';
+    const noticeTitle = isResubmission ? 'Application Resubmitted' : 'Application Submitted';
+    const noticeBody = isResubmission
+      ? 'Your updated logistics application is back in the admin review queue.'
+      : 'Your logistics application is now in the admin review queue.';
+
     res.status(200).json({
       success: true,
-      message: 'Logistics application submitted successfully. Awaiting admin verification.',
+      message: `${noticeBody} Review is usually completed within 24 hours.`,
       data: {
+        notice: {
+          type: 'success',
+          title: noticeTitle,
+          body: `${noticeBody} Review is usually completed within 24 hours.`,
+          autoDismissMs: 9000,
+        },
+        nextAction: {
+          type: 'await_review',
+          label: 'Wait for admin review',
+          detail: 'You can monitor the decision from the logistics dashboard. Trip acceptance unlocks after approval.',
+          href: '/logistics/dashboard',
+        },
         verificationStatus: user.logisticsProfile.verificationStatus,
         applicationSubmittedAt: user.logisticsProfile.applicationSubmittedAt,
         reviewDueAt: user.logisticsProfile.reviewDueAt,
@@ -1099,11 +1168,22 @@ exports.getLogisticsDashboard = async (req, res, next) => {
     delete summary.deliveryHoursCount;
 
     const nextActions = [];
-    if ((user?.logisticsProfile?.verificationStatus || 'unverified') !== 'verified') {
+    const currentVerificationStatus = user?.logisticsProfile?.verificationStatus || 'unverified';
+    if (currentVerificationStatus !== 'verified') {
+      const isPendingReview = currentVerificationStatus === 'pending';
+      const isRejectedReview = currentVerificationStatus === 'rejected';
       nextActions.push({
         type: 'verification',
-        label: 'Complete logistics verification',
-        detail: 'Upload documents and wait for admin approval before accepting trips.',
+        label: isPendingReview
+          ? 'Application under review'
+          : isRejectedReview
+            ? 'Update and resubmit verification'
+            : 'Complete logistics verification',
+        detail: isPendingReview
+          ? 'Admin is reviewing your logistics documents. Trip acceptance unlocks after approval.'
+          : isRejectedReview
+            ? (user?.logisticsProfile?.reviewNotes || 'Admin requested changes before approval.')
+            : 'Upload documents and wait for admin approval before accepting trips.',
         href: '/logistics/apply',
       });
     } else if (summary.availableTrips > 0) {
@@ -1387,6 +1467,214 @@ exports.getVerifiedProviders = async (req, res, next) => {
   }
 };
 
+const serializeBuyerLogisticsPreference = (user) => {
+  const preference = user?.buyerLogisticsPreference || {};
+  const provider = preference.selectedProvider;
+  const providerObject = provider && typeof provider === 'object' ? provider : null;
+  const snapshot = preference.selectedProviderSnapshot || {};
+  const profile = providerObject?.logisticsProfile || {};
+
+  return {
+    active: Boolean(preference.active && (providerObject?._id || provider)),
+    selectedProviderId: providerObject?._id || provider || null,
+    selectedProvider: providerObject ? {
+      id: providerObject._id,
+      _id: providerObject._id,
+      name: providerObject.businessName || providerObject.fullName || providerObject.name || snapshot.name || 'Verified logistics provider',
+      phone: providerObject.phone || snapshot.phone || '',
+      email: providerObject.email || snapshot.email || '',
+      hub: profile.baseHub || profile.locationHub || providerObject.locationHub || providerObject.city || snapshot.hub || '',
+      vehiclePlate: profile.vehiclePlate || snapshot.vehiclePlate || '',
+      vehicleType: profile.vehicleType || snapshot.vehicleType || '',
+      cargoCapacityKg: profile.cargoCapacityKg || snapshot.cargoCapacityKg || 0,
+      verificationStatus: profile.verificationStatus || providerObject.verificationStatus || snapshot.verificationStatus || 'verified',
+    } : null,
+    selectedProviderSnapshot: snapshot,
+    deliveryHub: preference.deliveryHub || '',
+    notes: preference.notes || '',
+    updatedAt: preference.updatedAt || null,
+  };
+};
+
+exports.getBuyerLogisticsPreference = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id || req.user.id)
+      .populate('buyerLogisticsPreference.selectedProvider', 'fullName name businessName phone email locationHub city logisticsProfile');
+
+    return res.status(200).json({
+      success: true,
+      data: serializeBuyerLogisticsPreference(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.updateBuyerLogisticsPreference = async (req, res, next) => {
+  try {
+    const { active = true, logisticsProviderId, deliveryHub = '', notes = '' } = req.body;
+    const userId = req.user._id || req.user.id;
+
+    if (!active) {
+      const user = await User.findByIdAndUpdate(
+        userId,
+        {
+          $set: {
+            'buyerLogisticsPreference.active': false,
+            'buyerLogisticsPreference.selectedProvider': null,
+            'buyerLogisticsPreference.selectedProviderSnapshot': {},
+            'buyerLogisticsPreference.updatedAt': new Date(),
+          },
+        },
+        { new: true }
+      ).populate('buyerLogisticsPreference.selectedProvider', 'fullName name businessName phone email locationHub city logisticsProfile');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Buyer logistics preference cleared.',
+        data: serializeBuyerLogisticsPreference(user),
+      });
+    }
+
+    const provider = await getVerifiedLogisticsProvider(logisticsProviderId);
+    if (!provider) {
+      return res.status(404).json({
+        success: false,
+        message: 'Selected logistics company is not available or verified.',
+      });
+    }
+
+    const snapshot = {
+      name: provider.businessName || provider.fullName || provider.name || 'Verified logistics provider',
+      phone: provider.phone || '',
+      email: provider.email || '',
+      hub: provider.logisticsProfile?.baseHub || provider.logisticsProfile?.locationHub || provider.locationHub || provider.city || '',
+      vehiclePlate: provider.logisticsProfile?.vehiclePlate || '',
+      vehicleType: provider.logisticsProfile?.vehicleType || '',
+      cargoCapacityKg: provider.logisticsProfile?.cargoCapacityKg || 0,
+      verificationStatus: provider.logisticsProfile?.verificationStatus || provider.verificationStatus || 'verified',
+    };
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          'buyerLogisticsPreference.active': true,
+          'buyerLogisticsPreference.selectedProvider': provider._id,
+          'buyerLogisticsPreference.selectedProviderSnapshot': snapshot,
+          'buyerLogisticsPreference.deliveryHub': String(deliveryHub || '').trim().slice(0, 120),
+          'buyerLogisticsPreference.notes': String(notes || '').trim().slice(0, 300),
+          'buyerLogisticsPreference.updatedAt': new Date(),
+        },
+      },
+      { new: true }
+    ).populate('buyerLogisticsPreference.selectedProvider', 'fullName name businessName phone email locationHub city logisticsProfile');
+
+    return res.status(200).json({
+      success: true,
+      message: 'Verified logistics company saved for seller requests.',
+      data: serializeBuyerLogisticsPreference(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getSellerBuyerLogisticsRequests = async (req, res, next) => {
+  try {
+    const userId = req.user._id || req.user.id;
+    const role = String(req.user.role || '').toLowerCase();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+    const query = {
+      'logisticsPreference.selectionSource': 'buyer',
+      'logisticsPreference.requestedProvider': { $exists: true, $ne: null },
+    };
+
+    if (role !== 'admin') {
+      query.seller = userId;
+    }
+
+    const orders = await Order.find(query)
+      .populate('buyer', 'fullName name businessName phone email')
+      .populate('seller', 'fullName name businessName phone email')
+      .populate('product', 'name images sku trackingSku')
+      .populate('logisticsPreference.requestedProvider', 'fullName name businessName phone email locationHub city logisticsProfile')
+      .sort('-createdAt')
+      .limit(limit)
+      .lean();
+
+    const logisticsRecords = await Logistics.find({ order: { $in: orders.map((order) => order._id) } })
+      .select('order status trackingNumber tripId bookingReference driverName driverPhone carrier estimatedDelivery metadata shippingAddress pickupAddress')
+      .lean();
+    const logisticsByOrder = new Map(logisticsRecords.map((record) => [String(record.order), record]));
+
+    const requests = orders.map((order) => {
+      const provider = order.logisticsPreference?.requestedProvider || {};
+      const profile = provider.logisticsProfile || {};
+      const logistics = logisticsByOrder.get(String(order._id)) || null;
+      const destination = order.deliveryAddress || logistics?.shippingAddress || {};
+
+      return {
+        id: String(order._id),
+        orderId: String(order._id),
+        orderNumber: order.orderNumber || `ORD-${String(order._id).slice(-8).toUpperCase()}`,
+        createdAt: order.createdAt,
+        status: order.status,
+        paymentStatus: order.paymentStatus || (order.paidAt ? 'paid' : 'pending'),
+        buyer: {
+          id: order.buyer?._id || order.buyer,
+          name: order.buyer?.businessName || order.buyer?.fullName || order.buyer?.name || 'Buyer',
+          phone: order.buyer?.phone || '',
+          email: order.buyer?.email || '',
+        },
+        seller: {
+          id: order.seller?._id || order.seller,
+          name: order.seller?.businessName || order.seller?.fullName || order.seller?.name || 'Seller',
+          phone: order.seller?.phone || '',
+        },
+        product: {
+          id: order.product?._id || order.product,
+          name: order.product?.name || 'Order item',
+          image: order.product?.images?.[0]?.url || order.product?.images?.[0] || '',
+        },
+        quantity: order.quantity,
+        totalAmount: order.totalAmount,
+        logisticsProvider: {
+          id: provider._id || order.logisticsPreference?.requestedProvider,
+          name: order.logisticsPreference?.providerName || provider.businessName || provider.fullName || provider.name || 'Verified logistics company',
+          phone: order.logisticsPreference?.providerPhone || provider.phone || '',
+          email: provider.email || '',
+          hub: order.logisticsPreference?.providerHub || profile.baseHub || profile.locationHub || provider.locationHub || provider.city || '',
+          vehiclePlate: profile.vehiclePlate || '',
+          vehicleType: profile.vehicleType || '',
+          cargoCapacityKg: profile.cargoCapacityKg || 0,
+        },
+        destination: {
+          label: destination.label || order.deliveryAddressText || '',
+          town: destination.town || destination.city || '',
+          county: destination.county || destination.state || '',
+          country: destination.country || 'Kenya',
+        },
+        note: order.logisticsPreference?.notes || '',
+        message: `Buyer requests this order use ${order.logisticsPreference?.providerName || provider.businessName || provider.fullName || provider.name || 'the selected logistics company'} for transport to ${destination.town || destination.city || destination.label || 'their location'}.`,
+        logistics,
+        shipmentCreated: Boolean(logistics?._id),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        requests,
+        total: requests.length,
+      },
+      requests,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 exports.calculateRoute = async (req, res, next) => {
   try {
     const route = await routeOptimizer.calculateRoute(req.params.id);
@@ -1554,11 +1842,12 @@ exports.createLogistics = async (req, res, next) => {
       cargoType, 
       isExpress, 
       notes,
+      logisticsProviderId,
       gpsLat,
       gpsLng,
     } = req.body;
 
-    const order = await Order.findById(orderId).populate('seller buyer');
+    const order = await Order.findById(orderId).populate('seller buyer logisticsPreference.requestedProvider');
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found.' });
     }
@@ -1641,12 +1930,27 @@ exports.createLogistics = async (req, res, next) => {
       nearestDrivers = await findNearestDrivers(pickupGps.lat, pickupGps.lng, 10, 5);
     }
 
+    const requestedProviderId = logisticsProviderId ||
+      order.logisticsPreference?.requestedProvider?._id ||
+      order.logisticsPreference?.requestedProvider;
+    const requestedProvider = requestedProviderId
+      ? await getVerifiedLogisticsProvider(requestedProviderId)
+      : null;
+    if (requestedProviderId && !requestedProvider) {
+      return res.status(404).json({
+        success: false,
+        message: 'Selected logistics company is not available or verified.',
+      });
+    }
+    const providerAssignment = buildProviderAssignment(requestedProvider);
+
     const logistics = await Logistics.create({
       order: orderId,
       orderNumber,
       seller: order.seller._id,
       buyer: order.buyer._id,
-      carrier: carrier ?? 'solo_owner_operator',
+      carrier: providerAssignment.carrier || carrier || 'solo_owner_operator',
+      ...providerAssignment,
       pickupAddress: normalizedPickup,
       shippingAddress: normalizedShipping,
       weight: weight || 100,
@@ -1666,6 +1970,11 @@ exports.createLogistics = async (req, res, next) => {
           name: d.driver.name,
           distance: d.distance,
         })),
+        selectedProviderId: requestedProvider?._id,
+        selectedProviderName: requestedProvider?.businessName || requestedProvider?.fullName || requestedProvider?.name,
+        selectedProviderPhone: requestedProvider?.phone,
+        selectedBy: order.logisticsPreference?.selectionSource || (logisticsProviderId ? 'seller' : 'default'),
+        buyerRequestedProvider: order.logisticsPreference?.selectionSource === 'buyer',
       },
     });
 
@@ -2993,6 +3302,8 @@ exports.processQrScan = async (req, res, next) => {
       timestamp: new Date()
     });
 
+    let escrowRelease = null;
+
     if (step === 'pickup') {
       logistics.status = 'in_transit';
       logistics.pickupTime = new Date();
@@ -3067,9 +3378,29 @@ exports.processQrScan = async (req, res, next) => {
         deliveredAt: new Date() 
       });
 
-      // Deduct sinking fund
-      if (logistics.driver && logistics.shippingCost) {
-        await deductSinkingFund(logistics.driver, logistics.shippingCost * 0.7, logistics._id);
+      if (escrowService && escrowService.releasePayment) {
+        try {
+          escrowRelease = await escrowService.releasePayment(logistics.order._id || logistics.order, {
+            releasedBy: userId,
+            releaseMethod: 'qr_confirmed',
+          });
+          await logistics.populate('driver fleetOwner');
+        } catch (releaseError) {
+          logger.warn('Escrow release after delivery QR failed:', releaseError);
+          return res.status(409).json({
+            success: false,
+            message: releaseError.message || 'Delivery QR accepted, but escrow could not release payouts.',
+            code: 'ESCROW_RELEASE_FAILED',
+            errors: [{
+              message: 'Delivery proof was accepted, but seller and logistics payout release failed.',
+              details: {
+                step,
+                logisticsId: logistics._id,
+                orderId: logistics.order?._id || logistics.order,
+              },
+            }],
+          });
+        }
       }
 
       const recipients = [];
@@ -3081,7 +3412,7 @@ exports.processQrScan = async (req, res, next) => {
           userIds: recipients,
           channels: ['push', 'sms'],
           title: '✅ Delivery confirmed',
-          body: `${logistics.cargoType || 'Cargo'} has been delivered successfully. Payment will be released to seller.`,
+          body: `${logistics.cargoType || 'Cargo'} has been delivered successfully. Seller and logistics payouts have been released from escrow.`,
           data: { 
             shipmentId: logistics._id.toString(), 
             status: 'delivered',
@@ -3108,6 +3439,12 @@ exports.processQrScan = async (req, res, next) => {
           usedAt: verificationResult?.usedAt,
           expiresAt: verificationResult?.expiresAt,
         },
+        escrowRelease: escrowRelease ? {
+          released: escrowRelease.released,
+          alreadyReleased: escrowRelease.alreadyReleased,
+          split: escrowRelease.split,
+          payouts: escrowRelease.payouts,
+        } : null,
       }
     });
   } catch (err) {
@@ -3295,7 +3632,14 @@ exports.getGroupTripRoutes = async (req, res, next) => {
     await ensureDefaultGroupTripRoutes();
     const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true';
     const query = includeInactive ? {} : { isActive: true };
-    const routes = await GroupTripRoute.find(query).sort({ isDefault: -1, label: 1 });
+    let routes = await GroupTripRoute.find(query).sort({ isDefault: -1, label: 1 }).lean();
+
+    if (!routes.length && !includeInactive) {
+      routes = DEFAULT_GROUP_TRIP_ROUTES.map((route) => omitUndefinedFields({
+        ...route,
+        _id: route.routeId,
+      }));
+    }
 
     return res.status(200).json({
       success: true,
@@ -3532,7 +3876,10 @@ exports.createGroupTrip = async (req, res, next) => {
           $maxDistance: 10000, // 10km radius
         },
       },
-      role: { $in: ['wholesaler', 'retailer', 'farmer'] },
+      $or: [
+        { role: { $in: ['seller', 'farmer'] } },
+        { businessType: { $in: ['wholesaler', 'retailer', 'farmer'] } },
+      ],
     }).limit(20);
 
     for (const nearbyUser of nearbyUsers) {

@@ -6,10 +6,39 @@ const { protect } = require('../../middleware/auth');
 const { upload, handleUploadError } = require('../../middleware/upload');
 
 const requireSellerBusinessName = body('businessName')
-  .if((value, { req }) => ['seller', 'vendor', 'farmer'].includes(String(req.body.role || '').toLowerCase()))
+  .if((value, { req }) => [
+    'seller',
+    'vendor',
+    'farmer',
+    'brand',
+    'wholesaler',
+    'manufacturer',
+    'retailer',
+    'small_business',
+  ].includes(String(req.body.role || '').toLowerCase()))
   .trim()
   .isLength({ min: 2, max: 120 })
   .withMessage('Business name is required for seller accounts and must be 2-120 characters');
+
+const validBusinessTypes = [
+  'brand',
+  'wholesaler',
+  'manufacturer',
+  'retailer',
+  'farmer',
+  'small_business',
+  'analytics',
+  'analystic',
+  'logistics',
+];
+
+const requireSellerBusinessType = body('businessType')
+  .if((value, { req }) => ['seller', 'vendor'].includes(String(req.body.role || '').toLowerCase()))
+  .notEmpty()
+  .withMessage('Business type is required for seller accounts')
+  .bail()
+  .isIn(validBusinessTypes)
+  .withMessage('Invalid business type');
 
 // ============================================
 // Step-by-Step Registration Routes (v1)
@@ -86,9 +115,10 @@ router.post(
     body('email').isEmail().withMessage('Valid email address is required'),
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     body('fullName').notEmpty().withMessage('Full name is required'),
-    body('role').isIn(['farmer', 'buyer', 'vendor', 'admin', 'seller', 'logistics']).withMessage('Invalid role'),
+    body('role').isIn(['farmer', 'buyer', 'vendor', 'admin', 'seller', 'logistics', 'brand', 'wholesaler', 'manufacturer', 'retailer', 'small_business']).withMessage('Invalid role'),
     requireSellerBusinessName,
-    body('businessType').optional(),
+    requireSellerBusinessType,
+    body('businessType').optional({ nullable: true, checkFalsy: true }).isIn(validBusinessTypes).withMessage('Invalid business type'),
     body('businessLogoUrl').optional({ nullable: true, checkFalsy: true }).isURL().withMessage('Valid URL is required for business logo'),
   ],
   authController.completeRegistration
@@ -193,11 +223,7 @@ router.post(
 // Verify email OTP (legacy)
 router.post(
   '/verify-email',
-  [
-    body('email').isEmail().withMessage('Valid email address is required'),
-    body('code').isLength({ min: 6, max: 6 }).withMessage('Valid 6-digit code is required'),
-  ],
-  authController.verifyEmailOtpCode
+  authController.verifyEmail
 );
 
 router.post(
@@ -234,7 +260,9 @@ router.post(
     body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
     body('email').optional().isEmail().withMessage('Valid email address is required'),
     body('fullName').notEmpty().withMessage('Full name is required'),
-    body('role').isIn(['farmer', 'buyer', 'vendor', 'admin', 'seller', 'logistics']).withMessage('Invalid role'),
+    body('role').isIn(['farmer', 'buyer', 'vendor', 'admin', 'seller', 'logistics', 'brand', 'wholesaler', 'manufacturer', 'retailer', 'small_business']).withMessage('Invalid role'),
+    requireSellerBusinessType,
+    body('businessType').optional({ nullable: true, checkFalsy: true }).isIn(validBusinessTypes).withMessage('Invalid business type'),
     requireSellerBusinessName,
   ],
   authController.register
@@ -247,6 +275,24 @@ router.post(
     body('password').notEmpty().withMessage('Password is required'),
   ],
   authController.login
+);
+
+router.get('/check-email', authController.checkEmailAccount);
+
+router.post(
+  '/check-email',
+  [
+    body('email').isEmail().withMessage('Valid email address is required'),
+  ],
+  authController.checkEmailAccount
+);
+
+router.post(
+  '/email-exists',
+  [
+    body('email').isEmail().withMessage('Valid email address is required'),
+  ],
+  authController.checkEmailAccount
 );
 
 // Forgot password
@@ -269,10 +315,32 @@ router.post(
 router.post(
   '/reset-password',
   [
-    body('code').isLength({ min: 6, max: 6 }).withMessage('Valid 6-digit code is required'),
-    body('newPassword').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+    body().custom((value) => {
+      const tokenPassword = value.token && (value.password || value.newPassword);
+      const otpPassword = (value.phone || value.email) && value.code && (value.password || value.newPassword);
+      const nextPassword = value.password || value.newPassword;
+
+      if ((tokenPassword || otpPassword) && String(nextPassword || '').length >= 6) return true;
+      throw new Error('Use token/password or identifier/code/newPassword to reset password');
+    }),
   ],
   authController.resetPassword
+);
+
+router.post(
+  '/verify-email-link',
+  [
+    body('token').notEmpty().withMessage('Verification token is required'),
+  ],
+  authController.verifyEmail
+);
+
+router.post(
+  '/resend-verification',
+  [
+    body('email').isEmail().withMessage('Valid email address is required'),
+  ],
+  authController.resendVerification
 );
 
 // Refresh token

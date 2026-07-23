@@ -30,7 +30,7 @@ exports.createOrder = async (req, res, next) => {
  */
 exports.getOrders = async (req, res, next) => {
   try {
-    const { page = 1, limit = 10, status, role } = req.query;
+    const { page = 1, limit = 10, status, role, range, startDate, endDate } = req.query;
     const userId = req.user.id;
     const userRole = req.user.role;
 
@@ -41,6 +41,9 @@ exports.getOrders = async (req, res, next) => {
       limit,
       status,
       role, // 'buyer' or 'seller' filter
+      range,
+      startDate,
+      endDate,
     });
     res.status(200).json({
       success: true,

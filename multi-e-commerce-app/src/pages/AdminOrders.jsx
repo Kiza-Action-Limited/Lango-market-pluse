@@ -57,6 +57,36 @@ const getUserName = (user) => (
 
 const getOrderId = (order) => order?._id || order?.id;
 
+const readMetadata = (source, key) => {
+  const metadata = source?.metadata;
+  if (!metadata) return undefined;
+  if (typeof metadata.get === 'function') return metadata.get(key);
+  return metadata[key];
+};
+
+const getLogisticsPreference = (order = {}) => {
+  const preference = order.logisticsPreference || {};
+  const provider = preference.requestedProvider;
+  const providerObject = provider && typeof provider === 'object' ? provider : null;
+  const logistics = order.logistics || {};
+  const profile = providerObject?.logisticsProfile || {};
+
+  return {
+    id: providerObject?._id || providerObject?.id || provider || readMetadata(logistics, 'selectedProviderId') || '',
+    name:
+      preference.providerName ||
+      providerObject?.businessName ||
+      providerObject?.fullName ||
+      providerObject?.name ||
+      readMetadata(logistics, 'selectedProviderName') ||
+      logistics.driverName ||
+      '',
+    phone: preference.providerPhone || providerObject?.phone || readMetadata(logistics, 'selectedProviderPhone') || logistics.driverPhone || '',
+    hub: preference.providerHub || profile.baseHub || profile.locationHub || '',
+    source: preference.selectionSource || readMetadata(logistics, 'selectedBy') || 'default',
+  };
+};
+
 const getStatusTone = (status) => {
   const value = String(status || '').toLowerCase();
   if (['released', 'completed', 'delivered'].includes(value)) return 'border-green-200 bg-green-50 text-green-700';
@@ -157,17 +187,21 @@ const AdminOrders = () => {
   }), [summary, pagination.total]);
 
   const exportOrders = () => {
-    const headers = ['Order', 'Buyer', 'Seller', 'Product', 'Status', 'Payment', 'Total', 'Date'];
-    const rows = orders.map((order) => [
-      order.orderNumber || getOrderId(order),
-      order.buyerName || getUserName(order.buyer),
-      order.sellerName || getUserName(order.seller),
-      order.productName,
-      order.status,
-      order.paymentStatus,
-      order.total || order.totalAmount || 0,
-      order.createdAt ? new Date(order.createdAt).toISOString() : '',
-    ]);
+    const headers = ['Order', 'Buyer', 'Seller', 'Product', 'Logistics', 'Status', 'Payment', 'Total', 'Date'];
+    const rows = orders.map((order) => {
+      const provider = getLogisticsPreference(order);
+      return [
+        order.orderNumber || getOrderId(order),
+        order.buyerName || getUserName(order.buyer),
+        order.sellerName || getUserName(order.seller),
+        order.productName,
+        provider.name || 'Seller preferred',
+        order.status,
+        order.paymentStatus,
+        order.total || order.totalAmount || 0,
+        order.createdAt ? new Date(order.createdAt).toISOString() : '',
+      ];
+    });
     const csv = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -179,6 +213,7 @@ const AdminOrders = () => {
     link.remove();
     URL.revokeObjectURL(url);
   };
+  const selectedOrderProvider = getLogisticsPreference(selectedOrder || {});
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
@@ -309,6 +344,7 @@ const AdminOrders = () => {
                   {orders.map((order) => {
                     const orderId = getOrderId(order);
                     const logistics = order.logistics || {};
+                    const provider = getLogisticsPreference(order);
 
                     return (
                       <tr key={orderId} className="bg-white hover:bg-gray-50">
@@ -355,9 +391,17 @@ const AdminOrders = () => {
                                 {normalizeStatus(logistics.status)}
                               </span>
                               <p className="mt-1 text-xs text-gray-500">{logistics.trackingNumber || logistics.tripId || 'Tracking pending'}</p>
+                              <p className="mt-1 max-w-[170px] truncate text-xs font-semibold text-sky-700">
+                                {provider.name || 'Seller preferred'}
+                              </p>
                             </div>
                           ) : (
-                            <span className="text-xs text-gray-500">No logistics record</span>
+                            <div>
+                              <span className="text-xs text-gray-500">No logistics record</span>
+                              <p className="mt-1 max-w-[170px] truncate text-xs font-semibold text-sky-700">
+                                {provider.name || 'Seller preferred'}
+                              </p>
+                            </div>
                           )}
                         </td>
                         <td className="px-5 py-4">
@@ -483,6 +527,14 @@ const AdminOrders = () => {
                 </div>
                 <div className="rounded-lg border border-gray-200 p-4">
                   <h3 className="flex items-center gap-2 font-semibold text-gray-950"><FaTruck className="text-[#F97316]" /> Logistics</h3>
+                  <div className="mt-3 rounded-md border border-sky-100 bg-sky-50 p-3 text-sm text-sky-900">
+                    <p className="font-semibold">
+                      {selectedOrderProvider.source === 'buyer' ? 'Buyer selected' : 'Preferred transport'}: {selectedOrderProvider.name || 'Seller preferred provider'}
+                    </p>
+                    <p className="mt-1 text-xs text-sky-700">
+                      {[selectedOrderProvider.phone, selectedOrderProvider.hub].filter(Boolean).join(' - ') || 'Provider details will appear when assigned.'}
+                    </p>
+                  </div>
                   {selectedOrder.logistics?._id ? (
                     <div className="mt-3 space-y-2 text-sm text-gray-600">
                       <p><span className="font-semibold text-gray-950">Trip:</span> {selectedOrder.logistics.tripId || selectedOrder.logistics.bookingReference || '-'}</p>

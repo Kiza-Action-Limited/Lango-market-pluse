@@ -5,6 +5,16 @@ const Product = require('../models/Product.model');
 const Logistics = require('../models/Logistics.model');
 const mongoose = require('mongoose');
 
+const categoryUserQuery = (category, extra = {}) => ({
+  ...extra,
+  $or: [
+    { role: category },
+    { businessType: category },
+  ],
+});
+
+const countUserCategory = (category, extra = {}) => User.countDocuments(categoryUserQuery(category, extra));
+
 /**
  * Generate daily analytics
  * POST /api/v1/analytics/generate
@@ -57,7 +67,18 @@ exports.generateDailyAnalytics = async (req, res, next) => {
       User.countDocuments({ createdAt: { $gte: targetDate, $lt: nextDate } }),
       User.countDocuments({ lastLogin: { $gte: targetDate, $lt: nextDate } }),
       User.aggregate([
-        { $group: { _id: '$role', count: { $sum: 1 } } }
+        {
+          $project: {
+            effectiveRole: {
+              $cond: [
+                { $in: ['$businessType', ['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business', 'logistics']] },
+                '$businessType',
+                '$role',
+              ],
+            },
+          },
+        },
+        { $group: { _id: '$effectiveRole', count: { $sum: 1 } } }
       ]),
       User.aggregate([
         { $group: { _id: '$userType', count: { $sum: 1 } } }
@@ -69,7 +90,7 @@ exports.generateDailyAnalytics = async (req, res, next) => {
     
     // Farmer Analytics
     const farmerStats = await User.aggregate([
-      { $match: { role: 'farmer', createdAt: { $gte: targetDate, $lt: nextDate } } },
+      { $match: categoryUserQuery('farmer', { createdAt: { $gte: targetDate, $lt: nextDate } }) },
       {
         $group: {
           _id: null,
@@ -278,7 +299,7 @@ exports.generateDailyAnalytics = async (req, res, next) => {
         },
         farmers: {
           total: farmerStats[0]?.totalFarmers || 0,
-          active: await User.countDocuments({ role: 'farmer', isActive: true }),
+          active: await countUserCategory('farmer', { isActive: true }),
           newFarmers: newUsers,
           topPerformers: topFarmers.map(f => ({
             farmerId: f._id,
@@ -480,30 +501,30 @@ exports.getDashboardOverview = async (req, res, next) => {
         },
       }),
       Logistics.countDocuments({ status: 'in_transit' }),
-      User.countDocuments({ role: 'farmer', isActive: true, lastLogin: { $gte: new Date(Date.now() - 60 * 60 * 1000) } })
+      countUserCategory('farmer', { isActive: true, lastLogin: { $gte: new Date(Date.now() - 60 * 60 * 1000) } })
     ]);
     
     // Role-based KPIs
     const roleKPIs = {
       farmers: {
-        total: await User.countDocuments({ role: 'farmer' }),
-        active: await User.countDocuments({ role: 'farmer', isActive: true }),
+        total: await countUserCategory('farmer'),
+        active: await countUserCategory('farmer', { isActive: true }),
         online: farmersOnline,
         revenueShare: todayData?.revenue.byRole.farmers || 0
       },
       wholesalers: {
-        total: await User.countDocuments({ role: 'wholesaler' }),
-        active: await User.countDocuments({ role: 'wholesaler', isActive: true }),
+        total: await countUserCategory('wholesaler'),
+        active: await countUserCategory('wholesaler', { isActive: true }),
         revenueShare: todayData?.revenue.byRole.wholesalers || 0
       },
       manufacturers: {
-        total: await User.countDocuments({ role: 'manufacturer' }),
-        active: await User.countDocuments({ role: 'manufacturer', isActive: true }),
+        total: await countUserCategory('manufacturer'),
+        active: await countUserCategory('manufacturer', { isActive: true }),
         revenueShare: todayData?.revenue.byRole.manufacturers || 0
       },
       retailers: {
-        total: await User.countDocuments({ role: 'retailer' }),
-        active: await User.countDocuments({ role: 'retailer', isActive: true }),
+        total: await countUserCategory('retailer'),
+        active: await countUserCategory('retailer', { isActive: true }),
         revenueShare: todayData?.revenue.byRole.retailers || 0
       }
     };

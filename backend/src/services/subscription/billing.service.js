@@ -2,6 +2,7 @@
 const Subscription = require('../../models/Subscription.model');
 const Transaction = require('../../models/Transaction.model');
 const User = require('../../models/User.model');
+const AgentReferral = require('../../models/AgentReferral.model');
 const planService = require('./plan.service');
 const { PLAN_IDS, PLANS, PRODUCT_LIMITS, normalizePlanId } = require('../../config/subscriptionPlans');
 const { PLATFORM_ACCOUNT, buildPlatformRevenueMetadata } = require('../../config/platformAccount');
@@ -19,6 +20,7 @@ const httpError = (message, statusCode, details = {}) => {
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
 const normalizeValue = (value) => String(value || '').trim().toLowerCase();
+const normalizeAgentNationalId = (value) => String(value || '').replace(/\D/g, '').slice(0, 20);
 
 const SELLER_PLAN_ROLES = new Set(['seller', 'farmer']);
 const BLOCKED_SELLER_PLAN_ROLES = new Set(['buyer', 'consumer', 'admin', 'logistics']);
@@ -80,6 +82,62 @@ const buildSmsCredits = (planId) => {
     lastTopUpAt: null,
     topUpHistory: []
   };
+};
+
+const buildSellerSnapshot = (user = {}) => ({
+  name: user.fullName || user.name || '',
+  businessName: user.businessName || '',
+  email: user.email || '',
+  phone: user.phone || '',
+  role: user.role || '',
+  businessType: user.businessType || '',
+});
+
+const getMetadataField = (source, key) => {
+  if (!source) return undefined;
+  if (source.metadata) {
+    if (typeof source.metadata.get === 'function') return source.metadata.get(key);
+    return source.metadata[key];
+  }
+  return source[key];
+};
+
+const checkoutRequestIdFromPayment = (payment) => (
+  payment?.checkoutRequestId ||
+  getMetadataField(payment, 'checkoutRequestId') ||
+  getMetadataField(payment, 'merchantRequestId')
+);
+
+const recordAgentReferral = async ({ seller, subscription, planId, paymentMeta = {} }) => {
+  const agentNationalId = normalizeAgentNationalId(paymentMeta.agentNationalId);
+  if (!agentNationalId) return null;
+
+  const idempotencySeed = paymentMeta.referralIdempotencyKey ||
+    paymentMeta.paymentReference ||
+    `${seller._id || seller.id}-${planId}-${agentNationalId}`;
+
+  return AgentReferral.findOneAndUpdate(
+    { idempotencyKey: `agent-referral:${idempotencySeed}` },
+    {
+      $setOnInsert: {
+        agentNationalId,
+        seller: seller._id || seller.id,
+        sellerSnapshot: buildSellerSnapshot(seller),
+        subscription: subscription?._id || null,
+        planId,
+        source: paymentMeta.referralSource || paymentMeta.source || 'subscription',
+        paymentReference: paymentMeta.paymentReference || '',
+        idempotencyKey: `agent-referral:${idempotencySeed}`,
+        status: 'tracked',
+        referredAt: new Date(),
+      },
+      $set: {
+        subscription: subscription?._id || null,
+        sellerSnapshot: buildSellerSnapshot(seller),
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 };
 
 const getSmsCreditState = (subscription) => {
@@ -352,6 +410,7 @@ class BillingService {
       metadata: {
         paymentReference: paymentMeta?.paymentReference || null,
         activatedVia: paymentMeta?.source || 'web',
+        agentNationalId: normalizeAgentNationalId(paymentMeta?.agentNationalId) || null,
         previousPlan: subscription?.plan || null,
         priceOverridden: paymentMeta?.amountOverride !== undefined && paymentMeta?.amountOverride !== null,
         managedByAdmin: Boolean(paymentMeta?.managedByAdmin),
@@ -368,6 +427,13 @@ class BillingService {
       // Create new subscription
       subscription = await Subscription.create({ user: userId, ...subscriptionData });
     }
+
+    await recordAgentReferral({
+      seller: user,
+      subscription,
+      planId: normalizedPlanId,
+      paymentMeta,
+    });
 
     // Update user record
     user.subscriptionTier = normalizedPlanId;
@@ -436,6 +502,11 @@ class BillingService {
       serverVerified: true,
       source: 'mpesa_verified',
       revenueAccount: PLATFORM_ACCOUNT.name,
+      agentNationalId: payment?.metadata?.get
+        ? payment.metadata.get('agentNationalId')
+        : payment?.metadata?.agentNationalId,
+      referralIdempotencyKey: checkoutRequestIdFromPayment(payment) || paymentReference,
+      referralSource: 'mpesa_subscription',
     });
 
     if (payment) {
@@ -465,7 +536,9 @@ class BillingService {
     return this.subscribe(userId, planId, 'commission', {
       paymentCompleted: true,
       paymentReference: paymentReference || `MIZIGO_${Date.now()}`,
-      source: 'mizigo_onboarding'
+      source: 'mizigo_onboarding',
+      agentNationalId: options.agentNationalId,
+      referralSource: 'mizigo_onboarding',
     });
   }
 

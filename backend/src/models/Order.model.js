@@ -80,6 +80,42 @@ const OrderSchema = new mongoose.Schema(
       minimumFee: { type: Number, min: 0, default: 0 },
       calculationSource: { type: String, trim: true },
     },
+    logisticsPreference: {
+      selectedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+      requestedProvider: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        index: true,
+      },
+      providerName: {
+        type: String,
+        trim: true,
+      },
+      providerPhone: {
+        type: String,
+        trim: true,
+      },
+      providerHub: {
+        type: String,
+        trim: true,
+      },
+      selectionSource: {
+        type: String,
+        enum: ['buyer', 'seller', 'default'],
+        default: 'default',
+      },
+      notes: {
+        type: String,
+        trim: true,
+        maxlength: 300,
+      },
+      requestedAt: {
+        type: Date,
+      },
+    },
     totalAmount: {
       type: Number,
       required: true,

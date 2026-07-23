@@ -28,6 +28,9 @@ const qrtokenRoutes = require('./routes/v1/qrtokens.routes');
 const sinkingfundRoutes = require('./routes/v1/sinkingfund.routes');
 const auditRoutes = require('./routes/v1/audit.routes');
 const supportRoutes = require('./routes/v1/support.routes');
+const contactRoutes = require('./routes/v1/contact.routes');
+const businessRoutes = require('./routes/v1/business.routes');
+const sellerRoutes = require('./routes/v1/seller.routes');
 const mpesaWebhookRoutes = require('./routes/webhooks/mpesa.webhook');
 const errorHandler = require('./middleware/errorHandler');
 const requestLogger = require('./middleware/requestLogger');
@@ -81,6 +84,39 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get(['/api/v1/mobile/config', '/api/mobile/config'], (req, res) => {
+  res.status(200).json({
+    success: true,
+    data: {
+      appName: 'Lango MarketPulse',
+      version: process.env.APP_VERSION || '1.0.0',
+      environment: process.env.NODE_ENV || 'development',
+      supportEmail: process.env.SUPPORT_EMAIL || 'support@lango.local',
+      supportPhone: process.env.SUPPORT_PHONE || '+254700000000',
+      currency: 'KES',
+      country: 'KE',
+      roles: ['buyer', 'seller', 'farmer', 'wholesaler', 'manufacturer', 'retailer', 'logistics', 'admin'],
+      features: {
+        pwaInstall: true,
+        pushNotifications: true,
+        gpsTracking: true,
+        qrScanning: true,
+        mpesaPayments: true,
+        csvExports: true,
+      },
+      endpoints: {
+        auth: '/api/v1/auth',
+        products: '/api/v1/products',
+        orders: '/api/v1/orders',
+        seller: '/api/v1/seller',
+        logistics: '/api/v1/logistics',
+        admin: '/api/v1/admin',
+        support: '/api/v1/support',
+      },
+    },
+  });
+});
+
 // Route mounts
 console.log(' Mounting routes...');
 app.use('/api/v1/auth', authRoutes);
@@ -119,6 +155,14 @@ app.use('/api/v1/audit', auditRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/v1/support', supportRoutes);
 app.use('/api/support', supportRoutes);
+app.use('/api/v1/contact', contactRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/v1/businesses', businessRoutes);
+app.use('/api/businesses', businessRoutes);
+app.use('/api/v1/suppliers', businessRoutes);
+app.use('/api/suppliers', businessRoutes);
+app.use('/api/v1/seller', sellerRoutes);
+app.use('/api/seller', sellerRoutes);
 app.use('/webhooks/mpesa', mpesaWebhookRoutes);
 app.use('/api/mpesa', mpesaWebhookRoutes);
 

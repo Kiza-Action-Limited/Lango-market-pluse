@@ -1,6 +1,6 @@
 // src/pages/OrderTracking.jsx
 import React, { useCallback, useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { 
   FaCheckCircle, FaTruck, FaBox, FaHourglassHalf, FaMapMarkerAlt, 
   FaClock, FaPhone, FaBrain, FaArrowLeft, FaCreditCard, FaMobileAlt, FaSyncAlt,
@@ -10,10 +10,12 @@ import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import { orderService } from '../services/orderService';
 import { paymentService } from '../services/paymentService';
+import { productService } from '../services/productService';
 import { logisticsService } from '../services/logisticsService';
 import { normalizeOrder, normalizeTracking } from '../utils/orderAdapter';
 import LogisticsEscrowFlow from '../components/logistics/LogisticsEscrowFlow';
 import QrHandshakePanel, { QrAuditTrail, QrTokenStatus } from '../components/logistics/QrHandshakePanel';
+import ProductReviewModal from '../components/ProductReviewModal';
 
 const LIVE_GPS_ORDER_STATUSES = new Set([
   'processing',
@@ -36,6 +38,18 @@ const LIVE_GPS_LOGISTICS_STATUSES = new Set([
   'delivered',
 ]);
 
+const REVIEWABLE_PAYMENT_STATUSES = new Set([
+  'FUNDS_HELD',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'RELEASED',
+  'payment_escrowed',
+  'processing',
+  'dispatched',
+  'delivered',
+  'completed',
+]);
+
 const hasCoordinatePair = (coords) => (
   Number.isFinite(Number(coords?.lat)) && Number.isFinite(Number(coords?.lng))
 );
@@ -54,13 +68,15 @@ const buildGoogleMapsEmbedUrl = (coords) => (
 
 const OrderTracking = () => {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
+  const checkoutRequestFromUrl = searchParams.get('checkoutRequestId') || '';
   const [order, setOrder] = useState(null);
   const [tracking, setTracking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
   const [lastGpsRefreshAt, setLastGpsRefreshAt] = useState('');
   const [mpesaPhone, setMpesaPhone] = useState('');
-  const [checkoutRequestId, setCheckoutRequestId] = useState('');
+  const [checkoutRequestId, setCheckoutRequestId] = useState(checkoutRequestFromUrl);
   const [paymentStatus, setPaymentStatus] = useState('');
   const [sendingPayment, setSendingPayment] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
@@ -68,6 +84,10 @@ const OrderTracking = () => {
   const [qrState, setQrState] = useState(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrScanning, setQrScanning] = useState(false);
+  const [reviewItems, setReviewItems] = useState([]);
+  const [activeReviewIndex, setActiveReviewIndex] = useState(0);
+  const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const applyTrackingPayload = useCallback((payload) => {
     const normalizedOrder = normalizeOrder({
@@ -86,9 +106,16 @@ const OrderTracking = () => {
     setOrder(normalizedOrder);
     setTracking(normalizedTracking);
     setMpesaPhone((previous) => previous || normalizedOrder.shippingAddress?.phone || '');
+    setCheckoutRequestId((previous) => previous || normalizedOrder.paymentIntentId || '');
 
     return normalizedOrder;
   }, []);
+
+  useEffect(() => {
+    if (checkoutRequestFromUrl) {
+      setCheckoutRequestId(checkoutRequestFromUrl);
+    }
+  }, [checkoutRequestFromUrl]);
 
   const fetchOrderDetails = useCallback(async ({ silent = false, live = false, showError = false } = {}) => {
     if (!silent) setLoading(true);
@@ -202,6 +229,89 @@ const OrderTracking = () => {
     if (refreshed) toast.success('Live GPS refreshed');
   };
 
+  const getReviewItemsForOrder = (sourceOrder = {}) => (
+    Array.isArray(sourceOrder.items) ? sourceOrder.items : []
+  )
+    .map((item) => ({
+      productId: item.productId || item.id,
+      name: item.name || 'Product',
+      image: item.image || '',
+    }))
+    .filter((item) => item.productId);
+
+  const getReviewPromptKey = (sourceOrder = {}) => (
+    sourceOrder.id ? `review-prompt:${sourceOrder.id}:${sourceOrder.paidAt || sourceOrder.status || 'paid'}` : ''
+  );
+
+  const hasReviewPromptBeenShown = (sourceOrder = {}) => {
+    const key = getReviewPromptKey(sourceOrder);
+    if (!key) return false;
+
+    try {
+      return window.sessionStorage.getItem(key) === 'shown';
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const markReviewPromptShown = (sourceOrder = {}) => {
+    const key = getReviewPromptKey(sourceOrder);
+    if (!key) return;
+
+    try {
+      window.sessionStorage.setItem(key, 'shown');
+    } catch (error) {
+      // Session storage can be unavailable in private contexts.
+    }
+  };
+
+  const isOrderPaidForReview = (sourceOrder = {}) => (
+    Boolean(sourceOrder.paidAt) || REVIEWABLE_PAYMENT_STATUSES.has(sourceOrder.status)
+  );
+
+  const openReviewPromptForOrder = (sourceOrder, { remember = false } = {}) => {
+    const nextReviewItems = getReviewItemsForOrder(sourceOrder);
+    if (nextReviewItems.length === 0) return;
+
+    if (remember) markReviewPromptShown(sourceOrder);
+    setActiveReviewIndex(0);
+    setReviewDraft({ rating: 5, comment: '' });
+    setReviewItems(nextReviewItems);
+  };
+
+  const closeReviewPrompt = () => {
+    setReviewItems([]);
+    setActiveReviewIndex(0);
+    setReviewDraft({ rating: 5, comment: '' });
+  };
+
+  const moveToNextReview = () => {
+    if (activeReviewIndex < reviewItems.length - 1) {
+      setActiveReviewIndex((previous) => previous + 1);
+      setReviewDraft({ rating: 5, comment: '' });
+      return;
+    }
+
+    closeReviewPrompt();
+  };
+
+  const submitReview = async (event) => {
+    event.preventDefault();
+    const currentReviewItem = reviewItems[activeReviewIndex];
+    if (!currentReviewItem) return;
+
+    setReviewSubmitting(true);
+    try {
+      await productService.addReview(currentReviewItem.productId, reviewDraft);
+      toast.success('Review submitted');
+      moveToNextReview();
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Failed to submit review');
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
   const confirmDelivery = async () => {
     setActionLoading('confirm');
     try {
@@ -300,10 +410,13 @@ const OrderTracking = () => {
 
       if (status === 'completed') {
         const refreshedOrder = await refreshOrderAfterPayment();
-        if (isAwaitingPayment(refreshedOrder.status)) {
-          setOrder((previous) => ({ ...previous, status: 'FUNDS_HELD', paidAt: new Date().toISOString() }));
+        let reviewableOrder = refreshedOrder;
+        if (isAwaitingPayment(refreshedOrder?.status)) {
+          reviewableOrder = { ...refreshedOrder, status: 'FUNDS_HELD', paidAt: new Date().toISOString() };
+          setOrder((previous) => ({ ...previous, ...reviewableOrder }));
         }
         toast.success('Payment confirmed. Tracking is now available.');
+        openReviewPromptForOrder(reviewableOrder, { remember: true });
       } else if (status === 'failed') {
         toast.error(message || 'Payment was not completed');
       }
@@ -315,6 +428,13 @@ const OrderTracking = () => {
       setCheckingPayment(false);
     }
   };
+
+  useEffect(() => {
+    if (!order || reviewItems.length > 0) return;
+    if (!isOrderPaidForReview(order) || hasReviewPromptBeenShown(order)) return;
+
+    openReviewPromptForOrder(order, { remember: true });
+  }, [order?.id, order?.status, order?.paidAt, reviewItems.length]);
 
   if (loading) {
     return (
@@ -343,6 +463,7 @@ const OrderTracking = () => {
 
   const currentStep = getStatusStep(order.status);
   const awaitingPayment = isAwaitingPayment(order.status);
+  const currentReviewItem = reviewItems[activeReviewIndex];
   const escrow = tracking?.escrow || order.escrow;
   const logistics = tracking?.logistics || order.logistics;
   const seller = tracking?.seller || order.seller;
@@ -357,6 +478,11 @@ const OrderTracking = () => {
     { label: 'Shipped', icon: FaTruck, status: 'shipped', description: 'Your order is on the way' },
     { label: 'Delivered', icon: FaMapMarkerAlt, status: 'delivered', description: 'Order has been delivered' }
   ];
+  const statusLabel = String(order.status || 'pending').replace(/_/g, ' ');
+  const trackingReference = logistics?.trackingNumber || logistics?.bookingReference || `ORD-${String(order.id).slice(-8).toUpperCase()}`;
+  const orderPlacedLabel = order.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'Pending';
+  const itemCount = Array.isArray(order.items) ? order.items.reduce((sum, item) => sum + Number(item.quantity || 1), 0) : 0;
+  const sellerLabel = seller?.businessName || seller?.name || seller?.fullName || 'Seller assigned';
 
   const estimatedDelivery = () => {
     if (['delivered', 'DELIVERED', 'completed', 'RELEASED'].includes(order.status)) return 'Delivered';
@@ -378,16 +504,16 @@ const OrderTracking = () => {
   const lastGpsUpdate = liveTracking.lastUpdate || driverCoords?.lastUpdate || driverCoords?.updatedAt || lastGpsRefreshAt || lastLogisticsUpdate?.timestamp;
 
   const FulfillmentOverview = () => (
-    <section className="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-md">
+    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase text-[#F97316]">Seller + logistics tracking</p>
           <h2 className="mt-1 text-xl font-bold text-[#111827]">Fulfillment Overview</h2>
           <p className="mt-2 text-sm text-[#6B7280]">
             Seller preparation and logistics movement are combined here so the buyer can follow the full chain.
           </p>
         </div>
-        <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-700">
+        <span className="max-w-full rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-700">
           {logistics?.trackingNumber || logistics?.bookingReference || 'Tracking pending'}
         </span>
       </div>
@@ -417,7 +543,7 @@ const OrderTracking = () => {
           <div className="mt-4 space-y-2 text-sm">
             <p className="flex justify-between gap-3">
               <span className="text-[#6B7280]">Seller</span>
-              <span className="text-right font-semibold text-[#111827]">{seller?.name || seller?.businessName || seller?.fullName || 'Assigned seller'}</span>
+              <span className="text-right font-semibold text-[#111827]">{sellerLabel}</span>
             </p>
             <p className="flex justify-between gap-3">
               <span className="text-[#6B7280]">Order status</span>
@@ -455,21 +581,21 @@ const OrderTracking = () => {
   );
 
   const LiveGpsMapPanel = () => (
-    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-md">
+    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase text-[#16A34A]">Google GPS tracking</p>
           <h2 className="mt-1 text-xl font-bold text-[#111827]">Live Delivery Map</h2>
           <p className="mt-2 text-sm text-[#6B7280]">
             Follow seller pickup, driver movement, and delivery destination when logistics shares live GPS.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
           <button
             type="button"
             onClick={refreshLiveGps}
             disabled={liveRefreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#16A34A] bg-white px-4 py-2 text-sm font-semibold text-[#15803D] hover:bg-[#F0FDF4] disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#16A34A] bg-white px-4 py-2 text-sm font-semibold text-[#15803D] hover:bg-[#F0FDF4] disabled:opacity-60"
           >
             <FaSyncAlt className={liveRefreshing ? 'animate-spin' : ''} />
             {liveRefreshing ? 'Refreshing...' : 'Refresh GPS'}
@@ -479,7 +605,7 @@ const OrderTracking = () => {
               href={mapOpenUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg bg-[#0B2D55] px-4 py-2 text-sm font-semibold text-white hover:bg-[#123B6D]"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#0B2D55] px-4 py-2 text-sm font-semibold text-white hover:bg-[#123B6D]"
             >
               <FaMapMarkerAlt /> Open Google Maps
             </a>
@@ -493,7 +619,7 @@ const OrderTracking = () => {
             <iframe
               title="Buyer live delivery GPS map"
               src={mapEmbedUrl}
-              className="h-80 w-full"
+              className="h-72 w-full sm:h-80"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
             />
@@ -574,9 +700,9 @@ const OrderTracking = () => {
   };
 
   const PaymentRequiredCard = () => (
-    <div className="rounded-xl border border-[#16A34A]/30 bg-white p-6 shadow-md">
+    <div className="rounded-xl border border-[#16A34A]/30 bg-white p-4 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-[#16A34A]">
             <FaCreditCard />
             <h2 className="text-xl font-bold text-[#111827]">Complete M-Pesa Payment</h2>
@@ -626,7 +752,7 @@ const OrderTracking = () => {
 
       {checkoutRequestId && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#16A34A]/20 bg-[#16A34A]/5 p-4">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase text-[#15803D]">Checkout Request ID</p>
             <p className="mt-1 break-all text-sm text-[#111827]">{checkoutRequestId}</p>
           </div>
@@ -634,7 +760,7 @@ const OrderTracking = () => {
             type="button"
             onClick={checkPaymentStatus}
             disabled={checkingPayment || sendingPayment}
-            className="inline-flex items-center gap-2 rounded-lg border border-[#16A34A] bg-white px-4 py-2 text-sm font-semibold text-[#15803D] hover:bg-[#F0FDF4] disabled:opacity-60"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#16A34A] bg-white px-4 py-2 text-sm font-semibold text-[#15803D] hover:bg-[#F0FDF4] disabled:opacity-60 sm:w-auto"
           >
             <FaSyncAlt className={checkingPayment ? 'animate-spin' : ''} />
             {checkingPayment ? 'Checking...' : 'I Have Paid'}
@@ -651,9 +777,9 @@ const OrderTracking = () => {
   );
 
   const EscrowStatusCard = () => (
-    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-md">
+    <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <FaShieldAlt className="text-[#16A34A]" />
             <h2 className="text-xl font-bold text-[#111827]">Escrow Payment Protection</h2>
@@ -670,7 +796,7 @@ const OrderTracking = () => {
         </span>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg bg-gray-50 p-3">
           <p className="text-xs font-semibold uppercase text-gray-500">Held amount</p>
           <p className="mt-1 font-bold text-[#111827]">{formatCurrency(escrow?.amount || escrow?.escrowAmount || order.total)}</p>
@@ -696,13 +822,13 @@ const OrderTracking = () => {
         </div>
       )}
 
-      <div className="mt-5 flex flex-wrap gap-3">
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
         {canConfirmDelivery && (
           <button
             type="button"
             onClick={confirmDelivery}
             disabled={actionLoading === 'confirm'}
-            className="inline-flex items-center gap-2 rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-60"
           >
             <FaMoneyBillWave />
             {actionLoading === 'confirm' ? 'Releasing...' : 'Confirm Delivery & Release'}
@@ -713,7 +839,7 @@ const OrderTracking = () => {
             type="button"
             onClick={openDispute}
             disabled={actionLoading === 'dispute'}
-            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
           >
             <FaExclamationTriangle />
             {actionLoading === 'dispute' ? 'Freezing...' : 'Open Dispute'}
@@ -724,10 +850,63 @@ const OrderTracking = () => {
   );
 
   return (
-    <div className="bg-[#F9FAFB] min-h-screen py-8">
-      <div className="container mx-auto px-4 max-w-4xl">
-        {/* Header with Back Button */}
+    <div className="dashboard-shell min-h-screen bg-[#F7F8FA] py-6 sm:py-8">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <div className="mb-6">
+          <Link to="/buyer/orders" className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-[#F97316] transition-colors hover:text-[#FB923C]">
+            <FaArrowLeft size={14} />
+            Back to orders
+          </Link>
+
+          <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            <div className="bg-[#0B2D55] p-5 text-white sm:p-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#FDBA74]">Buyer order tracking</p>
+                  <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Order #{String(order.id).slice(-8).toUpperCase()}</h1>
+                  <p className="mt-2 text-sm text-white/75">Placed {orderPlacedLabel} | {itemCount} item{itemCount === 1 ? '' : 's'} | {trackingReference}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-3 py-1.5 text-xs font-bold uppercase ${getStatusColor(order.status)}`}>
+                    {statusLabel}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={refreshLiveGps}
+                    disabled={liveRefreshing}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/20 bg-white/10 px-4 text-sm font-semibold text-white hover:bg-white/15 disabled:opacity-60"
+                  >
+                    <FaSyncAlt className={liveRefreshing ? 'animate-spin' : ''} />
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+              <div className="p-4">
+                <p className="text-xs font-semibold uppercase text-gray-500">Total paid</p>
+                <p className="mt-1 text-lg font-bold text-[#111827]">{formatCurrency(order.total)}</p>
+              </div>
+              <div className="p-4">
+                <p className="text-xs font-semibold uppercase text-gray-500">Seller</p>
+                <p className="mt-1 truncate text-sm font-bold text-[#111827]" title={sellerLabel}>{sellerLabel}</p>
+              </div>
+              <div className="p-4">
+                <p className="text-xs font-semibold uppercase text-gray-500">Delivery estimate</p>
+                <p className="mt-1 text-sm font-bold text-[#111827]">{estimatedDelivery()}</p>
+              </div>
+              <div className="p-4">
+                <p className="text-xs font-semibold uppercase text-gray-500">GPS status</p>
+                <p className={`mt-1 text-sm font-bold ${liveGpsActive ? 'text-green-700' : 'text-amber-700'}`}>
+                  {liveGpsActive ? 'Live location active' : 'Awaiting live GPS'}
+                </p>
+              </div>
+            </div>
+          </section>
+        </div>
+        {/* Header with Back Button */}
+        <div className="mb-6 hidden">
           <Link to="/buyer/orders" className="inline-flex items-center gap-2 text-[#F97316] hover:text-[#FB923C] transition-colors mb-4">
             <FaArrowLeft size={14} />
             <span className="text-sm font-medium">Back to Orders</span>
@@ -775,44 +954,44 @@ const OrderTracking = () => {
         )}
 
         {/* Order Status Timeline */}
-        {!awaitingPayment && <div className="bg-white rounded-xl shadow-md p-6 mb-6 border-l-4 border-[#F97316]">
-          <div className="flex justify-between items-center mb-6">
+        {!awaitingPayment && <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-[#111827]">Order Status</h2>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(order.status)}`}>
-              {order.status.replace(/_/g, ' ').toUpperCase()}
+            <span className={`rounded-full border px-3 py-1 text-sm font-semibold uppercase ${getStatusColor(order.status)}`}>
+              {statusLabel}
             </span>
           </div>
           
-          <div className="relative">
-            <div className="absolute top-5 left-0 right-0 h-1 bg-gray-200 rounded-full"></div>
+          <div className="relative overflow-hidden rounded-xl bg-gray-50 p-4 sm:p-5">
+            <div className="absolute left-8 right-8 top-9 hidden h-1 rounded-full bg-gray-200 sm:block"></div>
             <div 
-              className="absolute top-5 left-0 h-1 rounded-full transition-all duration-500"
+              className="absolute left-8 top-9 hidden h-1 rounded-full transition-all duration-500 sm:block"
               style={{ 
-                width: `${(currentStep / (steps.length - 1)) * 100}%`,
+                width: currentStep === 0 ? '0%' : `calc(${(currentStep / (steps.length - 1)) * 100}% - 4rem)`,
                 background: 'linear-gradient(90deg, #F97316, #FB923C)'
               }}
             ></div>
             
-            <div className="relative flex justify-between">
+            <div className="relative grid gap-4 sm:grid-cols-4">
               {steps.map((step, index) => {
                 const Icon = step.icon;
                 const isCompleted = index <= currentStep;
                 const isCurrent = index === currentStep;
                 
                 return (
-                  <div key={index} className="flex flex-col items-center text-center flex-1">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center z-10 ${
+                  <div key={index} className="flex items-center gap-3 sm:flex-col sm:text-center">
+                    <div className={`z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
                       isCompleted 
                         ? 'bg-linear-to-r from-[#F97316] to-[#FB923C] text-white' 
                         : 'bg-gray-200 text-gray-400'
                     } ${isCurrent ? 'ring-4 ring-[#F97316]/30' : ''}`}>
                       {isCompleted ? <FaCheckCircle /> : <Icon />}
                     </div>
-                    <div className="mt-3">
+                    <div className="min-w-0 sm:mt-3">
                       <p className={`text-xs font-semibold ${isCompleted ? 'text-[#F97316]' : 'text-gray-400'}`}>
                         {step.label}
                       </p>
-                      <p className="text-xs text-[#6B7280] mt-1 max-w-20 hidden sm:block">
+                      <p className="mt-1 text-xs text-[#6B7280]">
                         {step.description}
                       </p>
                     </div>
@@ -823,7 +1002,7 @@ const OrderTracking = () => {
           </div>
           
           {/* Delivery Estimate */}
-          <div className="mt-8 pt-4 border-t border-gray-100 text-center">
+          <div className="mt-5 rounded-lg border border-orange-100 bg-orange-50 px-4 py-3 text-center">
             <p className="text-sm text-[#6B7280]">
               <FaClock className="inline mr-1 text-[#F97316]" />
               {estimatedDelivery()}
@@ -833,15 +1012,15 @@ const OrderTracking = () => {
         
         {/* Tracking Updates */}
         {!awaitingPayment && tracking && tracking.updates && tracking.updates.length > 0 && (
-          <div className="bg-white rounded-xl shadow-md p-6 mb-6 border-l-4 border-[#FB923C]">
-            <h2 className="text-xl font-semibold mb-4 text-[#111827] flex items-center gap-2">
+          <div className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
+            <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-[#111827]">
               <FaTruck className="text-[#FB923C]" />
               Tracking Updates
             </h2>
             <div className="space-y-4">
               {tracking.updates.map((update, index) => (
-                <div key={index} className="flex gap-4 border-l-2 border-[#F97316] pl-4 pb-4 last:pb-0">
-                  <div className="w-2 h-2 rounded-full bg-[#F97316] mt-1.5 -ml-[1.1rem]"></div>
+                <div key={index} className="flex gap-4 border-l-2 border-[#F97316] pb-4 pl-4 last:pb-0">
+                  <div className="-ml-[1.1rem] mt-1.5 h-2 w-2 rounded-full bg-[#F97316]"></div>
                   <div className="flex-1">
                     <div className="flex flex-wrap justify-between items-start gap-2">
                       <div className="flex flex-wrap items-center gap-2">
@@ -877,34 +1056,34 @@ const OrderTracking = () => {
         )}
         
         {/* Order Summary */}
-        {!awaitingPayment && <div className="bg-white rounded-xl shadow-md overflow-hidden">
-          <div className="bg-linear-to-r from-gray-50 to-white px-6 py-4 border-b">
+        {!awaitingPayment && <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b bg-linear-to-r from-gray-50 to-white px-4 py-4 sm:px-6">
             <h2 className="text-xl font-semibold text-[#111827]">Order Summary</h2>
           </div>
           
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {/* Items */}
             <div className="space-y-3 mb-6">
               {order.items.map((item) => (
-                <div key={item.id} className="flex justify-between items-center py-2 border-b border-gray-100">
-                  <div className="flex items-center gap-3">
+                <div key={item.id} className="flex flex-col gap-3 border-b border-gray-100 py-3 last:border-0 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
                     <img
                       src={item.image || 'https://via.placeholder.com/50'}
                       alt={item.name}
-                      className="w-12 h-12 object-cover rounded-lg"
+                      className="h-14 w-14 shrink-0 rounded-lg object-cover"
                     />
-                    <div>
-                      <p className="font-medium text-[#111827]">{item.name}</p>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-[#111827]">{item.name}</p>
                       <p className="text-sm text-[#6B7280]">Qty: {item.quantity}</p>
                     </div>
                   </div>
-                  <span className="font-semibold text-[#F97316]">{formatCurrency(item.price * item.quantity)}</span>
+                  <span className="font-semibold text-[#F97316] sm:text-right">{formatCurrency(item.price * item.quantity)}</span>
                 </div>
               ))}
             </div>
             
             {/* Totals */}
-            <div className="bg-gray-50 rounded-lg p-4 mb-6">
+            <div className="mb-6 rounded-lg bg-gray-50 p-4">
               <div className="space-y-2">
                 <div className="flex justify-between text-[#6B7280]">
                   <span>Subtotal</span>
@@ -927,7 +1106,7 @@ const OrderTracking = () => {
                 <FaMapMarkerAlt className="text-[#F97316]" />
                 Shipping Address
               </h3>
-              <div className="bg-gray-50 rounded-lg p-4 text-sm text-[#6B7280]">
+              <div className="rounded-lg bg-gray-50 p-4 text-sm text-[#6B7280]">
                 <p className="font-medium text-[#111827]">{order.shippingAddress.fullName}</p>
                 <p>{order.shippingAddress.addressLine1}</p>
                 {order.shippingAddress.addressLine2 && <p>{order.shippingAddress.addressLine2}</p>}
@@ -958,6 +1137,21 @@ const OrderTracking = () => {
           </div>
         </div>}
       </div>
+
+      <ProductReviewModal
+        isOpen={reviewItems.length > 0 && Boolean(currentReviewItem)}
+        onClose={closeReviewPrompt}
+        onSubmit={submitReview}
+        draft={reviewDraft}
+        onDraftChange={setReviewDraft}
+        productName={currentReviewItem?.name || 'Product'}
+        productImage={currentReviewItem?.image || ''}
+        eyebrow="Payment confirmed"
+        helperText="Your payment is confirmed. Share verified feedback for this purchase."
+        progressText={reviewItems.length > 1 ? `Product ${activeReviewIndex + 1} of ${reviewItems.length}` : ''}
+        submitting={reviewSubmitting}
+        cancelLabel="Skip"
+      />
     </div>
   );
 };

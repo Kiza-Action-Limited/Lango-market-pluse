@@ -17,6 +17,28 @@ const getRequesterSnapshot = (user) => ({
   businessName: user?.businessName || '',
 });
 
+const inquiryCategoryMap = {
+  general: 'general',
+  orders: 'orders',
+  billing: 'payments',
+  payments: 'payments',
+  subscription: 'payments',
+  technical: 'technical',
+  partnership: 'general',
+  logistics: 'logistics',
+  products: 'products',
+  account: 'account',
+};
+
+const getContactTicketId = (thread) => `CNT-${String(thread?._id || '').slice(-8).toUpperCase()}`;
+
+const escapeHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
 const sanitizeSupportMessage = (thread) => {
   const raw = thread?.toObject ? thread.toObject() : thread;
   return {
@@ -60,44 +82,147 @@ const notifyAdminsOfNewMessage = async (thread, sender) => {
   );
 };
 
+exports.createPublicContactMessage = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const {
+      fullName,
+      name,
+      email,
+      phone,
+      inquiryType = 'general',
+      subject,
+      message,
+      source = 'web-contact-form',
+      submittedAt,
+    } = req.body;
+
+    const normalizedInquiryType = String(inquiryType || 'general').trim().toLowerCase();
+    const category = inquiryCategoryMap[normalizedInquiryType] || 'general';
+    const requesterSnapshot = {
+      name: String(fullName || name || 'Website visitor').trim(),
+      email: String(email || '').trim().toLowerCase(),
+      phone: String(phone || '').trim(),
+      businessName: '',
+    };
+    const safeSubject = String(subject || `${normalizedInquiryType} inquiry`).trim();
+    const bodyLines = [
+      String(message || '').trim(),
+      '',
+      `Source: ${source}`,
+      `Inquiry type: ${normalizedInquiryType}`,
+      submittedAt ? `Submitted at: ${submittedAt}` : null,
+    ].filter(Boolean);
+
+    const thread = await SupportMessage.create({
+      requester: undefined,
+      requesterRole: 'guest',
+      requesterSnapshot,
+      subject: safeSubject,
+      category,
+      priority: ['orders', 'billing', 'technical'].includes(normalizedInquiryType) ? 'high' : 'normal',
+      status: 'pending_admin',
+      lastMessageAt: new Date(),
+      messages: [{
+        sender: undefined,
+        senderRole: 'guest',
+        body: bodyLines.join('\n'),
+        channel: 'email',
+        sentByAdmin: false,
+      }],
+    });
+
+    await notifyAdminsOfNewMessage(thread, {
+      fullName: requesterSnapshot.name,
+      email: requesterSnapshot.email,
+      phone: requesterSnapshot.phone,
+      role: 'guest',
+    });
+
+    const sanitized = sanitizeSupportMessage(thread);
+    const ticketId = getContactTicketId(thread);
+
+    res.status(201).json({
+      success: true,
+      message: 'Contact message received. Our support team will respond shortly.',
+      ticketId,
+      data: {
+        ...sanitized,
+        ticketId,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const notifyRequesterOfReply = async (thread, { reply, channel }) => {
-  const requester = await User.findById(thread.requester).select('email phone fullName name businessName').lean();
-  if (!requester) return { email: null, sms: null };
+  const requester = thread.requester
+    ? await User.findById(thread.requester).select('email phone fullName name businessName').lean()
+    : null;
+  const requesterSnapshot = thread.requesterSnapshot || {};
+  const target = {
+    _id: requester?._id || null,
+    name: requester ? getDisplayName(requester) : requesterSnapshot.name || 'Customer',
+    email: requester?.email || requesterSnapshot.email || '',
+    phone: requester?.phone || requesterSnapshot.phone || '',
+  };
 
-  await createNotificationSafely(requester._id, {
-    type: 'in_app',
-    channel: 'system',
-    title: `Admin replied: ${thread.subject}`,
-    body: reply,
-    status: 'sent',
-    data: {
-      source: 'support_reply',
-      supportMessageId: String(thread._id),
-      href: '/support',
-    },
-  });
+  if (!target.email && !target.phone && !target._id) {
+    return {
+      email: { success: false, message: 'No requester email address found' },
+      sms: { success: false, message: 'No requester phone number found' },
+      inApp: null,
+    };
+  }
 
-  const results = { email: null, sms: null };
-  const shouldEmail = ['email', 'all'].includes(channel);
+  const results = { email: null, sms: null, inApp: null };
+
+  if (target._id) {
+    results.inApp = await createNotificationSafely(target._id, {
+      type: 'in_app',
+      channel: 'system',
+      title: `Admin replied: ${thread.subject}`,
+      body: reply,
+      status: 'sent',
+      data: {
+        source: 'support_reply',
+        supportMessageId: String(thread._id),
+        href: '/support',
+      },
+    });
+  }
+
+  const shouldEmail = ['email', 'all'].includes(channel) || (!target._id && channel === 'in_app');
   const shouldSms = ['sms', 'all'].includes(channel);
 
-  if (shouldEmail && requester.email) {
+  if (shouldEmail && target.email) {
+    const safeReplyHtml = escapeHtml(reply).replace(/\n/g, '<br />');
+    const safeSubject = escapeHtml(thread.subject);
+    const safeName = escapeHtml(target.name);
     const html = `
       <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827">
         <h2 style="color:#F97316">Admin reply from Lango MarketPulse</h2>
-        <p><strong>${thread.subject}</strong></p>
-        <p>${String(reply).replace(/[&<>"']/g, '').replace(/\n/g, '<br />')}</p>
-        <p style="font-size:12px;color:#6B7280">Open your dashboard support inbox to continue the conversation.</p>
+        <p>Hello ${safeName},</p>
+        <p><strong>${safeSubject}</strong></p>
+        <div style="margin:16px 0;padding:14px 16px;border-left:4px solid #F97316;background:#FFF7ED">
+          ${safeReplyHtml}
+        </div>
+        <p style="font-size:12px;color:#6B7280">Reply to this email or open your dashboard support inbox to continue the conversation.</p>
       </div>
     `;
     results.email = await emailService
-      .sendEmail(requester.email, `Admin reply: ${thread.subject}`, html, reply)
+      .sendEmail(target.email, `Admin reply: ${thread.subject}`, html, reply)
       .catch((error) => ({ success: false, error: error.message }));
   }
 
-  if (shouldSms && requester.phone) {
+  if (shouldSms && target.phone) {
     results.sms = await smsService
-      .sendToPhone(requester.phone, `Lango Admin: ${reply}`)
+      .sendToPhone(target.phone, `Lango Admin: ${reply}`)
       .catch((error) => ({ success: false, error: error.message }));
   }
 

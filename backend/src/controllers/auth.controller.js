@@ -4,6 +4,7 @@ const { validationResult } = require('express-validator');
 const fs = require('fs/promises');
 const path = require('path');
 const { randomUUID } = require('crypto');
+const jwt = require('jsonwebtoken');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { 
   sendPhoneOtp, 
@@ -1100,6 +1101,31 @@ exports.verifyKYC = async (req, res) => {
 };
 
 /**
+ * Check whether an email belongs to an account.
+ */
+exports.checkEmailAccount = async (req, res) => {
+  try {
+    const email = req.body.email || req.query.email;
+    const result = await authService.checkEmailAccount(email);
+
+    return res.status(200).json({
+      success: true,
+      exists: result.exists,
+      found: result.exists,
+      isRegistered: result.exists,
+      email: result.email,
+      user: result.user,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || 'Unable to check email account',
+      code: error.code || 'CHECK_EMAIL_FAILED',
+    });
+  }
+};
+
+/**
  * Request password reset (sends OTP) - FIXED
  */
 exports.forgotPassword = async (req, res) => {
@@ -1114,16 +1140,24 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    // Send OTP based on identifier type - ONLY THIS, no extra service call
     if (phone) {
       await sendPhoneOtp(phone);
-    } else if (email) {
-      await sendEmailOtpCode(email);
+      return res.status(200).json({
+        success: true,
+        resetMode: 'otp',
+        message: 'Password reset code sent to your phone',
+      });
     }
-    
-    res.status(200).json({ 
-      success: true, 
-      message: `Password reset code sent to your ${phone ? 'phone' : 'email'}` 
+
+    const result = await authService.requestEmailPasswordReset(email);
+
+    res.status(200).json({
+      success: true,
+      resetMode: 'link',
+      message: result.message,
+      delivered: result.delivered,
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
+      ...(result.devResetToken ? { devResetToken: result.devResetToken } : {}),
     });
   } catch (error) {
     console.error('Forgot password error:', error.message);
@@ -1141,10 +1175,35 @@ exports.forgotPassword = async (req, res) => {
  */
 exports.resetPassword = async (req, res) => {
   try {
-    const { phone, email, code, newPassword } = req.body;
+    const {
+      phone,
+      email,
+      code,
+      token,
+      newPassword,
+      password,
+    } = req.body;
+    const nextPassword = newPassword || password;
+
+    if (token) {
+      if (!nextPassword || String(nextPassword).length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: 'Password must be at least 6 characters',
+          code: 'INVALID_PASSWORD',
+        });
+      }
+
+      await authService.resetPasswordByToken(token, nextPassword);
+      return res.status(200).json({
+        success: true,
+        message: 'Password reset successful',
+      });
+    }
+
     const identifier = phone || email;
     
-    if (!identifier || !code || !newPassword) {
+    if (!identifier || !code || !nextPassword) {
       return res.status(400).json({
         success: false,
         message: 'Identifier, verification code, and new password are required',
@@ -1174,9 +1233,7 @@ exports.resetPassword = async (req, res) => {
       });
     }
     
-    // Update password directly
-    user.password = newPassword;
-    await user.save();
+    await authService.setUserPassword(user, nextPassword);
     
     // Clear OTP data after successful reset
     if (phone) await clearOtpData(phone);
@@ -1199,6 +1256,122 @@ exports.resetPassword = async (req, res) => {
       message: error.message,
       code: error.code || 'RESET_PASSWORD_FAILED',
       remainingAttempts: error.remainingAttempts,
+    });
+  }
+};
+
+/**
+ * Verify an existing user's email by token or legacy OTP.
+ */
+exports.verifyEmail = async (req, res) => {
+  try {
+    const { token, email, code } = req.body;
+
+    if (token) {
+      if (!process.env.JWT_SECRET) {
+        return res.status(500).json({
+          success: false,
+          message: 'Email verification is not configured',
+          code: 'JWT_SECRET_MISSING',
+        });
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (decoded.purpose && decoded.purpose !== 'email_verification') {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid email verification token',
+          code: 'INVALID_EMAIL_TOKEN',
+        });
+      }
+
+      const user = decoded.id
+        ? await User.findById(decoded.id)
+        : await authService.findUserByEmail(decoded.email);
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found',
+          code: 'USER_NOT_FOUND',
+        });
+      }
+
+      user.isEmailVerified = true;
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Email verified successfully',
+      });
+    }
+
+    if (!email || !code) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and verification code are required',
+      });
+    }
+
+    await verifyEmailOtp(email, code);
+    const user = await authService.findUserByEmail(email);
+    if (user && typeof user.save === 'function') {
+      user.isEmailVerified = true;
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Email verified successfully',
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || 'Email verification failed',
+      code: error.code || 'EMAIL_VERIFICATION_FAILED',
+    });
+  }
+};
+
+/**
+ * Resend verification email/code for an existing account.
+ */
+exports.resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await authService.findUserByEmail(email);
+
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        message: 'If an account exists, a verification email has been sent.',
+      });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(200).json({
+        success: true,
+        message: 'Email is already verified.',
+        alreadyVerified: true,
+      });
+    }
+
+    const result = await sendEmailOtpCode(email);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message || 'Verification code sent to your email',
+      cooldownSeconds: result.cooldownSeconds,
+      delivered: result.delivered,
+      ...(result.devTestCode ? { devTestCode: result.devTestCode } : {}),
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.deliveryError ? { deliveryError: result.deliveryError } : {}),
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || 'Failed to resend verification email',
+      code: error.code || 'RESEND_VERIFICATION_FAILED',
     });
   }
 };

@@ -4,6 +4,7 @@ import {
   FaBan,
   FaCheckCircle,
   FaCrown,
+  FaDownload,
   FaEdit,
   FaLayerGroup,
   FaListUl,
@@ -249,6 +250,30 @@ const AdminSubscriptions = () => {
     }
   };
 
+  const exportSubscriptionsCsv = async (plan = 'all') => {
+    try {
+      const params = {
+        plan,
+        status,
+        search: search.trim() || undefined,
+      };
+      const response = await adminSubscriptionService.exportCsv(params);
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const planSuffix = plan && plan !== 'all' ? `_${plan}` : '';
+      link.href = url;
+      link.download = `admin_subscriptions${planSuffix}_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success(`${plan === 'all' ? 'Subscription' : humanize(plan)} CSV downloaded`);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to export subscriptions CSV');
+    }
+  };
+
   const toggleFeaturePlan = (planId) => {
     setFeatureForm((prev) => {
       const current = new Set(prev.planIds || []);
@@ -401,6 +426,29 @@ const AdminSubscriptions = () => {
                 >
                   Apply
                 </button>
+                <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3 sm:ml-auto sm:border-l sm:border-t-0 sm:pl-3 sm:pt-0">
+                  <button
+                    type="button"
+                    onClick={() => exportSubscriptionsCsv('all')}
+                    className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-[#111827] hover:bg-gray-50"
+                  >
+                    <FaDownload /> All CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportSubscriptionsCsv('smart')}
+                    className="inline-flex h-11 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    <FaDownload /> Smart CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportSubscriptionsCsv('growth')}
+                    className="inline-flex h-11 items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 text-sm font-semibold text-green-700 hover:bg-green-100"
+                  >
+                    <FaDownload /> Growth CSV
+                  </button>
+                </div>
               </div>
             </div>
 

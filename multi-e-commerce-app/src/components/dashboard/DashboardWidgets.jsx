@@ -23,14 +23,14 @@ export const Sparkline = ({ points = [], color = '#F97316', fill = '#FFEDD5' }) 
 };
 
 export const KpiCard = ({ icon: Icon, label, value, detail, trend, color = '#F97316', points }) => (
-  <div className="rounded-md border border-gray-200 bg-white p-4 shadow-sm">
+  <div className="min-w-0 rounded-md border border-gray-200 bg-white p-3 shadow-sm sm:p-4">
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-        <p className="mt-2 truncate text-2xl font-bold text-[#111827]">{value}</p>
+        <p className="truncate text-[11px] font-medium uppercase tracking-wide text-gray-500 sm:text-xs">{label}</p>
+        <p className="mt-2 truncate text-xl font-bold text-[#111827] sm:text-2xl" title={String(value ?? '')}>{value}</p>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
           {trend && <span className="font-semibold text-[#16A34A]">{trend}</span>}
-          {detail && <span>{detail}</span>}
+          {detail && <span className="min-w-0 truncate">{detail}</span>}
         </div>
       </div>
       {Icon && (
@@ -46,10 +46,10 @@ export const KpiCard = ({ icon: Icon, label, value, detail, trend, color = '#F97
 );
 
 export const Panel = ({ title, action, children, className = '' }) => (
-  <section className={`rounded-md border border-gray-200 bg-white p-5 shadow-sm ${className}`}>
-    <div className="mb-4 flex items-center justify-between gap-3">
-      <h2 className="text-sm font-semibold text-[#111827]">{title}</h2>
-      {action}
+  <section className={`min-w-0 rounded-md border border-gray-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <h2 className="min-w-0 truncate text-sm font-semibold text-[#111827]">{title}</h2>
+      {action && <div className="shrink-0">{action}</div>}
     </div>
     {children}
   </section>
@@ -99,7 +99,7 @@ export const StatusPill = ({ children, tone = 'gray' }) => {
     gray: 'bg-gray-100 text-gray-700',
   };
 
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.gray}`}>{children}</span>;
+  return <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.gray}`}><span className="truncate">{children}</span></span>;
 };
 
 export const SalesByLocationPanel = ({ title = 'Sales by Location', subtitle = 'Income in the last 28 days', locations = [], action, className = '' }) => (
@@ -128,8 +128,8 @@ export const SalesByLocationPanel = ({ title = 'Sales by Location', subtitle = '
 
 export const StoreVisitsBySourcePanel = ({ sources = [], totalLabel = '0 Visitors', className = '' }) => (
   <Panel title="Store Visits by Source" className={className}>
-    <div className="mb-5 flex items-end gap-2">
-      <span className="text-3xl font-bold text-[#111827]">{totalLabel}</span>
+    <div className="mb-5 flex flex-wrap items-end gap-2">
+      <span className="text-2xl font-bold text-[#111827] sm:text-3xl">{totalLabel}</span>
       <span className="pb-1 text-sm text-gray-500">Visitors</span>
     </div>
     <div className="space-y-4">
@@ -151,7 +151,7 @@ export const CustomerReviewsPanel = ({ title = 'Customer Reviews', summary, acti
       <p className="mb-4 text-xs text-gray-500">Based on {summary?.verifiedPurchases || 0} verified purchases</p>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
         <div className="lg:col-span-2">
-          <p className="text-4xl font-bold text-[#111827]">{average}</p>
+          <p className="text-3xl font-bold text-[#111827] sm:text-4xl">{average}</p>
           <p className="mt-1 text-sm text-gray-500">out of 5</p>
         </div>
         <div className="space-y-2 lg:col-span-3">
@@ -169,8 +169,8 @@ export const CustomerReviewsPanel = ({ title = 'Customer Reviews', summary, acti
       </div>
       {latest ? (
         <div className="mt-5 rounded-md border border-gray-100 bg-gray-50 p-4">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="font-semibold text-[#111827]">{latest.title || 'Customer feedback'}</p>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <p className="min-w-0 truncate font-semibold text-[#111827]">{latest.title || 'Customer feedback'}</p>
             <span className="text-xs text-gray-500">{latest.date || ''}</span>
           </div>
           <p className="text-sm leading-6 text-gray-600">{latest.comment}</p>

@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const User = require('../../models/User.model');
 const Subscription = require('../../models/Subscription.model');
 const memoryStore = require('./authMemoryStore');
+const { emailService } = require('../../config/email');
 const { getEffectiveUserCategory, isSellerUser } = require('../../utils/userCategory');
 
 const applyDotPath = (target, path, value) => {
@@ -46,6 +47,16 @@ const getDefaultRedirectForUser = (user = {}) => {
   if (isSellerUser(user)) return '/seller';
   return '/';
 };
+
+const isProduction = process.env.NODE_ENV === 'production';
+const PASSWORD_RESET_TOKEN_TTL_SECONDS = 60 * 60;
+
+const hashResetToken = (token) => crypto
+  .createHash('sha256')
+  .update(String(token || ''))
+  .digest('hex');
+
+const passwordResetKey = (tokenHash) => `reset:token:${tokenHash}`;
 
 class AuthService {
   useFallback() {
@@ -100,9 +111,11 @@ class AuthService {
     const roleMap = {
       seller: 'seller',
       farmer: 'farmer',
+      brand: 'seller',
       wholesaler: 'seller',
       manufacturer: 'seller',
       retailer: 'seller',
+      small_business: 'seller',
       vendor: 'seller',
       analytics: 'seller',
       analystic: 'seller',
@@ -130,8 +143,12 @@ class AuthService {
     if (normalizedEmail) {
       userPayload.email = normalizedEmail;
     }
-    if (normalizedBusinessType) {
-      userPayload.businessType = normalizedBusinessType;
+    const sellerSubtypeFromRole = ['brand', 'wholesaler', 'manufacturer', 'retailer', 'small_business'].includes(normalizedRole)
+      ? normalizedRole
+      : null;
+
+    if (normalizedBusinessType || sellerSubtypeFromRole) {
+      userPayload.businessType = normalizedBusinessType || sellerSubtypeFromRole;
     }
     if (normalizedBusinessName) {
       userPayload.businessName = normalizedBusinessName;
@@ -287,6 +304,112 @@ class AuthService {
       }
     }
     
+    return { success: true };
+  }
+
+  async checkEmailAccount(email) {
+    const normalizedEmail = this.normalizeEmail(email);
+    if (!normalizedEmail) {
+      const error = new Error('Valid email address is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const user = await this.findUserByEmail(normalizedEmail);
+    return {
+      exists: Boolean(user),
+      email: normalizedEmail,
+      user: user ? {
+        id: String(user._id || user.id),
+        role: user.role || 'buyer',
+        isEmailVerified: Boolean(user.isEmailVerified),
+      } : null,
+    };
+  }
+
+  async requestEmailPasswordReset(email) {
+    const normalizedEmail = this.normalizeEmail(email);
+    if (!normalizedEmail) {
+      const error = new Error('Valid email address is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const user = await this.findUserByEmail(normalizedEmail);
+    if (!user) {
+      return {
+        success: true,
+        sent: false,
+        message: 'If an account exists, a password reset link has been sent.',
+      };
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = hashResetToken(token);
+    await this.storePasswordResetToken(tokenHash, {
+      userId: String(user._id || user.id),
+      email: normalizedEmail,
+      createdAt: Date.now(),
+    });
+
+    let delivered = false;
+    let deliveryError = null;
+    try {
+      await emailService.sendPasswordResetEmail(normalizedEmail, token, 60);
+      delivered = true;
+    } catch (error) {
+      deliveryError = error;
+      if (isProduction) {
+        await this.clearPasswordResetToken(tokenHash);
+        throw error;
+      }
+      console.warn(`[Email disabled] Reset link token for ${normalizedEmail}: ${token}`);
+    }
+
+    return {
+      success: true,
+      sent: delivered,
+      delivered,
+      message: delivered
+        ? 'Password reset link sent to your email.'
+        : 'Password reset link generated. Email delivery failed in development mode.',
+      ...(deliveryError && !isProduction ? { deliveryError: deliveryError.message, devResetToken: token } : {}),
+    };
+  }
+
+  async resetPasswordByToken(token, newPassword) {
+    const rawToken = String(token || '').trim();
+    if (!rawToken) {
+      const error = new Error('Reset token is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const tokenHash = hashResetToken(rawToken);
+    const entry = await this.getPasswordResetToken(tokenHash);
+    if (!entry?.userId && !entry?.email) {
+      const error = new Error('Invalid or expired reset token');
+      error.statusCode = 400;
+      error.code = 'RESET_TOKEN_INVALID';
+      throw error;
+    }
+
+    const user = this.useFallback()
+      ? memoryStore.getUserById(entry.userId)
+      : entry.userId
+        ? await User.findById(entry.userId).select('+password')
+        : await User.findOne({ email: entry.email }).select('+password');
+
+    if (!user) {
+      await this.clearPasswordResetToken(tokenHash);
+      const error = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    await this.setUserPassword(user, newPassword);
+
+    await this.clearPasswordResetToken(tokenHash);
     return { success: true };
   }
 
@@ -529,7 +652,7 @@ class AuthService {
   }
 
   async findUserByEmail(email) {
-    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : null;
+    const normalizedEmail = this.normalizeEmail(email);
     if (!normalizedEmail) return null;
     return this.useFallback()
       ? memoryStore.findByPhoneOrEmail({ email: normalizedEmail })
@@ -569,6 +692,34 @@ class AuthService {
     return trimmed;
   }
 
+  async setUserPassword(user, newPassword) {
+    if (!user) {
+      const error = new Error('User not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (this.useFallback()) {
+      const updated = await memoryStore.updatePasswordById(user._id || user.id, newPassword);
+      if (!updated) {
+        const error = new Error('User not found');
+        error.statusCode = 404;
+        throw error;
+      }
+      return updated;
+    }
+
+    user.password = newPassword;
+    await user.save();
+    return this.sanitizeUser(user);
+  }
+
+  normalizeEmail(email) {
+    if (typeof email !== 'string') return null;
+    const normalized = email.trim().toLowerCase();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : null;
+  }
+
   async simulateKYCCheck(kycData) {
     return true;
   }
@@ -594,6 +745,45 @@ class AuthService {
         return true;
       }
       return false;
+    }
+  }
+
+  async storePasswordResetToken(tokenHash, payload) {
+    if (redisClient) {
+      await redisClient.setEx(passwordResetKey(tokenHash), PASSWORD_RESET_TOKEN_TTL_SECONDS, JSON.stringify(payload));
+      return;
+    }
+
+    if (!global._passwordResetTokens) global._passwordResetTokens = new Map();
+    global._passwordResetTokens.set(passwordResetKey(tokenHash), {
+      payload,
+      expires: Date.now() + PASSWORD_RESET_TOKEN_TTL_SECONDS * 1000,
+    });
+  }
+
+  async getPasswordResetToken(tokenHash) {
+    if (redisClient) {
+      const raw = await redisClient.get(passwordResetKey(tokenHash));
+      return raw ? JSON.parse(raw) : null;
+    }
+
+    const entry = global._passwordResetTokens?.get(passwordResetKey(tokenHash));
+    if (!entry) return null;
+    if (entry.expires <= Date.now()) {
+      global._passwordResetTokens.delete(passwordResetKey(tokenHash));
+      return null;
+    }
+    return entry.payload;
+  }
+
+  async clearPasswordResetToken(tokenHash) {
+    if (redisClient) {
+      await redisClient.del(passwordResetKey(tokenHash));
+      return;
+    }
+
+    if (global._passwordResetTokens) {
+      global._passwordResetTokens.delete(passwordResetKey(tokenHash));
     }
   }
 }

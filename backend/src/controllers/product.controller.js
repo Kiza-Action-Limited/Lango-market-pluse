@@ -21,7 +21,17 @@ const PLAN_PRODUCT_LIMITS = {
   [PLAN_IDS.MIZIGO]: PRODUCT_LIMITS[PLAN_IDS.MIZIGO],
 };
 
-const PAID_REVIEW_STATUSES = ['payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed'];
+const PAID_REVIEW_STATUSES = [
+  'FUNDS_HELD',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'RELEASED',
+  'payment_escrowed',
+  'processing',
+  'dispatched',
+  'delivered',
+  'completed',
+];
 
 const isLogisticsUser = (user = {}) => getEffectiveUserCategory(user) === 'logistics';
 
@@ -125,6 +135,21 @@ const normalizeWholesalePayload = (body = {}, existing = {}) => {
 };
 
 const normalizeProductCategory = (category) => String(category || '').trim().toLowerCase();
+
+const uploadProductImages = async (files = [], userId) => {
+  if (!Array.isArray(files) || files.length === 0) return [];
+
+  const folder = `products/${userId}`;
+  const uploads = files.map(async (file) => {
+    const result = await uploadToCloudinary(file.buffer, folder, file.mimetype);
+    return {
+      url: result.secure_url,
+      publicId: result.public_id,
+    };
+  });
+
+  return Promise.all(uploads);
+};
 
 const LOW_STOCK_SENSITIVITY_RULES = [
   { threshold: 50, terms: ['maize', 'corn', 'unga', 'posho', 'grains-cereals', 'food-staples'] },
@@ -292,9 +317,11 @@ exports.createProduct = async (req, res, next) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const plan = await getEffectivePlan(req.user.id);
+    const [plan, currentProductCount] = await Promise.all([
+      getEffectivePlan(req.user.id),
+      Product.countDocuments({ seller: req.user.id }),
+    ]);
     const productLimit = getProductLimitForPlan(plan);
-    const currentProductCount = await Product.countDocuments({ seller: req.user.id });
 
     if (currentProductCount >= productLimit) {
       return res.status(403).json({
@@ -310,25 +337,16 @@ exports.createProduct = async (req, res, next) => {
       });
     }
 
-    // Upload images to Cloudinary
-    const uploadedImages = [];
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        try {
-          const result = await uploadToCloudinary(file.buffer, `products/${req.user.id}`, file.mimetype);
-          uploadedImages.push({
-            url: result.secure_url,
-            publicId: result.public_id,
-          });
-        } catch (error) {
-          console.error('Error uploading to Cloudinary:', error);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to upload images. Please try again.',
-            error: error.message
-          });
-        }
-      }
+    let uploadedImages = [];
+    try {
+      uploadedImages = await uploadProductImages(req.files, req.user.id);
+    } catch (error) {
+      console.error('Error uploading to Cloudinary:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload images. Please try again.',
+        error: error.message
+      });
     }
 
     // Parse customAttributes if sent as JSON string
@@ -766,23 +784,17 @@ exports.updateProduct = async (req, res, next) => {
 
     // Handle new image uploads
     if (req.files && req.files.length > 0) {
-      const newImages = [];
-      for (const file of req.files) {
-        try {
-          const result = await uploadToCloudinary(file.buffer, `products/${req.user.id}`, file.mimetype);
-          newImages.push({
-            url: result.secure_url,
-            publicId: result.public_id,
-          });
-        } catch (error) {
-          console.error('Error uploading to Cloudinary:', error);
-          return res.status(500).json({
-            success: false,
-            message: 'Failed to upload images',
-          });
-        }
+      let newImages = [];
+      try {
+        newImages = await uploadProductImages(req.files, req.user.id);
+      } catch (error) {
+        console.error('Error uploading to Cloudinary:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to upload images',
+        });
       }
-      
+
       // Keep existing images
       product.images = [...product.images, ...newImages];
     }
@@ -947,7 +959,7 @@ exports.getLowStockProducts = async (req, res, next) => {
     const products = await Product.find({
       seller: req.user.id,
       quantityAvailable: { $gt: 0 },
-    }).select('name category quantityAvailable minThreshold unit price images sku inventoryHistory reservedQuantity');
+    }).select('name category quantityAvailable minThreshold unit price images sku inventoryHistory reservedQuantity').lean();
 
     const lowStockProducts = products.filter((product) => {
       const effectiveThreshold = threshold > 0 ? threshold : getEffectiveLowStockThreshold(product);
@@ -980,9 +992,11 @@ exports.getMyProducts = async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const requestedLimit = Math.max(1, parseInt(req.query.limit, 10) || 20);
 
-    const plan = await getEffectivePlan(req.user.id);
+    const [plan, totalProducts] = await Promise.all([
+      getEffectivePlan(req.user.id),
+      Product.countDocuments({ seller: req.user.id }),
+    ]);
     const productLimit = getProductLimitForPlan(plan);
-    const totalProducts = await Product.countDocuments({ seller: req.user.id });
     const remainingSlots = Number.isFinite(productLimit) ? Math.max(0, productLimit - totalProducts) : null;
     const upgradeRequired = isFreeProductPlan(plan) && remainingSlots === 0;
 
@@ -1018,7 +1032,8 @@ exports.getMyProducts = async (req, res, next) => {
     const products = await Product.find({ seller: req.user.id })
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(fetchLimit);
+      .limit(fetchLimit)
+      .lean();
 
     res.status(200).json({
       success: true,
@@ -1052,7 +1067,7 @@ exports.getProductReviews = async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id)
       .select('reviews')
-      .populate('reviews.user', 'name');
+      .populate('reviews.user', 'name fullName profileImageUrl');
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -1097,8 +1112,9 @@ exports.getReviewEligibility = async (req, res, next) => {
       $or: [
         { status: { $in: PAID_REVIEW_STATUSES } },
         { paymentStatus: 'completed' },
+        { paidAt: { $exists: true, $ne: null } },
       ],
-    }).select('_id status paymentStatus');
+    }).select('_id status paymentStatus paidAt');
 
     res.status(200).json({
       success: true,
@@ -1142,6 +1158,7 @@ exports.addProductReview = async (req, res, next) => {
       $or: [
         { status: { $in: PAID_REVIEW_STATUSES } },
         { paymentStatus: 'completed' },
+        { paidAt: { $exists: true, $ne: null } },
       ],
     });
 
@@ -1172,7 +1189,7 @@ exports.addProductReview = async (req, res, next) => {
     product.rating = product.reviews.length ? Number((totalRating / product.reviews.length).toFixed(1)) : 0;
 
     await product.save();
-    await product.populate('reviews.user', 'name');
+    await product.populate('reviews.user', 'name fullName profileImageUrl');
 
     const savedReview = product.reviews.find(
       (review) => String(review.user?._id || review.user) === String(req.user.id)

@@ -18,10 +18,85 @@
     --intelligence: #FB923C;
     --secondary: #FFFFFF;
     --dark: #000000;
+    --app-bottom-nav-height: 4.75rem;
+  }
+
+  html {
+    width: 100%;
+    overflow-x: hidden;
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
   }
   
   body {
     @apply bg-gray-50 text-dark;
+    min-height: 100dvh;
+    width: 100%;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overscroll-behavior-y: none;
+  }
+
+  #root {
+    min-height: 100dvh;
+    width: 100%;
+    isolation: isolate;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
+
+  img,
+  video {
+    height: auto;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button,
+  a {
+    touch-action: manipulation;
+  }
+
+  button,
+  [role="button"],
+  input,
+  select,
+  textarea {
+    min-width: 0;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  table {
+    width: 100%;
+  }
+
+  th,
+  td {
+    overflow-wrap: anywhere;
   }
   
   /* Custom scrollbar */
@@ -59,6 +134,40 @@
   .card {
     @apply bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow;
   }
+
+  .mobile-shell-bottom-spacer {
+    padding-bottom: calc(var(--app-bottom-nav-height) + env(safe-area-inset-bottom));
+  }
+
+  .app-page {
+    @apply mx-auto w-full max-w-screen-2xl px-4 py-6 sm:px-6 lg:px-8;
+  }
+
+  .app-panel {
+    @apply rounded-xl border border-gray-200 bg-white shadow-sm;
+  }
+
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .dashboard-shell {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .dashboard-shell .overflow-x-auto {
+    max-width: 100%;
+  }
+
+  .dashboard-shell table {
+    min-width: 42rem;
+  }
+
+  .dashboard-actionbar {
+    @apply flex flex-wrap items-center gap-3;
+  }
   
   .badge {
     @apply px-2 py-1 rounded-full text-xs font-medium;
@@ -78,6 +187,98 @@
   
   .badge-info {
     @apply bg-blue-100 text-blue-800;
+  }
+}
+
+@media (max-width: 767px) {
+  main {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .container,
+  .max-w-screen-2xl {
+    max-width: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table th,
+  table td {
+    white-space: nowrap;
+  }
+
+  h1 {
+    line-height: 1.15;
+  }
+
+  h2,
+  h3 {
+    line-height: 1.2;
+  }
+
+  .card,
+  .rounded-xl,
+  .rounded-2xl {
+    border-radius: 0.75rem;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  button,
+  [role="button"] {
+    min-height: 44px;
+  }
+
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+  }
+
+  .dashboard-shell {
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+
+  .dashboard-shell .dashboard-actionbar {
+    width: 100%;
+  }
+
+  .dashboard-shell .dashboard-actionbar > * {
+    flex: 1 1 8.5rem;
+    justify-content: center;
+  }
+
+  .dashboard-shell table {
+    min-width: 38rem;
+  }
+
+  .dashboard-shell th,
+  .dashboard-shell td {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+}
+
+@media (max-width: 479px) {
+  .container,
+  .max-w-screen-2xl {
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+
+  .app-page {
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+
+  .dashboard-shell table {
+    min-width: 34rem;
   }
 }
 

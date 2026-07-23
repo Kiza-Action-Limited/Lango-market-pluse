@@ -71,7 +71,9 @@ exports.initiateSubscriptionMpesaPayment = async (req, res, next) => {
 
     const phoneNumber = req.body.phoneNumber || req.user.phone;
     await billingService.assertUserCanUseSubscriptionPlan(req.user.id, req.body.planId);
-    const result = await mpesaService.initiateSubscriptionPayment(req.body.planId, phoneNumber, req.user.id);
+    const result = await mpesaService.initiateSubscriptionPayment(req.body.planId, phoneNumber, req.user.id, {
+      agentNationalId: req.body.agentNationalId,
+    });
 
     res.status(200).json({
       success: true,

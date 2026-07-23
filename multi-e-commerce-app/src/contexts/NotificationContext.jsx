@@ -4,6 +4,7 @@ import { notificationService } from '../services/notificationService';
 import { useAuth } from './AuthContext';
 import toast from 'react-hot-toast';
 import io from 'socket.io-client';
+import { getSocketUrl } from '../config/apiBase';
 
 const NotificationContext = createContext();
 
@@ -37,8 +38,7 @@ export const NotificationProvider = ({ children }) => {
   }, [isAuthenticated, token]);
 
   const setupSocket = () => {
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL?.replace(/\/api\/?$/, '') || 'http://localhost:5000';
-    const notificationSocket = io(socketUrl, {
+    const notificationSocket = io(getSocketUrl(), {
       auth: { token },
       transports: ['websocket', 'polling'],
     });

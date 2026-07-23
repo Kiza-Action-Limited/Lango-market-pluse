@@ -3,6 +3,17 @@ const router = express.Router();
 const { body, query } = require('express-validator');
 const analyticsController = require('../../controllers/Analytics.controller');
 const { protect, authorize } = require('../../middleware/auth');
+const { getEffectiveUserCategory } = require('../../utils/userCategory');
+
+const authorizeCategory = (...categories) => (req, res, next) => {
+  const category = getEffectiveUserCategory(req.user);
+  if (categories.includes(category)) return next();
+
+  return res.status(403).json({
+    success: false,
+    message: `Access denied. Required category: ${categories.join(' or ')}`,
+  });
+};
 
 // All routes require authentication
 router.use(protect);
@@ -19,7 +30,7 @@ router.post('/generate',
 
 // Role-based analytics access
 router.get('/',
-  authorize('admin', 'manufacturer', 'wholesaler'),
+  authorizeCategory('admin', 'manufacturer', 'wholesaler'),
   [
     query('startDate').optional().isISO8601(),
     query('endDate').optional().isISO8601(),
@@ -34,7 +45,7 @@ router.get('/dashboard',
 );
 
 router.get('/sales',
-  authorize('admin', 'manufacturer', 'wholesaler', 'retailer'),
+  authorizeCategory('admin', 'manufacturer', 'wholesaler', 'retailer'),
   [
     query('period').optional().isIn(['day', 'week', 'month', 'year']),
     query('year').optional().isInt({ min: 2020, max: 2030 }),
@@ -47,7 +58,7 @@ router.get('/sales',
 
 // Role-specific analytics
 router.get('/farmers',
-  authorize('admin', 'manufacturer', 'wholesaler'),
+  authorizeCategory('admin', 'manufacturer', 'wholesaler'),
   [
     query('startDate').optional().isISO8601(),
     query('endDate').optional().isISO8601()
@@ -56,7 +67,7 @@ router.get('/farmers',
 );
 
 router.get('/manufacturers',
-  authorize('admin', 'wholesaler'),
+  authorizeCategory('admin', 'wholesaler'),
   [
     query('startDate').optional().isISO8601(),
     query('endDate').optional().isISO8601()
@@ -65,7 +76,7 @@ router.get('/manufacturers',
 );
 
 router.get('/market-trends',
-  authorize('admin', 'manufacturer', 'wholesaler', 'farmer', 'retailer'),
+  authorizeCategory('admin', 'manufacturer', 'wholesaler', 'farmer', 'retailer'),
   [
     query('category').optional().isString(),
     query('region').optional().isString()
@@ -74,7 +85,7 @@ router.get('/market-trends',
 );
 
 router.get('/supply-chain',
-  authorize('admin', 'manufacturer', 'wholesaler'),
+  authorizeCategory('admin', 'manufacturer', 'wholesaler'),
   analyticsController.getSupplyChainAnalytics
 );
 

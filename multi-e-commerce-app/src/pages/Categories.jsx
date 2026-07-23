@@ -1,8 +1,8 @@
 // src/pages/Categories.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
 import { FaTag, FaStore, FaArrowRight, FaBrain } from 'react-icons/fa';
+import api from '../config/axios';
 
 const Categories = () => {
   const [categories, setCategories] = useState([]);
@@ -14,7 +14,7 @@ const Categories = () => {
 
   const fetchCategories = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/categories');
+      const response = await api.get('/categories');
       setCategories(response.data.categories);
     } catch (error) {
       console.error('Error fetching categories:', error);

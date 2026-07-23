@@ -34,7 +34,7 @@ export const subscriptionService = {
     return normalizeSubscriptionPayload(response.data);
   },
 
-  subscribe: async ({ planId, paymentMethod = 'mpesa', paymentCompleted = true, paymentReference }) => {
+  subscribe: async ({ planId, paymentMethod = 'mpesa', paymentCompleted = true, paymentReference, agentNationalId }) => {
     const normalizedPlanId = normalizePlanId(planId);
     const body = {
       planId: normalizedPlanId,
@@ -44,6 +44,10 @@ export const subscriptionService = {
     if (normalizedPlanId !== 'mizigo') {
       body.paymentCompleted = paymentCompleted;
       body.paymentReference = paymentReference || `ui-${normalizedPlanId}-${Date.now()}`;
+    }
+
+    if (agentNationalId) {
+      body.agentNationalId = String(agentNationalId).replace(/\D/g, '');
     }
 
     const response = await api.post('/v1/subscriptions/subscribe', body);

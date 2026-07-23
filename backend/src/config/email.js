@@ -245,7 +245,11 @@ class EmailService {
    * @returns {Promise<Object>}
    */
   async sendPasswordResetEmail(to, resetToken, expiresIn = 60) {
-    const resetUrl = `${process.env.APP_URL}/reset-password?token=${resetToken}`;
+    const frontendUrl = String(process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:5173')
+      .split(',')[0]
+      .trim()
+      .replace(/\/$/, '');
+    const resetUrl = `${frontendUrl}/forgot-password?token=${encodeURIComponent(resetToken)}`;
     const subject = 'Password Reset Request - Lango Market Pulse';
     const text = `You requested a password reset. Click the link below to reset your password:\n\n${resetUrl}\n\nThis link expires in ${expiresIn} minutes.\n\nIf you didn't request this, please ignore this email.`;
     

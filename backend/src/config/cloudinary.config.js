@@ -1,5 +1,6 @@
 // config/cloudinary.config.js
 const cloudinary = require('cloudinary').v2;
+const { Readable } = require('stream');
 
 // Configure Cloudinary
 cloudinary.config({
@@ -8,46 +9,36 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Upload file buffer to Cloudinary (without streamifier)
-const uploadToCloudinary = (buffer, folder = 'products', mimeType = 'image/jpeg') => {
-  return new Promise((resolve, reject) => {
-    const sanitizedMimeType = mimeType || 'image/jpeg';
-    const base64String = buffer.toString('base64');
-    const dataURI = `data:${sanitizedMimeType};base64,${base64String}`;
-    const isPdf = sanitizedMimeType === 'application/pdf';
+const getUploadOptions = (folder, mimeType) => {
+  const sanitizedMimeType = mimeType || 'image/jpeg';
+  const isPdf = sanitizedMimeType === 'application/pdf';
+  const options = {
+    folder,
+    resource_type: isPdf ? 'raw' : 'image',
+    allowed_formats: isPdf ? ['pdf'] : ['jpg', 'png', 'jpeg', 'webp', 'gif'],
+  };
 
-    const options = {
-      folder: folder,
-      resource_type: isPdf ? 'raw' : 'image',
-      allowed_formats: isPdf ? ['pdf'] : ['jpg', 'png', 'jpeg', 'webp', 'gif'],
-    };
+  if (!isPdf) {
+    options.transformation = [
+      { width: 1600, height: 1600, crop: 'limit', quality: 'auto:good' },
+    ];
+  }
 
-    if (!isPdf) {
-      options.transformation = [{ width: 800, height: 800, crop: 'limit', quality: 'auto' }];
-    }
-
-    cloudinary.uploader.upload(dataURI, options, (error, result) => {
-      if (error) {
-        console.error('Cloudinary upload error:', error);
-        reject(error);
-      } else {
-        resolve(result);
-      }
-    });
-  });
+  return options;
 };
 
-// Alternative using upload_stream (requires streamifier)
-const uploadToCloudinaryWithStream = (buffer, folder = 'products') => {
+const pipeBufferToUpload = (buffer, uploadStream) => {
+  const readableStream = new Readable();
+  readableStream.push(buffer);
+  readableStream.push(null);
+  readableStream.pipe(uploadStream);
+};
+
+// Upload file buffer to Cloudinary without base64 inflation.
+const uploadToCloudinary = (buffer, folder = 'products', mimeType = 'image/jpeg') => {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: folder,
-        allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif'],
-        transformation: [
-          { width: 800, height: 800, crop: 'limit', quality: 'auto' }
-        ],
-      },
+      getUploadOptions(folder, mimeType),
       (error, result) => {
         if (error) {
           console.error('Cloudinary upload error:', error);
@@ -57,13 +48,27 @@ const uploadToCloudinaryWithStream = (buffer, folder = 'products') => {
         }
       }
     );
-    
-    // Create readable stream from buffer
-    const { Readable } = require('stream');
-    const readableStream = new Readable();
-    readableStream.push(buffer);
-    readableStream.push(null);
-    readableStream.pipe(uploadStream);
+
+    pipeBufferToUpload(buffer, uploadStream);
+  });
+};
+
+// Backward-compatible alias for callers that already use the stream helper.
+const uploadToCloudinaryWithStream = (buffer, folder = 'products', mimeType = 'image/jpeg') => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      getUploadOptions(folder, mimeType),
+      (error, result) => {
+        if (error) {
+          console.error('Cloudinary upload error:', error);
+          reject(error);
+        } else {
+          resolve(result);
+        }
+      }
+    );
+
+    pipeBufferToUpload(buffer, uploadStream);
   });
 };
 

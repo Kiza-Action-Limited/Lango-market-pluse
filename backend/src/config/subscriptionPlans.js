@@ -48,15 +48,15 @@ const FEATURE_KEYS = Object.freeze({
   DAILY_BURN_TRACKER: 'dailyBurnTracker',
   ASSET_TRACKING: 'assetTracking',
   TAX_LOGGER: 'taxLogger',
-  VITALS_PDF: 'vitalsPdf',
-  PERFORMANCE_PDF: 'performancePdf',
-  AUDIT_PDF: 'auditPdf',
+  VITALS_PDF: 'vitalsCsv',
+  PERFORMANCE_PDF: 'performanceCsv',
+  AUDIT_PDF: 'auditCsv',
   LOGISTICS_BRIDGE: 'logisticsBridge',
   EXPRESS_ALERTS: 'radialExpressAlerts',
   GROUP_BUY_MATCHER: 'groupBuyMatcher',
   THREE_WAY_QR: 'threeWayQrHandshake',
   TAKE_HOME_GAUGE: 'takeHomeGauge',
-  VERIFIED_TRIP_PDF: 'verifiedTripPdf',
+  VERIFIED_TRIP_PDF: 'verifiedTripCsv',
   SINKING_FUND: 'sinkingFund',
 });
 
@@ -107,7 +107,7 @@ const PLANS = Object.freeze({
     skuLimit: PRODUCT_LIMITS[PLAN_IDS.SOLO],
     includedSmsCredits: 0,
     target: ['farmers', 'small_manufacturers', 'micro_retailers'],
-    reportType: 'vitals_pdf',
+    reportType: 'vitals_csv',
     nextPlan: PLAN_IDS.SMART,
     features: { ...baseBusinessFeatures },
     lockedFeatures: {
@@ -129,7 +129,7 @@ const PLANS = Object.freeze({
     skuLimit: PRODUCT_LIMITS[PLAN_IDS.SMART],
     includedSmsCredits: 500,
     target: ['growing_retailers', 'wholesalers', 'distributors'],
-    reportType: 'performance_pdf',
+    reportType: 'performance_csv',
     nextPlan: PLAN_IDS.GROWTH,
     features: {
       ...baseBusinessFeatures,
@@ -148,7 +148,7 @@ const PLANS = Object.freeze({
       [FEATURE_KEYS.BILL_GUARDIAN]: 'Upgrade to Plan 3 for 10-day bill alerts.',
       [FEATURE_KEYS.DAILY_BURN_TRACKER]: 'Upgrade to Plan 3 to track daily burn.',
       [FEATURE_KEYS.ASSET_TRACKING]: 'Upgrade to Plan 3 to track assets and net worth.',
-      [FEATURE_KEYS.AUDIT_PDF]: 'Upgrade to Plan 3 for the full audit PDF.',
+      [FEATURE_KEYS.AUDIT_PDF]: 'Upgrade to Plan 3 for the full audit CSV.',
     },
   },
   [PLAN_IDS.GROWTH]: {
@@ -162,7 +162,7 @@ const PLANS = Object.freeze({
     skuLimit: PRODUCT_LIMITS[PLAN_IDS.GROWTH],
     includedSmsCredits: 2000,
     target: ['large_manufacturers', 'wholesalers', 'property_owners'],
-    reportType: 'audit_pdf',
+    reportType: 'audit_csv',
     nextPlan: null,
     features: {
       ...baseBusinessFeatures,
@@ -197,7 +197,7 @@ const PLANS = Object.freeze({
     skuLimit: PRODUCT_LIMITS[PLAN_IDS.MIZIGO],
     includedSmsCredits: null,
     target: ['truck_drivers', 'fleet_owners'],
-    reportType: 'verified_trip_pdf',
+    reportType: 'verified_trip_csv',
     nextPlan: null,
     standalone: true,
     features: {

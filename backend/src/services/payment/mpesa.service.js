@@ -3,6 +3,7 @@ const Wallet = require('../../models/Wallet.model');
 const Order = require('../../models/Order.model');
 const Logistics = require('../../models/Logistics.model');
 const Transaction = require('../../models/Transaction.model');
+const User = require('../../models/User.model');
 const escrowService = require('../order/escrow.service');
 const qrChainSvc = require('../order/qrChain.service');
 const mongoose = require('mongoose');
@@ -75,6 +76,37 @@ const createMpesaError = (message, code, statusCode = 503, details = {}) => {
   return error;
 };
 
+const getSelectedLogisticsProvider = async (sellerId) => {
+  const seller = await User.findById(sellerId).select('sellerLogisticsAddon');
+  const addon = seller?.sellerLogisticsAddon || {};
+  const providerId = addon.selectedProvider?._id || addon.selectedProvider;
+  if (!addon.active || !providerId || !mongoose.Types.ObjectId.isValid(providerId)) return null;
+
+  return User.findOne({
+    _id: providerId,
+    role: 'logistics',
+    $or: [
+      { verificationStatus: 'verified' },
+      { 'logisticsProfile.verificationStatus': 'verified' },
+    ],
+  }).select('fullName name businessName phone logisticsProfile employer ownerAccount role');
+};
+
+const buildLogisticsAssignment = (provider) => {
+  if (!provider?._id) return {};
+  const driverMode = String(provider.logisticsProfile?.driverMode || '').toLowerCase();
+  const fleetOwner = provider.employer || provider.ownerAccount || provider.logisticsProfile?.fleetOwner;
+  const isFleetManaged = driverMode === 'hired_driver' || Boolean(fleetOwner);
+
+  return {
+    driver: provider._id,
+    ...(isFleetManaged && fleetOwner ? { fleetOwner } : {}),
+    driverName: provider.businessName || provider.fullName || provider.name || 'Logistics provider',
+    driverPhone: provider.phone || '',
+    carrier: isFleetManaged ? 'fleet_managed' : 'solo_owner_operator',
+  };
+};
+
 class MpesaService {
   async ensureLogisticsRecordForPaidOrder(orderId, source = 'mpesa_payment') {
     const existing = await Logistics.findOne({ order: orderId });
@@ -90,6 +122,8 @@ class MpesaService {
     }
 
     const product = order.product || {};
+    const selectedProvider = await getSelectedLogisticsProvider(order.seller);
+    const logisticsAssignment = buildLogisticsAssignment(selectedProvider);
     const pickupAddress = normalizeLogisticsAddress(product.pickupAddress, {
       label: product.locationHub || 'Seller pickup hub',
       town: product.locationHub || 'Seller hub',
@@ -107,7 +141,8 @@ class MpesaService {
         orderNumber,
         seller: order.seller,
         buyer: order.buyer,
-        carrier: 'solo_owner_operator',
+        carrier: logisticsAssignment.carrier || 'solo_owner_operator',
+        ...logisticsAssignment,
         pickupAddress,
         shippingAddress,
         weight: Number(product.weightKg || order.quantity || 1),
@@ -123,6 +158,8 @@ class MpesaService {
           source,
           paymentIncludedInEscrow: true,
           calculationSource: order.logisticsPricing?.calculationSource,
+          selectedProviderId: selectedProvider?._id,
+          selectedProviderName: selectedProvider?.businessName || selectedProvider?.fullName || selectedProvider?.name,
           autoCreatedAt: new Date(),
         },
       });
@@ -261,7 +298,7 @@ class MpesaService {
     }
   }
 
-  async initiateSubscriptionPayment(planId, phoneNumber, userId) {
+  async initiateSubscriptionPayment(planId, phoneNumber, userId, options = {}) {
     const normalizedPlanId = normalizePlanId(planId);
     const plan = PLANS[normalizedPlanId];
     const amount = PLAN_PRICES[normalizedPlanId];
@@ -323,6 +360,7 @@ class MpesaService {
           payerUserId: userId,
           accountReference,
           mpesaShortCode: subscriptionShortCode,
+          agentNationalId: String(options.agentNationalId || '').replace(/\D/g, '') || null,
         }),
       });
 

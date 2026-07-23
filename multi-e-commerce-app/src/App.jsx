@@ -33,6 +33,7 @@ const BuyerRFQInbox = lazy(() => import('./pages/BuyerRFQInbox'));
 const BuyerSellers = lazy(() => import('./pages/BuyerSellers'));
 const BuyerReviews = lazy(() => import('./pages/BuyerReviews'));
 const BuyerProductAlerts = lazy(() => import('./pages/BuyerProductAlerts'));
+const BuyerLogisticsPreference = lazy(() => import('./pages/BuyerLogisticsPreference'));
 const Orders = lazy(() => import('./pages/Orders'));
 const OrderTracking = lazy(() => import('./pages/OrderTracking'));
 const Profile = lazy(() => import('./pages/Profile'));
@@ -61,6 +62,7 @@ const EditProduct = lazy(() => import('./pages/EditProduct'));
 const SellerOrders = lazy(() => import('./pages/SellerOrders'));
 const SellerRFQs = lazy(() => import('./pages/SellerRFQs'));
 const SellerFinance = lazy(() => import('./pages/SellerFinance'));
+const SellerLogisticsRequests = lazy(() => import('./pages/SellerLogisticsRequests'));
 const RegionalScarcityBoard = lazy(() => import('./pages/RegionalScarcityBoard'));
 const SellerPremiumVerification = lazy(() => import('./pages/SellerPremiumVerification'));
 const SellerPremiumPayment = lazy(() => import('./pages/SellerPremiumPayment'));
@@ -169,6 +171,7 @@ function App() {
                           <Route path="orders/:id/track" element={<OrderTracking />} />
                           <Route path="rfqs" element={<BuyerRFQInbox />} />
                           <Route path="sellers" element={<BuyerSellers />} />
+                          <Route path="logistics" element={<BuyerLogisticsPreference />} />
                           <Route path="reviews" element={<BuyerReviews />} />
                           <Route path="product-alerts" element={<BuyerProductAlerts />} />
                           <Route path="profile" element={<Profile />} />
@@ -206,6 +209,7 @@ function App() {
                           <Route path="edit-product/:id" element={<EditProduct />} />
                           <Route path="products" element={<SellerProducts />} />
                           <Route path="orders" element={<SellerOrders />} />
+                          <Route path="logistics-requests" element={<SellerLogisticsRequests />} />
                           <Route path="rfqs" element={<SellerRFQs />} />
                           <Route path="finance" element={<SellerFinance />} />
                           <Route path="support" element={<SupportInbox />} />
@@ -223,6 +227,8 @@ function App() {
                       <Route element={<AdminRoute />}>
                         <Route element={<AdminLayout />}>
                           <Route path="admin/dashboard" element={<AdminDashboard />} />
+                          <Route path="admin/documents" element={<AdminDashboard section="documents" />} />
+                          <Route path="admin/agent-referrals" element={<AdminDashboard section="agent-referrals" />} />
                           <Route path="admin/users" element={<AdminUsers />} />
                           <Route path="admin/categories" element={<AdminCategories />} />
                           <Route path="admin/orders" element={<AdminOrders />} />

@@ -151,6 +151,35 @@ router.get(
   ctrl.getVerifiedProviders
 );
 
+router.get(
+  '/buyer/preference',
+  authorize('buyer', 'admin'),
+  ctrl.getBuyerLogisticsPreference
+);
+
+router.put(
+  '/buyer/preference',
+  authorize('buyer', 'admin'),
+  [
+    body('active').optional().isBoolean(),
+    body('logisticsProviderId').optional({ nullable: true, checkFalsy: true }).isMongoId().withMessage('Choose a valid logistics company.'),
+    body('deliveryHub').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ max: 120 }),
+    body('notes').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ max: 300 }),
+  ],
+  validate,
+  ctrl.updateBuyerLogisticsPreference
+);
+
+router.get(
+  '/seller/buyer-requests',
+  authorize('seller', 'farmer', 'admin'),
+  [
+    query('limit').optional().isInt({ min: 1, max: 100 }),
+  ],
+  validate,
+  ctrl.getSellerBuyerLogisticsRequests
+);
+
 router.put(
   ['/location', '/driver/location'],
   authorize('logistics'),
@@ -253,6 +282,7 @@ router
     subscriptionGate('growth'),
     [
       body('orderId').isMongoId().withMessage('Valid order ID required.'),
+      body('logisticsProviderId').optional({ nullable: true, checkFalsy: true }).isMongoId().withMessage('Choose a valid logistics company.'),
       body('carrier').optional().isIn(['solo_owner_operator', 'fleet_managed', 'third_party', 'other']),
       body('cargoType').optional().isString().trim(),
       body('weight').optional().isFloat({ min: 0 }),

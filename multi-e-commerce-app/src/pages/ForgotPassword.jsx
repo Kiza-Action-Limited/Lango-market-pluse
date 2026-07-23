@@ -25,6 +25,7 @@ const ForgotPassword = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [devResetToken, setDevResetToken] = useState('');
 
   const handleSendReset = async (e) => {
     e.preventDefault();
@@ -43,9 +44,10 @@ const ForgotPassword = () => {
         return;
       }
 
-      await authService.forgotPassword(cleanEmail);
+      const resetResponse = await authService.forgotPassword(cleanEmail);
+      setDevResetToken(resetResponse?.devResetToken || '');
       setDone(true);
-      toast.success('OTP code is send to your email. Please check your inbox.');
+      toast.success('Password reset link sent. Please check your inbox.');
     } catch (error) {
       const message = error?.response?.data?.message || 'Failed to send OTP verification email';
       toast.error(message);
@@ -93,7 +95,7 @@ const ForgotPassword = () => {
         <p className="text-sm text-[#6B7280] mt-1">
           {hasToken
             ? 'Enter your new password to restore access to your account.'
-            : 'Enter your email and we will send a password reset link.'}
+            : 'Enter your email and we will send a secure password reset link.'}
         </p>
 
         {!hasToken && !done && (
@@ -174,8 +176,16 @@ const ForgotPassword = () => {
             <p className="text-sm text-[#166534] font-medium">
               {hasToken
                 ? 'Your password has been updated successfully.'
-                : 'If your email exists, a reset link has been sent.'}
+                : 'A password reset link has been sent if the email belongs to an account.'}
             </p>
+            {devResetToken && !hasToken && (
+              <Link
+                to={`/forgot-password?token=${encodeURIComponent(devResetToken)}${role ? `&role=${encodeURIComponent(role)}` : ''}`}
+                className="mt-3 inline-block rounded-md border border-[#16A34A]/30 bg-white px-3 py-2 text-sm font-semibold text-[#166534] hover:bg-[#ECFDF5]"
+              >
+                Continue with development reset link
+              </Link>
+            )}
             <Link to={loginPath} className="inline-block mt-3 text-sm font-semibold text-[#F97316] hover:underline">
               Go to login
             </Link>

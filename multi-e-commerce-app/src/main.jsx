@@ -45,3 +45,11 @@ root.render(
     </PersistGate>
   </Provider>
 );
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch(() => {
+      // The app remains fully usable if a browser or environment blocks service workers.
+    });
+  });
+}

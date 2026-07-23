@@ -11,72 +11,72 @@ export const API_ENDPOINTS = {
   
   // Products
   PRODUCTS: {
-    BASE: '/products',
-    FEATURED: '/products/featured',
-    DETAIL: (id) => `/products/${id}`,
-    REVIEWS: (id) => `/products/${id}/reviews`,
+    BASE: '/v1/products',
+    FEATURED: '/v1/products/featured',
+    DETAIL: (id) => `/v1/products/${id}`,
+    REVIEWS: (id) => `/v1/products/${id}/reviews`,
   },
   
   // Categories
   CATEGORIES: {
-    BASE: '/categories',
+    BASE: '/v1/categories',
   },
   
   // Cart
   CART: {
-    BASE: '/cart',
-    ADD: '/cart/add',
-    UPDATE: '/cart/update',
-    REMOVE: (id) => `/cart/remove/${id}`,
-    CLEAR: '/cart/clear',
+    BASE: '/v1/cart',
+    ADD: '/v1/cart/add',
+    UPDATE: '/v1/cart/update',
+    REMOVE: (id) => `/v1/cart/remove/${id}`,
+    CLEAR: '/v1/cart/clear',
   },
   
-  // Orders5
+  // Orders
   ORDERS: {
-    BASE: '/orders',
-    DETAIL: (id) => `/orders/${id}`,
-    TRACK: (id) => `/orders/${id}/tracking`,
-    CANCEL: (id) => `/orders/${id}/cancel`,
+    BASE: '/v1/orders',
+    DETAIL: (id) => `/v1/orders/${id}`,
+    TRACK: (id) => `/v1/orders/${id}/tracking`,
+    CANCEL: (id) => `/v1/orders/${id}/cancel`,
   },
   
   // Wishlist
   WISHLIST: {
-    BASE: '/wishlist',
-    CHECK: (id) => `/wishlist/check/${id}`,
-    TOGGLE: (id) => `/wishlist/${id}`,
+    BASE: '/v1/wishlist',
+    CHECK: (id) => `/v1/wishlist/check/${id}`,
+    TOGGLE: (id) => `/v1/wishlist/${id}`,
   },
   
   // Notifications
   NOTIFICATIONS: {
-    BASE: '/notifications',
-    READ: (id) => `/notifications/${id}/read`,
-    READ_ALL: '/notifications/read-all',
+    BASE: '/v1/notifications',
+    READ: (id) => `/v1/notifications/${id}/read`,
+    READ_ALL: '/v1/notifications/read-all',
   },
   
   // Seller
   SELLER: {
-    STATS: '/seller/stats',
-    PRODUCTS: '/seller/products',
-    
-    ORDERS: '/seller/orders',
+    PREMIUM_VERIFICATION: '/v1/seller/premium-verification',
+    EXPORT: (type) => `/v1/seller/export/${type}`,
   },
   
   // Admin
   ADMIN: {
-    STATS: '/admin/stats',
-    USERS: '/admin/users',
-    BLOCK_USER: (id) => `/admin/users/${id}/block`,
-    ORDERS: '/admin/orders',
-    UPDATE_ORDER_STATUS: (id) => `/admin/orders/${id}/status`,
-    PRODUCTS: '/admin/products',
-    TOGGLE_PRODUCT: (id) => `/admin/products/${id}/toggle`,
-    SUBSCRIPTIONS: '/admin/subscriptions',
-    UPDATE_SUBSCRIPTION: (id) => `/admin/subscriptions/${id}`,
+    STATS: '/v1/admin/stats',
+    USERS: '/v1/admin/users',
+    BLOCK_USER: (id) => `/v1/admin/users/${id}`,
+    ORDERS: '/v1/admin/orders',
+    UPDATE_ORDER_STATUS: (id) => `/v1/admin/orders/${id}/status`,
+    PRODUCTS: '/v1/admin/products',
+    TOGGLE_PRODUCT: (id) => `/v1/admin/products/${id}/toggle`,
+    SUBSCRIPTIONS: '/v1/admin/subscriptions',
+    UPDATE_SUBSCRIPTION: (id) => `/v1/admin/subscriptions/${id}`,
+    EXPORT: (type) => `/v1/admin/export/${type}`,
   },
   
   // Profile
   PROFILE: {
-    BASE: '/profile',
+    BASE: '/v1/auth/me',
+    AVATAR: '/v1/auth/me/profile-image',
   },
 };
 

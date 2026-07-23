@@ -581,7 +581,7 @@ const MizigoEngine = () => {
               <h3 className="mb-2 text-sm font-semibold text-[#111827]">Verified Trip Statements</h3>
               {trips.length ? (
                 <div className="rounded-md border border-gray-200 p-3 text-sm text-gray-600">
-                  {trips.length} live trip record{trips.length === 1 ? '' : 's'} available. Monthly PDF generation requires a backend statement endpoint.
+                  {trips.length} live trip record{trips.length === 1 ? '' : 's'} available. Monthly CSV generation requires a backend statement endpoint.
                 </div>
               ) : <EmptyState>No trip records returned.</EmptyState>}
               <h3 className="mb-2 mt-4 text-sm font-semibold text-[#111827]">Cross-Dock Timing</h3>

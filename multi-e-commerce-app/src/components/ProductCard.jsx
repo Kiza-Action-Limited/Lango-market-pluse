@@ -30,21 +30,21 @@ const ProductCard = ({ product }) => {
   };
 
   return (
-    <div className="group hover-card bg-white rounded-md border border-gray-200 shadow-sm overflow-hidden">
+    <div className="group hover-card overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
       <Link to={`/products/${productId}`} className="relative block">
-        <div className="h-44 bg-gray-100">
+        <div className="aspect-[4/3] bg-gray-100 sm:h-44 sm:aspect-auto">
           {primaryImageUrl ? (
-            <img src={primaryImageUrl} alt={product.name} className="w-full h-full object-cover" />
+            <img src={primaryImageUrl} alt={product.name} className="h-full w-full object-cover" />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
+            <div className="flex h-full w-full flex-col items-center justify-center text-gray-400">
               <FaImage className="text-2xl mb-2" />
               <span className="text-xs">Image unavailable</span>
             </div>
           )}
         </div>
 
-        <div className="absolute left-2 top-2 flex items-start gap-1">
-          <span className="rounded-md bg-white/95 px-2 py-1 text-[10px] font-semibold text-[#111827] border border-gray-200">
+        <div className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] items-start gap-1">
+          <span className="truncate rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[10px] font-semibold text-[#111827]">
             {sellerType || 'Marketplace'}
           </span>
           {hasDiscount && (
@@ -56,34 +56,34 @@ const ProductCard = ({ product }) => {
           <button
             type="button"
             onClick={handleAddToCart}
-            className="absolute left-2 right-2 bottom-2 h-7 rounded-md bg-[#F97316] text-white text-[11px] font-medium inline-flex items-center justify-center gap-1.5 shadow-md transition-all duration-200 md:translate-y-2 md:opacity-0 md:group-hover:translate-y-0 md:group-hover:opacity-100"
+            className="absolute bottom-2 left-2 right-2 inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md bg-[#F97316] px-2 text-[11px] font-semibold text-white shadow-md transition-all duration-200 md:translate-y-2 md:opacity-0 md:group-hover:translate-y-0 md:group-hover:opacity-100"
           >
             <FaShoppingCart size={10} />
-            {buttonLabel}
+            <span className="truncate">{buttonLabel}</span>
           </button>
         ) : (
-          <div className="absolute left-2 right-2 bottom-2 h-7 rounded-md bg-gray-300 text-gray-600 text-[11px] font-medium inline-flex items-center justify-center">
+          <div className="absolute bottom-2 left-2 right-2 inline-flex min-h-10 items-center justify-center rounded-md bg-gray-300 px-2 text-[11px] font-medium text-gray-600">
             Out of Stock
           </div>
         )}
       </Link>
 
-      <div className="p-2.5">
+      <div className="p-3">
         <div className="mb-1 flex items-center gap-1.5 text-[10px] text-gray-600">
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium">KE</span>
-          <span>{campusLabel || 'Online Seller'}</span>
+          <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-medium">KE</span>
+          <span className="truncate">{campusLabel || 'Online Seller'}</span>
         </div>
         <Link to={`/products/${productId}`}>
-          <h3 className="mb-1 line-clamp-2 min-h-[2.2rem] text-[13px] leading-5 font-medium text-[#111827] hover:text-[#F97316]">
+          <h3 className="mb-1 line-clamp-2 min-h-[2.35rem] text-[13px] font-medium leading-5 text-[#111827] hover:text-[#F97316] sm:text-sm">
             {product.name}
             {hasDiscount && <span className="ml-1 font-semibold text-[#F97316]">-{discountPct}%</span>}
           </h3>
         </Link>
 
-        <div className="mb-1">
-          <span className="text-[14px] font-semibold text-[#111827]">{formatCurrency(product.price)}</span>
+        <div className="mb-1 flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+          <span className="text-sm font-bold text-[#111827] sm:text-[15px]">{formatCurrency(product.price)}</span>
           {hasDiscount && (
-            <span className="ml-1.5 text-[11px] text-gray-400 line-through">{formatCurrency(product.originalPrice)}</span>
+            <span className="text-[11px] text-gray-400 line-through">{formatCurrency(product.originalPrice)}</span>
           )}
         </div>
 

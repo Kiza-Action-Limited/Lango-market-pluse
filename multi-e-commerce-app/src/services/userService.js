@@ -1,6 +1,34 @@
 // src/services/userService.js
 import api from '../config/axios';
 
+const normalizeAddressLabel = (addressData = {}) => {
+  if (typeof addressData === 'string') return addressData.trim();
+  return (
+    addressData.address ||
+    addressData.label ||
+    addressData.street ||
+    [addressData.addressLine1, addressData.addressLine2, addressData.city, addressData.county]
+      .filter(Boolean)
+      .join(', ')
+  ).trim();
+};
+
+const userToAddressResponse = (user) => {
+  const label = user?.address || user?.location?.address || '';
+  return {
+    success: true,
+    data: label
+      ? [{
+        id: 'primary',
+        _id: 'primary',
+        label,
+        address: label,
+        isDefault: true,
+      }]
+      : [],
+  };
+};
+
 export const userService = {
   getProfile: async () => {
     const response = await api.get('/v1/auth/me');
@@ -14,31 +42,33 @@ export const userService = {
 
   updateAvatar: async (avatarFile) => {
     const formData = new FormData();
-    formData.append('avatar', avatarFile);
-    const response = await api.put('/profile/avatar', formData, {
+    formData.append('profileImage', avatarFile);
+    const response = await api.post('/v1/auth/me/profile-image', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
   },
 
   getAddresses: async () => {
-    const response = await api.get('/profile/addresses');
-    return response.data;
+    const user = await userService.getProfile();
+    return userToAddressResponse(user);
   },
 
   addAddress: async (addressData) => {
-    const response = await api.post('/profile/addresses', addressData);
-    return response.data;
+    const address = normalizeAddressLabel(addressData);
+    const user = await userService.updateProfile({ address });
+    return { success: true, data: userToAddressResponse(user).data[0] || null };
   },
 
   updateAddress: async (addressId, addressData) => {
-    const response = await api.put(`/profile/addresses/${addressId}`, addressData);
-    return response.data;
+    const address = normalizeAddressLabel(addressData);
+    const user = await userService.updateProfile({ address });
+    return { success: true, data: userToAddressResponse(user).data[0] || null };
   },
 
   deleteAddress: async (addressId) => {
-    const response = await api.delete(`/profile/addresses/${addressId}`);
-    return response.data;
+    const user = await userService.updateProfile({ address: '' });
+    return { success: true, data: userToAddressResponse(user).data };
   },
 
   getWishlist: async () => {
@@ -62,17 +92,17 @@ export const userService = {
   },
 
   getOrderHistory: async () => {
-    const response = await api.get('/orders');
+    const response = await api.get('/v1/orders');
     return response.data;
   },
 
   getOrderDetails: async (orderId) => {
-    const response = await api.get(`/orders/${orderId}`);
+    const response = await api.get(`/v1/orders/${orderId}`);
     return response.data;
   },
 
   cancelOrder: async (orderId) => {
-    const response = await api.put(`/orders/${orderId}/cancel`);
+    const response = await api.put(`/v1/orders/${orderId}/cancel`);
     return response.data;
   }
 };

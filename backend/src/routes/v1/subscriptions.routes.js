@@ -56,6 +56,7 @@ router.post('/subscribe', [
   body('paymentMethod').optional().isIn(['mpesa', 'commission']),
   body('paymentCompleted').optional().isBoolean(),
   body('paymentReference').optional().isString().isLength({ min: 3 }),
+  body('agentNationalId').optional({ nullable: true, checkFalsy: true }).matches(/^[0-9]{5,20}$/).withMessage('Agent National ID must contain 5 to 20 digits'),
 ], subscriptionGate.checkRole('OWNER', 'FLEET_OWNER', 'DRIVER'), subscriptionController.subscribe);
 
 router.delete('/me', [

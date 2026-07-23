@@ -8,7 +8,11 @@ const Escrow = require('../models/Escrow.model');
 const Analytics = require('../models/Analytics.model');
 const Subscription = require('../models/Subscription.model');
 const SubscriptionFeature = require('../models/SubscriptionFeature.model');
+const AgentReferral = require('../models/AgentReferral.model');
 const SupportMessage = require('../models/SupportMessage.model');
+const Payment = require('../models/Payment.model');
+const Review = require('../models/Review.model');
+const RFQ = require('../models/RFQ.model');
 const billingService = require('../services/subscription/billing.service');
 const escrowService = require('../services/order/escrow.service');
 const notificationService = require('../services/notification/notification.service');
@@ -16,6 +20,7 @@ const emailService = require('../services/notification/email.service');
 const smsService = require('../services/notification/sms.service');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { PLANS } = require('../config/subscriptionPlans');
+const { dateStamp, displayName, docId, sendCsv } = require('../utils/csvExport');
 const { validationResult } = require('express-validator');
 
 const getDocId = (value) => value?._id || value?.id || value;
@@ -144,52 +149,6 @@ const appendInventoryFields = (product) => {
           recordedAt: raw.createdAt || new Date(),
         }],
   };
-};
-
-const escapePdfText = (value = '') => String(value)
-  .replace(/\\/g, '\\\\')
-  .replace(/\(/g, '\\(')
-  .replace(/\)/g, '\\)');
-
-const buildSimplePdfBuffer = (title, rows = []) => {
-  const lines = [];
-  let y = 800;
-  const addText = (size, text, x = 48) => {
-    lines.push(`BT /F1 ${size} Tf ${x} ${y} Td (${escapePdfText(text)}) Tj ET`);
-    y -= size + 7;
-  };
-
-  addText(18, title);
-  addText(10, `Generated: ${new Date().toLocaleString()}`);
-  y -= 8;
-  rows.forEach((row) => {
-    if (y < 80) return;
-    addText(row.size || 10, row.text || '');
-  });
-
-  const content = lines.join('\n');
-  const objects = [
-    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
-    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
-    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj',
-    '4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj',
-    `5 0 obj << /Length ${Buffer.byteLength(content)} >> stream\n${content}\nendstream endobj`,
-  ];
-
-  let pdf = '%PDF-1.4\n';
-  const offsets = [0];
-  objects.forEach((object) => {
-    offsets.push(Buffer.byteLength(pdf));
-    pdf += `${object}\n`;
-  });
-  const xrefStart = Buffer.byteLength(pdf);
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += '0000000000 65535 f \n';
-  for (let index = 1; index <= objects.length; index += 1) {
-    pdf += `${String(offsets[index]).padStart(10, '0')} 00000 n \n`;
-  }
-  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
-  return Buffer.from(pdf);
 };
 
 const getAdminTargetQuery = ({ targetRole, targetUserType }) => {
@@ -1113,8 +1072,27 @@ exports.updateUser = async (req, res, next) => {
     } = req.body;
     const updates = {};
     
-    if (role) updates.role = role;
-    if (businessType) updates.businessType = businessType;
+    const normalizedRequestedRole = role ? String(role).trim().toLowerCase() : null;
+    if (normalizedRequestedRole) {
+      const normalizedRole = normalizedRequestedRole;
+      if (['brand', 'wholesaler', 'manufacturer', 'retailer', 'small_business'].includes(normalizedRole)) {
+        updates.role = 'seller';
+        updates.businessType = normalizedRole;
+      } else if (normalizedRole === 'farmer') {
+        updates.role = 'farmer';
+        updates.businessType = 'farmer';
+      } else {
+        updates.role = normalizedRole;
+        if (['buyer', 'admin'].includes(normalizedRole)) updates.businessType = null;
+        if (normalizedRole === 'logistics') updates.businessType = 'logistics';
+      }
+    }
+    if (
+      businessType &&
+      (!normalizedRequestedRole || ['seller', 'brand', 'wholesaler', 'manufacturer', 'retailer', 'small_business'].includes(normalizedRequestedRole))
+    ) {
+      updates.businessType = businessType;
+    }
     if (isBlocked !== undefined) updates.isBlocked = isBlocked;
     if (isActive !== undefined) updates.isActive = isActive;
     else if (isBlocked !== undefined) updates.isActive = !isBlocked;
@@ -1470,6 +1448,85 @@ exports.getSubscriptions = async (req, res, next) => {
 };
 
 /**
+ * Get agent referrals captured during seller subscription activation
+ * GET /api/v1/admin/agent-referrals
+ */
+exports.getAgentReferrals = async (req, res, next) => {
+  try {
+    const { search = '', agentNationalId = '', plan = 'all', page = 1, limit = 50 } = req.query;
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
+    const query = {};
+
+    if (agentNationalId) {
+      query.agentNationalId = String(agentNationalId).replace(/\D/g, '');
+    }
+
+    if (plan && plan !== 'all') {
+      query.planId = plan;
+    }
+
+    if (search) {
+      const normalizedSearch = String(search).trim();
+      query.$or = [
+        { agentNationalId: { $regex: normalizedSearch, $options: 'i' } },
+        { 'sellerSnapshot.name': { $regex: normalizedSearch, $options: 'i' } },
+        { 'sellerSnapshot.businessName': { $regex: normalizedSearch, $options: 'i' } },
+        { 'sellerSnapshot.email': { $regex: normalizedSearch, $options: 'i' } },
+        { 'sellerSnapshot.phone': { $regex: normalizedSearch, $options: 'i' } },
+        { paymentReference: { $regex: normalizedSearch, $options: 'i' } },
+      ];
+    }
+
+    const [rows, total, uniqueAgentIds, byAgent, byPlan] = await Promise.all([
+      AgentReferral.find(query)
+        .populate('seller', 'fullName name businessName email phone role businessType')
+        .populate('subscription', 'plan planName status price startDate endDate')
+        .sort({ referredAt: -1, createdAt: -1 })
+        .skip((pageNumber - 1) * pageSize)
+        .limit(pageSize)
+        .lean(),
+      AgentReferral.countDocuments(query),
+      AgentReferral.distinct('agentNationalId', query),
+      AgentReferral.aggregate([
+        { $match: query },
+        { $group: { _id: '$agentNationalId', referrals: { $sum: 1 }, latestReferralAt: { $max: '$referredAt' } } },
+        { $sort: { referrals: -1, latestReferralAt: -1 } },
+        { $limit: 20 },
+      ]),
+      AgentReferral.aggregate([
+        { $match: query },
+        { $group: { _id: '$planId', referrals: { $sum: 1 } } },
+        { $sort: { referrals: -1 } },
+      ]),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: rows,
+      summary: {
+        totalReferrals: total,
+        uniqueAgents: uniqueAgentIds.length,
+        topAgents: byAgent.map((agent) => ({
+          agentNationalId: agent._id,
+          referrals: agent.referrals,
+          latestReferralAt: agent.latestReferralAt,
+        })),
+        byPlan: byPlan.map((item) => ({ planId: item._id, referrals: item.referrals })),
+      },
+      pagination: {
+        page: pageNumber,
+        limit: pageSize,
+        total,
+        pages: Math.ceil(total / pageSize) || 1,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Create or update a seller subscription as super admin
  * PUT /api/v1/admin/subscriptions/:userId
  */
@@ -1816,6 +1873,7 @@ exports.getAllOrders = async (req, res, next) => {
     let orders = await Order.find(query)
       .populate('buyer', 'fullName name email phone userType role businessType')
       .populate('seller', 'fullName name businessName email phone role businessType')
+      .populate('logisticsPreference.requestedProvider', 'fullName name businessName phone logisticsProfile.baseHub logisticsProfile.locationHub logisticsProfile.vehiclePlate logisticsProfile.vehicleType')
       .populate('product', 'name images price category')
       .sort('-createdAt')
       .lean();
@@ -1839,7 +1897,7 @@ exports.getAllOrders = async (req, res, next) => {
     const pagedOrders = orders.slice((pageNumber - 1) * pageSize, pageNumber * pageSize);
 
     const logisticsRecords = await Logistics.find({ order: { $in: pagedOrders.map((order) => order._id) } })
-      .select('order tripId bookingReference trackingNumber status carrier estimatedDelivery shippingCost driverName driverPhone liveTracking gpsTracking')
+      .select('order tripId bookingReference trackingNumber status carrier estimatedDelivery shippingCost driverName driverPhone liveTracking gpsTracking metadata')
       .lean();
     const logisticsByOrder = new Map(logisticsRecords.map((record) => [String(record.order), record]));
 
@@ -2193,10 +2251,11 @@ exports.getLogistics = async (req, res, next) => {
     const logistics = await Logistics.find(query)
       .populate({
         path: 'order',
-        select: 'orderNumber buyer seller totalAmount status paymentStatus paidAt deliveredAt releasedAt escrowReleaseDate',
+        select: 'orderNumber buyer seller totalAmount status paymentStatus paidAt deliveredAt releasedAt escrowReleaseDate logisticsPreference',
         populate: [
           { path: 'buyer', select: 'fullName name email phone userType' },
           { path: 'seller', select: 'fullName name businessName email phone' },
+          { path: 'logisticsPreference.requestedProvider', select: 'fullName name businessName phone logisticsProfile.baseHub logisticsProfile.locationHub logisticsProfile.vehiclePlate logisticsProfile.vehicleType' },
         ],
       })
       .populate('seller', 'fullName name businessName email phone')
@@ -2239,10 +2298,11 @@ exports.getLogisticsLiveTracking = async (req, res, next) => {
     const logistics = await Logistics.findById(req.params.logisticsId)
       .populate({
         path: 'order',
-        select: 'orderNumber buyer seller totalAmount status paymentStatus paidAt deliveredAt releasedAt escrowReleaseDate',
+        select: 'orderNumber buyer seller totalAmount status paymentStatus paidAt deliveredAt releasedAt escrowReleaseDate logisticsPreference',
         populate: [
           { path: 'buyer', select: 'fullName name email phone userType' },
           { path: 'seller', select: 'fullName name businessName email phone' },
+          { path: 'logisticsPreference.requestedProvider', select: 'fullName name businessName phone logisticsProfile.baseHub logisticsProfile.locationHub logisticsProfile.vehiclePlate logisticsProfile.vehicleType' },
         ],
       })
       .populate('seller', 'fullName name businessName email phone')
@@ -2929,11 +2989,396 @@ exports.broadcastNotification = async (req, res, next) => {
   }
 };
 
+const ADMIN_EXPORT_TYPES = [
+  'users',
+  'products',
+  'orders',
+  'payments',
+  'transactions',
+  'logistics',
+  'subscriptions',
+  'documents',
+  'categories',
+  'support',
+  'rfqs',
+  'reviews',
+  'agent-referrals',
+];
+
+const adminCsvHeaders = {
+  users: ['id', 'name', 'email', 'phone', 'role', 'businessType', 'businessName', 'verificationStatus', 'isActive', 'isBlocked', 'createdAt'],
+  products: ['id', 'name', 'seller', 'sellerEmail', 'category', 'price', 'unit', 'quantityAvailable', 'reservedQuantity', 'status', 'sku', 'createdAt'],
+  orders: ['id', 'orderNumber', 'buyer', 'seller', 'product', 'quantity', 'unitPrice', 'totalAmount', 'status', 'paidAt', 'deliveredAt', 'createdAt'],
+  payments: ['id', 'transactionId', 'user', 'order', 'amount', 'currency', 'paymentMethod', 'status', 'mpesaReceiptNumber', 'paidAt', 'createdAt'],
+  transactions: ['id', 'user', 'type', 'amount', 'currency', 'balanceBefore', 'balanceAfter', 'reference', 'status', 'createdAt'],
+  logistics: ['id', 'orderNumber', 'buyer', 'seller', 'driver', 'status', 'carrier', 'trackingNumber', 'shippingCost', 'estimatedDelivery', 'actualDelivery', 'createdAt'],
+  subscriptions: [
+    'id', 'seller', 'sellerEmail', 'sellerPhone', 'businessName', 'businessType',
+    'planId', 'planName', 'status', 'amount', 'billingCycle', 'paymentMethod',
+    'startDate', 'endDate', 'lastPaymentDate', 'nextBillingDate', 'autoRenew',
+    'smsCreditsAllocated', 'smsCreditsUsed', 'smsCreditsRemaining',
+    'createdAt', 'updatedAt',
+  ],
+  documents: ['id', 'user', 'email', 'role', 'businessType', 'source', 'documentType', 'title', 'documentNumber', 'hasFile', 'url', 'uploadedAt'],
+  categories: ['id', 'name', 'description', 'isActive', 'createdAt'],
+  support: ['id', 'user', 'email', 'subject', 'category', 'priority', 'status', 'createdAt', 'updatedAt'],
+  rfqs: ['id', 'rfqNumber', 'buyer', 'seller', 'product', 'quantity', 'unit', 'targetPrice', 'status', 'quoteTotal', 'neededBy', 'createdAt'],
+  reviews: ['id', 'product', 'seller', 'reviewer', 'order', 'rating', 'title', 'verified', 'helpful', 'unhelpful', 'createdAt'],
+  'agent-referrals': ['id', 'agentNationalId', 'seller', 'sellerEmail', 'sellerPhone', 'businessName', 'planId', 'source', 'paymentReference', 'status', 'referredAt', 'createdAt'],
+};
+
+const getAdminExportRows = async (type, filters = {}) => {
+  const limit = 10000;
+
+  switch (type) {
+    case 'users': {
+      const users = await User.find({})
+        .select('fullName name email phone role businessType businessName verificationStatus isActive isBlocked createdAt')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return users.map((user) => ({
+        id: docId(user),
+        name: displayName(user),
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        businessType: user.businessType,
+        businessName: user.businessName,
+        verificationStatus: user.verificationStatus,
+        isActive: user.isActive !== false,
+        isBlocked: Boolean(user.isBlocked),
+        createdAt: user.createdAt,
+      }));
+    }
+
+    case 'products': {
+      const products = await Product.find({})
+        .populate('seller', 'fullName name businessName email')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return products.map((product) => ({
+        id: docId(product),
+        name: product.name,
+        seller: displayName(product.seller),
+        sellerEmail: product.seller?.email,
+        category: product.category,
+        price: product.price,
+        unit: product.unit,
+        quantityAvailable: product.quantityAvailable,
+        reservedQuantity: product.reservedQuantity,
+        status: product.status || (product.isPublished === false ? 'inactive' : 'active'),
+        sku: product.sku,
+        createdAt: product.createdAt,
+      }));
+    }
+
+    case 'orders': {
+      const orders = await Order.find({})
+        .populate('buyer', 'fullName name businessName email phone')
+        .populate('seller', 'fullName name businessName email phone')
+        .populate('product', 'name')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return orders.map((order) => ({
+        id: docId(order),
+        orderNumber: order.orderNumber,
+        buyer: displayName(order.buyer),
+        seller: displayName(order.seller),
+        product: order.product?.name || docId(order.product),
+        quantity: order.quantity,
+        unitPrice: order.unitPrice,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        paidAt: order.paidAt,
+        deliveredAt: order.deliveredAt,
+        createdAt: order.createdAt,
+      }));
+    }
+
+    case 'payments': {
+      const payments = await Payment.find({})
+        .populate('user', 'fullName name businessName email phone')
+        .populate('order', 'orderNumber')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return payments.map((payment) => ({
+        id: docId(payment),
+        transactionId: payment.transactionId,
+        user: displayName(payment.user),
+        order: payment.order?.orderNumber || docId(payment.order),
+        amount: payment.amount,
+        currency: payment.currency,
+        paymentMethod: payment.paymentMethod,
+        status: payment.status,
+        mpesaReceiptNumber: payment.mpesaReceiptNumber,
+        paidAt: payment.paidAt,
+        createdAt: payment.createdAt,
+      }));
+    }
+
+    case 'transactions': {
+      const transactions = await Transaction.find({})
+        .populate('user', 'fullName name businessName email phone')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return transactions.map((transaction) => ({
+        id: docId(transaction),
+        user: displayName(transaction.user),
+        type: transaction.type,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        balanceBefore: transaction.balanceBefore,
+        balanceAfter: transaction.balanceAfter,
+        reference: transaction.reference,
+        status: transaction.status,
+        createdAt: transaction.createdAt,
+      }));
+    }
+
+    case 'logistics': {
+      const records = await Logistics.find({})
+        .populate('buyer seller driver', 'fullName name businessName email phone')
+        .populate('order', 'orderNumber')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return records.map((record) => ({
+        id: docId(record),
+        orderNumber: record.order?.orderNumber || record.orderNumber,
+        buyer: displayName(record.buyer),
+        seller: displayName(record.seller),
+        driver: displayName(record.driver),
+        status: record.status,
+        carrier: record.carrier,
+        trackingNumber: record.trackingNumber,
+        shippingCost: record.shippingCost,
+        estimatedDelivery: record.estimatedDelivery,
+        actualDelivery: record.actualDelivery,
+        createdAt: record.createdAt,
+      }));
+    }
+
+    case 'subscriptions': {
+      const subscriptionQuery = {};
+      const plan = String(filters.plan || '').trim().toLowerCase();
+      const status = String(filters.status || '').trim().toLowerCase();
+      const search = String(filters.search || '').trim().toLowerCase();
+
+      if (plan && plan !== 'all') subscriptionQuery.plan = plan;
+      if (status && status !== 'all') subscriptionQuery.status = status;
+
+      const subscriptions = await Subscription.find(subscriptionQuery)
+        .populate('user', 'fullName name businessName email phone role businessType')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+
+      return subscriptions.filter((subscription) => {
+        if (!search) return true;
+        const seller = subscription.user || {};
+        return [
+          displayName(seller),
+          seller.email,
+          seller.phone,
+          seller.businessName,
+          seller.businessType,
+          subscription.plan,
+          subscription.planName,
+          subscription.status,
+        ].some((value) => String(value || '').toLowerCase().includes(search));
+      }).map((subscription) => {
+        const seller = subscription.user;
+        const smsAllocated = Number(subscription.features?.smsCreditsAllocated || 0);
+        const smsUsed = Number(subscription.features?.smsCreditsUsed || 0);
+        return {
+          id: docId(subscription),
+          seller: displayName(seller),
+          sellerEmail: seller?.email,
+          sellerPhone: seller?.phone,
+          businessName: seller?.businessName,
+          businessType: seller?.businessType || seller?.role,
+          planId: subscription.planId || subscription.plan,
+          planName: subscription.planName,
+          status: subscription.status,
+          amount: subscription.amount ?? subscription.price,
+          billingCycle: subscription.billingCycle,
+          paymentMethod: subscription.paymentMethod,
+          startDate: subscription.startDate,
+          endDate: subscription.endDate,
+          lastPaymentDate: subscription.lastPaymentDate,
+          nextBillingDate: subscription.nextBillingDate,
+          autoRenew: subscription.autoRenew,
+          smsCreditsAllocated: smsAllocated,
+          smsCreditsUsed: smsUsed,
+          smsCreditsRemaining: Math.max(0, smsAllocated - smsUsed),
+          createdAt: subscription.createdAt,
+          updatedAt: subscription.updatedAt,
+        };
+      });
+    }
+
+    case 'documents': {
+      const users = await User.find({})
+        .select('fullName name email phone role businessType businessName adminDocuments logisticsProfile kycDetails verificationStatus kycVerified')
+        .sort('-updatedAt')
+        .limit(limit)
+        .lean();
+      return users.flatMap((user) => buildUserDocumentList(user).map((document) => ({
+        id: docId(document),
+        user: displayName(user),
+        email: user.email,
+        role: user.role,
+        businessType: user.businessType,
+        source: document.source,
+        documentType: document.documentType,
+        title: document.title,
+        documentNumber: document.documentNumber,
+        hasFile: document.hasFile,
+        url: document.url,
+        uploadedAt: document.uploadedAt,
+      })));
+    }
+
+    case 'categories': {
+      const categories = await Category.find({}).sort('name').limit(limit).lean();
+      return categories.map((category) => ({
+        id: docId(category),
+        name: category.name,
+        description: category.description,
+        isActive: category.isActive !== false,
+        createdAt: category.createdAt,
+      }));
+    }
+
+    case 'support': {
+      const messages = await SupportMessage.find({})
+        .populate('requester', 'fullName name businessName email phone')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return messages.map((message) => ({
+        id: docId(message),
+        user: displayName(message.requester) || message.requesterSnapshot?.name,
+        email: message.requesterSnapshot?.email || message.requester?.email,
+        subject: message.subject || message.title,
+        category: message.category,
+        priority: message.priority,
+        status: message.status,
+        createdAt: message.createdAt,
+        updatedAt: message.updatedAt,
+      }));
+    }
+
+    case 'rfqs': {
+      const rfqs = await RFQ.find({})
+        .populate('buyer seller', 'fullName name businessName email phone')
+        .populate('product', 'name')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return rfqs.map((rfq) => ({
+        id: docId(rfq),
+        rfqNumber: rfq.rfqNumber,
+        buyer: displayName(rfq.buyer),
+        seller: displayName(rfq.seller),
+        product: rfq.product?.name || docId(rfq.product),
+        quantity: rfq.quantity,
+        unit: rfq.unit,
+        targetPrice: rfq.targetPrice,
+        status: rfq.status,
+        quoteTotal: rfq.quote?.totalPrice,
+        neededBy: rfq.neededBy,
+        createdAt: rfq.createdAt,
+      }));
+    }
+
+    case 'reviews': {
+      const reviews = await Review.find({})
+        .populate('product', 'name')
+        .populate('seller reviewer', 'fullName name businessName email phone')
+        .populate('order', 'orderNumber')
+        .sort('-createdAt')
+        .limit(limit)
+        .lean();
+      return reviews.map((review) => ({
+        id: docId(review),
+        product: review.product?.name || docId(review.product),
+        seller: displayName(review.seller),
+        reviewer: displayName(review.reviewer),
+        order: review.order?.orderNumber || docId(review.order),
+        rating: review.rating,
+        title: review.title,
+        verified: review.verified,
+        helpful: review.helpful,
+        unhelpful: review.unhelpful,
+        createdAt: review.createdAt,
+      }));
+    }
+
+    case 'agent-referrals': {
+      const referrals = await AgentReferral.find({})
+        .populate('seller', 'fullName name businessName email phone')
+        .sort('-referredAt')
+        .limit(limit)
+        .lean();
+      return referrals.map((referral) => {
+        const seller = referral.seller || referral.sellerSnapshot || {};
+        return {
+          id: docId(referral),
+          agentNationalId: referral.agentNationalId,
+          seller: displayName(seller) || referral.sellerSnapshot?.name,
+          sellerEmail: seller.email || referral.sellerSnapshot?.email,
+          sellerPhone: seller.phone || referral.sellerSnapshot?.phone,
+          businessName: seller.businessName || referral.sellerSnapshot?.businessName,
+          planId: referral.planId,
+          source: referral.source,
+          paymentReference: referral.paymentReference,
+          status: referral.status,
+          referredAt: referral.referredAt,
+          createdAt: referral.createdAt,
+        };
+      });
+    }
+
+    default:
+      return null;
+  }
+};
+
 /**
- * Export compact admin report as PDF
- * GET /api/v1/admin/reports/summary.pdf
+ * Export admin records as CSV
+ * GET /api/v1/admin/export/:type
  */
-exports.exportSummaryPdf = async (req, res, next) => {
+exports.exportRecordsCsv = async (req, res, next) => {
+  try {
+    const type = String(req.params.type || '').trim().toLowerCase();
+    if (!ADMIN_EXPORT_TYPES.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: `Unsupported export type. Use one of: ${ADMIN_EXPORT_TYPES.join(', ')}`,
+      });
+    }
+
+    const rows = await getAdminExportRows(type, req.query || {});
+    const exportSuffix = type === 'subscriptions' && req.query?.plan && req.query.plan !== 'all'
+      ? `_${String(req.query.plan).replace(/[^a-z0-9_-]/gi, '').toLowerCase()}`
+      : '';
+    sendCsv(res, `admin_${type}${exportSuffix}_${dateStamp()}.csv`, adminCsvHeaders[type], rows || []);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Export compact admin report as CSV
+ * GET /api/v1/admin/reports/summary.csv
+ */
+exports.exportSummaryCsv = async (req, res, next) => {
   try {
     const [
       totalUsers,
@@ -2960,21 +3405,23 @@ exports.exportSummaryPdf = async (req, res, next) => {
     ]);
 
     const rows = [
-      { size: 13, text: 'Platform Snapshot' },
-      { text: `Users: ${totalUsers} total | ${activeUsers} active` },
-      { text: `Products: ${totalProducts} total | ${activeProducts} active | ${inactiveProducts} inactive` },
-      { text: `Orders: ${totalOrders} total | ${pendingOrders} pending/processing` },
-      { text: `Logistics: ${logisticsProviders} providers | ${verifiedLogistics} verified` },
-      { size: 13, text: 'Recent Transactions' },
+      { section: 'Platform Snapshot', metric: 'Total users', value: totalUsers },
+      { section: 'Platform Snapshot', metric: 'Active users', value: activeUsers },
+      { section: 'Platform Snapshot', metric: 'Total products', value: totalProducts },
+      { section: 'Platform Snapshot', metric: 'Active products', value: activeProducts },
+      { section: 'Platform Snapshot', metric: 'Inactive products', value: inactiveProducts },
+      { section: 'Platform Snapshot', metric: 'Total orders', value: totalOrders },
+      { section: 'Platform Snapshot', metric: 'Pending or processing orders', value: pendingOrders },
+      { section: 'Platform Snapshot', metric: 'Logistics providers', value: logisticsProviders },
+      { section: 'Platform Snapshot', metric: 'Verified logistics', value: verifiedLogistics },
       ...transactions.map((transaction) => ({
-        text: `${transaction.reference || transaction.transactionId || String(transaction._id).slice(-8)} | ${transaction.type || transaction.paymentMethod || 'payment'} | KES ${Number(transaction.amount || 0).toLocaleString()} | ${transaction.user?.email || transaction.user?.phone || 'user'}`,
+        section: 'Recent Transactions',
+        metric: transaction.reference || transaction.transactionId || String(transaction._id).slice(-8),
+        value: `${transaction.type || transaction.paymentMethod || 'payment'} | KES ${Number(transaction.amount || 0).toLocaleString()} | ${transaction.user?.email || transaction.user?.phone || 'user'}`,
       })),
     ];
 
-    const pdfBuffer = buildSimplePdfBuffer('Lango MarketPulse Admin Report', rows);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="admin_report_${new Date().toISOString().slice(0, 10)}.pdf"`);
-    res.send(pdfBuffer);
+    sendCsv(res, `admin_report_${dateStamp()}.csv`, ['section', 'metric', 'value'], rows);
   } catch (error) {
     next(error);
   }

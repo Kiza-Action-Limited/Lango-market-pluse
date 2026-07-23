@@ -9,6 +9,7 @@ import {
   FaChevronUp,
   FaCrown,
   FaExclamationTriangle,
+  FaIdCard,
   FaLock,
   FaMapMarkerAlt,
   FaRoute,
@@ -216,7 +217,7 @@ const SubscriptionOverviewPanel = ({ overview, loading, pendingPayment, onAction
           </div>
           <p className="mt-3 text-2xl font-bold text-[#111827]">{lockedCount}</p>
           <p className="mt-2 text-xs text-[#6B7280]">
-            {overview.sellerLogisticsAddon?.active ? 'Mizigo add-on active' : 'Upgrade to unlock more seller tools'}
+            {overview.sellerLogisticsAddon?.active ? 'Logistics provider selected' : 'Upgrade to unlock more seller tools'}
           </p>
         </div>
       </div>
@@ -260,7 +261,7 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
         }
       } catch (error) {
         if (error.response?.status !== 404 && error.response?.status !== 403) {
-          toast.error(error.response?.data?.message || 'Unable to load saved logistics add-on');
+          toast.error(error.response?.data?.message || 'Unable to load saved logistics provider');
         }
       }
     };
@@ -302,7 +303,7 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
     } catch (error) {
       const nextAddon = fallbackUpdater();
       setAddon(nextAddon);
-      toast.error(error.response?.data?.message || 'Saved locally. Backend could not update logistics add-on.');
+      toast.error(error.response?.data?.message || 'Saved locally. Backend could not update logistics provider.');
       return nextAddon;
     } finally {
       setSavingAddon(false);
@@ -314,7 +315,7 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
       { active: true, sellerHub },
       () => activateSellerLogisticsAddon(user, { sellerHub })
     );
-    toast.success('Mizigo Logistics Bridge activated as an add-on');
+    toast.success('Logistics provider selector activated');
   };
 
   const deactivateAddon = async () => {
@@ -322,7 +323,7 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
       { active: false, sellerHub, selectedProviderId: '' },
       () => deactivateSellerLogisticsAddon(user)
     );
-    toast.success('Mizigo Logistics Bridge paused');
+    toast.success('Logistics provider selector paused');
   };
 
   const saveHub = (value) => {
@@ -346,54 +347,59 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
         selectedProvider: provider,
       })
     );
-    toast.success(`${provider.name} selected for seller deliveries`);
+    toast.success(`${provider.name} selected for buyer deliveries`);
   };
 
   return (
     <section id={`plan-card-${plan.id}`} className={`rounded-xl border bg-white p-5 shadow-sm ${highlightedPlanId === plan.id ? 'ring-2 ring-[#FB923C] ring-offset-2' : 'border-gray-200'}`}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Independent seller add-on</p>
-          <h2 className="mt-1 text-2xl font-bold text-[#111827]">Mizigo Logistics Track</h2>
+          <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Seller logistics provider</p>
+          <h2 className="mt-1 text-2xl font-bold text-[#111827]">Logistics Provider Selector</h2>
           <p className="mt-1 text-sm text-[#6B7280]">
-            Works alongside your {activePlan?.name || 'seller'} plan. It does not change your product, SMS, or intelligence tier.
+            Works alongside your {activePlan?.name || 'seller'} plan. Buyers pay product plus calculated logistics at checkout, and both amounts stay in escrow until buyer QR delivery confirmation.
           </p>
         </div>
         <div className={`rounded-full px-3 py-1 text-xs font-semibold ${addon.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
-          {addon.active ? 'Add-on active' : 'Not active'}
+          {addon.active ? 'Provider selector active' : 'Not active'}
         </div>
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-5">
-        <div className="xl:col-span-2 rounded-lg border border-gray-200 bg-[#F9FAFB] p-4">
+        <div className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 xl:col-span-2">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-xl font-semibold text-[#111827]">{plan.name}</h3>
-              <p className="text-sm text-[#6B7280]">{plan.differentiator}</p>
+              <p className="text-sm text-[#6B7280]">Buyer-paid logistics bridge</p>
             </div>
             <FaTruck className="text-xl text-[#F97316]" />
           </div>
-          <p className="mt-4 text-2xl font-bold text-[#111827]">{plan.priceLabel}</p>
-          <p className="mt-1 text-sm text-[#6B7280]">{plan.description}</p>
+          <p className="mt-4 text-2xl font-bold text-[#111827]">Distance-based logistics fee</p>
+          <p className="mt-1 text-sm text-[#6B7280]">Checkout calculates pickup-to-shop delivery cost and holds seller plus logistics payouts in escrow.</p>
 
           <ul className="mt-4 space-y-2">
-            {plan.featureKeys.slice(0, expandedPlanId === plan.id ? plan.featureKeys.length : 6).map((featureKey) => (
-              <li key={featureKey} className="flex items-start gap-2 text-sm text-[#374151]">
+            {[
+              'Buyer pays product amount and logistics together',
+              'Escrow holds both payouts until delivery QR scan',
+              'Selected logistics account receives the delivery payout',
+              'Seller account receives product payout after delivery proof',
+              'QR pickup and buyer shop delivery confirmation',
+              'Distance estimate from seller hub to buyer shop',
+            ].slice(0, expandedPlanId === plan.id ? 6 : 4).map((label) => (
+              <li key={label} className="flex items-start gap-2 text-sm text-[#374151]">
                 <FaCheckCircle className="mt-0.5 shrink-0 text-[#16A34A]" />
-                <span>{FEATURE_LABELS[featureKey] || featureKey}</span>
+                <span>{label}</span>
               </li>
             ))}
           </ul>
 
-          {plan.featureKeys.length > 6 && (
-            <button
-              type="button"
-              onClick={() => onToggleExpand(plan.id)}
-              className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-[#F97316] hover:text-[#EA580C]"
-            >
-              {expandedPlanId === plan.id ? <>View less <FaChevronUp size={11} /></> : <>View more features <FaChevronDown size={11} /></>}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => onToggleExpand(plan.id)}
+            className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-[#F97316] hover:text-[#EA580C]"
+          >
+            {expandedPlanId === plan.id ? <>View less <FaChevronUp size={11} /></> : <>View more features <FaChevronDown size={11} /></>}
+          </button>
 
           <div className="mt-5 flex flex-wrap gap-2">
             {addon.active ? (
@@ -403,7 +409,7 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
                 disabled={savingAddon}
                 className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-[#111827] hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {savingAddon ? 'Saving...' : 'Pause Add-on'}
+                {savingAddon ? 'Saving...' : 'Pause selector'}
               </button>
             ) : (
               <button
@@ -412,13 +418,13 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
                 disabled={savingAddon}
                 className="rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {savingAddon ? 'Saving...' : 'Activate Logistics Bridge'}
+                {savingAddon ? 'Saving...' : 'Activate selector'}
               </button>
             )}
           </div>
         </div>
 
-        <div className="xl:col-span-3 rounded-lg border border-gray-200 p-4">
+        <div className="rounded-lg border border-gray-200 p-4 xl:col-span-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-lg font-semibold text-[#111827]">Choose Registered Logistics</h3>
@@ -480,7 +486,7 @@ const MizigoSellerAddon = ({ user, activePlan, highlightedPlanId, expandedPlanId
           </div>
 
           {!addon.active && (
-            <p className="mt-3 text-xs text-[#9A3412]">Activate the add-on first, then choose a logistics provider for delivery assignment.</p>
+            <p className="mt-3 text-xs text-[#9A3412]">Activate the selector first, then choose a logistics provider for buyer delivery assignment.</p>
           )}
         </div>
       </div>
@@ -498,6 +504,8 @@ const SubscriptionPlans = () => {
   const [pendingSubscriptionPayments, setPendingSubscriptionPayments] = useState([]);
   const [subscriptionOverview, setSubscriptionOverview] = useState(null);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [agentNationalId, setAgentNationalId] = useState('');
+  const agentReferralStorageKey = `marketpulse_agent_referral_${user?._id || user?.id || 'guest'}`;
 
   const allPlanIds = useMemo(
     () => new Set([...TRADER_PLANS, ...MIZIGO_PLANS].map((plan) => plan.id)),
@@ -527,6 +535,11 @@ const SubscriptionPlans = () => {
   useEffect(() => {
     setPendingSubscriptionPayments(listPendingSubscriptionPayments(user));
   }, [user]);
+
+  useEffect(() => {
+    if (!isSeller) return;
+    setAgentNationalId(localStorage.getItem(agentReferralStorageKey) || '');
+  }, [agentReferralStorageKey, isSeller]);
 
   useEffect(() => {
     let cancelled = false;
@@ -567,8 +580,20 @@ const SubscriptionPlans = () => {
   };
 
   const handleActivatePlan = (plan) => {
+    const normalizedAgentNationalId = String(agentNationalId || '').replace(/\D/g, '');
+    if (normalizedAgentNationalId && normalizedAgentNationalId.length < 5) {
+      toast.error('Agent National ID must have at least 5 digits');
+      return;
+    }
+
+    if (normalizedAgentNationalId) {
+      localStorage.setItem(agentReferralStorageKey, normalizedAgentNationalId);
+    } else {
+      localStorage.removeItem(agentReferralStorageKey);
+    }
+
     if (plan.id === PLAN_IDS.MIZIGO) {
-      switchPlan(plan.id);
+      switchPlan(plan.id, { agentNationalId: normalizedAgentNationalId });
       return;
     }
 
@@ -578,7 +603,9 @@ const SubscriptionPlans = () => {
       return;
     }
 
-    navigate(`/seller/premium-payment?plan=${encodeURIComponent(plan.id)}`);
+    const query = new URLSearchParams({ plan: plan.id });
+    if (normalizedAgentNationalId) query.set('agentNationalId', normalizedAgentNationalId);
+    navigate(`/seller/premium-payment?${query.toString()}`);
   };
 
   const handleOverviewAction = (action) => {
@@ -659,6 +686,36 @@ const SubscriptionPlans = () => {
               </button>
             </div>
           </div>
+        )}
+
+        {isSeller && (
+          <section className="mb-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-50 text-[#F97316]">
+                  <FaIdCard />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-[#111827]">Agent referral (optional)</p>
+                  <p className="mt-1 text-sm text-[#6B7280]">
+                    If a Lango agent referred this seller account, enter the agent National ID before choosing a plan. Leave it blank if there is no agent referral.
+                  </p>
+                </div>
+              </div>
+              <div className="w-full sm:w-72">
+                <label className="sr-only" htmlFor="agentNationalId">Agent National ID</label>
+                <input
+                  id="agentNationalId"
+                  type="text"
+                  inputMode="numeric"
+                  value={agentNationalId}
+                  onChange={(event) => setAgentNationalId(event.target.value.replace(/\D/g, '').slice(0, 20))}
+                  placeholder="Optional agent National ID"
+                  className="h-11 w-full rounded-lg border border-gray-300 px-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                />
+              </div>
+            </div>
+          </section>
         )}
 
         {isSeller && (

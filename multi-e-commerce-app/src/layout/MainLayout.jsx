@@ -15,7 +15,7 @@ const MainLayout = () => {
   const isWorkspaceView = isSellerOrAdminView || isLogisticsView || isBuyerView;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="flex min-h-dvh min-w-0 flex-col">
       {isWorkspaceView ? null : isAuthPage ? (
         <nav className="bg-[#F2871A] text-white sticky top-0 z-40 shadow-sm">
           <div className="max-w-screen-2xl mx-auto px-4 md:px-6">
@@ -32,7 +32,7 @@ const MainLayout = () => {
       ) : (
         <Navbar />
       )}
-      <main className={`grow bg-gray-50 ${isAuthPage || isWorkspaceView ? '' : 'pt-24 md:pt-26'}`}>
+      <main className={`min-w-0 grow bg-gray-50 ${isAuthPage || isWorkspaceView ? '' : 'pt-[112px] sm:pt-[116px] md:pt-[108px]'}`}>
         {!isAuthPage && !isWorkspaceView && (
           <div className="max-w-screen-2xl mx-auto px-4 pt-3">
             <ProfileCompletionReminder />

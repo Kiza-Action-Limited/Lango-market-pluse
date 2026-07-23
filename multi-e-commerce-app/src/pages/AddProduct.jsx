@@ -1,5 +1,5 @@
 // src/pages/AddProduct.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { 
@@ -12,6 +12,83 @@ import { useAuth } from '../contexts/AuthContext';
 import { productService } from '../services/productService';
 import { getUserCategoryLabel, isFarmerUser } from '../utils/userCategory';
 import { getAutoLowStockThreshold, PRODUCT_CATEGORY_OPTIONS } from '../utils/inventorySensitivity';
+
+const MAX_PRODUCT_IMAGES = 10;
+const MAX_RAW_IMAGE_SIZE_MB = 20;
+const MAX_UPLOAD_IMAGE_SIZE_MB = 10;
+const TARGET_IMAGE_SIZE_BYTES = 1600 * 1024;
+const MAX_IMAGE_DIMENSION = 1600;
+const IMAGE_COMPRESSION_QUALITY = 0.82;
+
+const isCompressibleImage = (file) => (
+  file?.type?.startsWith('image/') &&
+  !['image/gif', 'image/svg+xml'].includes(file.type)
+);
+
+const replaceFileExtension = (name, extension) => {
+  const safeName = String(name || 'product-image').replace(/\.[^/.]+$/, '');
+  return `${safeName}.${extension}`;
+};
+
+const loadImageFile = (file) => new Promise((resolve, reject) => {
+  const imageUrl = URL.createObjectURL(file);
+  const image = new Image();
+  image.onload = () => {
+    URL.revokeObjectURL(imageUrl);
+    resolve(image);
+  };
+  image.onerror = () => {
+    URL.revokeObjectURL(imageUrl);
+    reject(new Error('Unable to read image'));
+  };
+  image.src = imageUrl;
+});
+
+const canvasToBlob = (canvas, type, quality) => new Promise((resolve) => {
+  canvas.toBlob((blob) => resolve(blob), type, quality);
+});
+
+const revokeBlobPreview = (preview) => {
+  if (typeof preview === 'string' && preview.startsWith('blob:')) {
+    URL.revokeObjectURL(preview);
+  }
+};
+
+const optimizeProductImage = async (file) => {
+  if (!isCompressibleImage(file)) return file;
+
+  try {
+    const image = await loadImageFile(file);
+    const largestSide = Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height);
+    const scale = Math.min(1, MAX_IMAGE_DIMENSION / largestSide);
+    const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+    const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+
+    if (scale === 1 && file.size <= TARGET_IMAGE_SIZE_BYTES) {
+      return file;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext('2d');
+    if (!context) return file;
+
+    context.drawImage(image, 0, 0, width, height);
+    const blob = await canvasToBlob(canvas, 'image/webp', IMAGE_COMPRESSION_QUALITY);
+
+    if (!blob || blob.size >= file.size) return file;
+
+    return new File([blob], replaceFileExtension(file.name, 'webp'), {
+      type: 'image/webp',
+      lastModified: Date.now(),
+    });
+  } catch (error) {
+    console.warn('Image optimization skipped:', error);
+    return file;
+  }
+};
 
 const AddProduct = () => {
   const { id } = useParams();
@@ -42,6 +119,7 @@ const AddProduct = () => {
   });
   
   const [imagePreviews, setImagePreviews] = useState([]);
+  const imagePreviewsRef = useRef([]);
   const [errors, setErrors] = useState({});
 
   const categories = PRODUCT_CATEGORY_OPTIONS.concat([
@@ -105,6 +183,14 @@ const AddProduct = () => {
       setFormData((prev) => ({ ...prev, category: 'grocery' }));
     }
   }, [isFarmer, formData.category]);
+
+  useEffect(() => {
+    imagePreviewsRef.current = imagePreviews;
+  }, [imagePreviews]);
+
+  useEffect(() => () => {
+    imagePreviewsRef.current.forEach(revokeBlobPreview);
+  }, []);
 
   const checkPlanUsage = async () => {
     try {
@@ -263,44 +349,72 @@ const AddProduct = () => {
   };
 
   const handleImageUpload = async (e) => {
-    const files = Array.from(e.target.files);
-    const maxImages = 10;
-    const maxImageSizeMb = 10;
-    const maxImageSizeBytes = maxImageSizeMb * 1024 * 1024;
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+
+    if (!files.length) return;
     
-    if (imagePreviews.length + files.length > maxImages) {
-      toast.error(`Maximum ${maxImages} images allowed`);
+    if (imagePreviews.length + files.length > MAX_PRODUCT_IMAGES) {
+      toast.error(`Maximum ${MAX_PRODUCT_IMAGES} images allowed`);
       return;
     }
     
     setUploadingImages(true);
     
-    for (const file of files) {
-      if (file.size > maxImageSizeBytes) {
-        toast.error(`${file.name} exceeds ${maxImageSizeMb}MB limit`);
-        continue;
+    try {
+      const rawLimitBytes = MAX_RAW_IMAGE_SIZE_MB * 1024 * 1024;
+      const uploadLimitBytes = MAX_UPLOAD_IMAGE_SIZE_MB * 1024 * 1024;
+      const validFiles = files.filter((file) => {
+        if (!file.type.startsWith('image/')) {
+          toast.error(`${file.name} is not an image`);
+          return false;
+        }
+
+        if (file.size > rawLimitBytes) {
+          toast.error(`${file.name} exceeds ${MAX_RAW_IMAGE_SIZE_MB}MB limit`);
+          return false;
+        }
+
+        return true;
+      });
+
+      if (!validFiles.length) return;
+
+      const optimizedFiles = await Promise.all(validFiles.map(optimizeProductImage));
+      const uploadableFiles = optimizedFiles.filter((file) => {
+        if (file.size > uploadLimitBytes) {
+          toast.error(`${file.name} is still larger than ${MAX_UPLOAD_IMAGE_SIZE_MB}MB after optimization`);
+          return false;
+        }
+
+        return true;
+      });
+
+      if (!uploadableFiles.length) return;
+
+      const previewUrls = uploadableFiles.map((file) => URL.createObjectURL(file));
+      const originalBytes = validFiles.reduce((total, file) => total + file.size, 0);
+      const optimizedBytes = uploadableFiles.reduce((total, file) => total + file.size, 0);
+
+      setImagePreviews(prev => [...prev, ...previewUrls]);
+      setFormData(prev => ({
+        ...prev,
+        images: [...prev.images, ...uploadableFiles]
+      }));
+
+      if (optimizedBytes < originalBytes * 0.75) {
+        toast.success('Images optimized for faster upload');
       }
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image`);
-        continue;
-      }
-      
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreviews(prev => [...prev, reader.result]);
-        setFormData(prev => ({
-          ...prev,
-          images: [...prev.images, file]
-        }));
-      };
-      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Error preparing product images:', error);
+      toast.error('Failed to prepare images for upload');
+    } finally {
+      setUploadingImages(false);
     }
-    
-    setUploadingImages(false);
   };
 
   const removeImage = (index) => {
+    revokeBlobPreview(imagePreviews[index]);
     setImagePreviews(prev => prev.filter((_, i) => i !== index));
     setFormData(prev => ({
       ...prev,
@@ -827,9 +941,9 @@ const AddProduct = () => {
                       <FaCloudUploadAlt className="mb-3 text-2xl text-[#6B7280]" />
                     )}
                     <span className="text-sm font-semibold text-[#111827]">
-                      {uploadingImages ? 'Uploading images' : 'Choose product images'}
+                      {uploadingImages ? 'Optimizing images' : 'Choose product images'}
                     </span>
-                    <span className="mt-1 text-xs text-[#6B7280]">PNG, JPG, WebP up to 10MB</span>
+                    <span className="mt-1 text-xs text-[#6B7280]">PNG, JPG, WebP up to 20MB, optimized before upload</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -913,20 +1027,22 @@ const AddProduct = () => {
                     </button>
                     <button
                       type="submit"
-                      disabled={loading || !hasBusinessName || hasReachedProductLimit}
+                      disabled={loading || uploadingImages || !hasBusinessName || hasReachedProductLimit}
                       title={
                         !hasBusinessName
                           ? 'Add your business name before creating products.'
+                          : uploadingImages
+                            ? 'Images are still being optimized.'
                           : hasReachedProductLimit
                             ? productLimitMessage
                             : ''
                       }
                       className="h-11 flex-1 rounded-lg bg-[#F97316] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#EA580C] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {loading ? (
+                      {loading || uploadingImages ? (
                         <span className="inline-flex items-center gap-2">
                           <FaSpinner className="animate-spin" />
-                          {id ? 'Updating' : 'Adding'}
+                          {uploadingImages ? 'Optimizing' : id ? 'Updating' : 'Adding'}
                         </span>
                       ) : (
                         id ? 'Update Product' : 'Add Product'

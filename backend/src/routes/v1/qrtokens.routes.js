@@ -39,6 +39,16 @@ router.post(
 );
 
 /**
+ * Get QR token statistics
+ * GET /api/v1/qr-tokens/stats
+ */
+router.get(
+  '/stats',
+  rbacMiddleware(['admin']),
+  qrtokenController.getQRStats
+);
+
+/**
  * Get QR token details
  * GET /api/v1/qr-tokens/:id
  */
@@ -70,16 +80,6 @@ router.post(
   '/:id/resend',
   [param('id').isMongoId()],
   qrtokenController.resendQRToken
-);
-
-/**
- * Get QR token statistics
- * GET /api/v1/qr-tokens/stats
- */
-router.get(
-  '/stats',
-  rbacMiddleware(['admin']),
-  qrtokenController.getQRStats
 );
 
 module.exports = router;

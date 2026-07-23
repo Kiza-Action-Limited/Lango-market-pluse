@@ -221,24 +221,24 @@ const Products = ({ seller = false }) => {
   }, [products, categoryNameById]);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">
+    <div className="app-page">
+      <div className="mb-5 flex items-center justify-between gap-3 sm:mb-6">
+        <h1 className="min-w-0 truncate text-2xl font-bold text-[#111827] sm:text-3xl">
           {seller ? 'My Products' : 'All Products'}
         </h1>
         <button
           onClick={() => setShowFilters(!showFilters)}
-          className="lg:hidden btn-secondary flex items-center space-x-2"
+          className="btn-secondary flex shrink-0 items-center gap-2 px-4 lg:hidden"
         >
           <FaFilter />
           <span>Filters</span>
         </button>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6">
+      <div className="flex min-w-0 flex-col gap-6 lg:flex-row">
         {/* Filters Sidebar */}
-        <aside className={`${showFilters ? 'block' : 'hidden'} lg:block w-full lg:w-80`}>
-          <div className="sticky top-4 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+        <aside className={`${showFilters ? 'block' : 'hidden'} w-full lg:block lg:w-80 lg:shrink-0`}>
+          <div className="sticky top-[120px] rounded-xl border border-gray-200 bg-white p-4 shadow-sm lg:top-4">
             <div className="mb-4 flex items-start justify-between gap-3 border-b border-gray-200 pb-4">
               <div className="flex items-center gap-3">
                 <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFF7ED] text-[#F97316]">
@@ -383,12 +383,12 @@ const Products = ({ seller = false }) => {
         </aside>
 
         {/* Products Grid */}
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:gap-6">
               {Array.from({ length: 9 }).map((_, idx) => (
-                <div key={idx} className="rounded-xl bg-white border border-gray-100 p-4">
-                  <div className="h-44 rounded-md bg-gray-200 skeleton-shimmer" />
+                <div key={idx} className="rounded-xl border border-gray-100 bg-white p-3 sm:p-4">
+                  <div className="aspect-[4/3] rounded-md bg-gray-200 skeleton-shimmer sm:h-44 sm:aspect-auto" />
                   <div className="mt-4 h-4 w-4/5 rounded bg-gray-200 skeleton-shimmer" />
                   <div className="mt-2 h-4 w-2/3 rounded bg-gray-200 skeleton-shimmer" />
                   <div className="mt-4 h-8 w-1/2 rounded bg-gray-200 skeleton-shimmer" />
@@ -396,7 +396,7 @@ const Products = ({ seller = false }) => {
               ))}
             </div>
           ) : products.length === 0 ? (
-            <div className="text-center py-12">
+            <div className="rounded-xl border border-dashed border-gray-300 bg-white py-12 text-center">
               <p className="text-gray-500 text-lg">No products found</p>
               <button
                 onClick={clearFilters}
@@ -411,15 +411,15 @@ const Products = ({ seller = false }) => {
                 {groupedProducts.map((group) => (
                   <section key={group.id}>
                     <div className="mb-4 flex flex-wrap items-end justify-between gap-2 border-b border-gray-200 pb-3">
-                      <div>
-                        <h2 className="text-xl font-semibold text-[#111827]">{group.name}</h2>
+                      <div className="min-w-0">
+                        <h2 className="truncate text-lg font-semibold text-[#111827] sm:text-xl">{group.name}</h2>
                         <p className="text-sm text-gray-500">
                           {group.products.length} {group.products.length === 1 ? 'product' : 'products'}
                         </p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:gap-6">
                       {group.products.map((product) => (
                         <ProductCard key={product.id || product._id} product={product} />
                       ))}
@@ -430,21 +430,21 @@ const Products = ({ seller = false }) => {
 
               {/* Pagination */}
               {pagination.totalPages > 1 && (
-                <div className="flex justify-center mt-8 space-x-2">
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
                   <button
                     onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
                     disabled={pagination.page === 1}
-                    className="px-4 py-2 border rounded-lg disabled:opacity-50"
+                    className="rounded-lg border px-4 py-2 font-semibold disabled:opacity-50"
                   >
                     Previous
                   </button>
-                  <span className="px-4 py-2">
+                  <span className="px-3 py-2 text-sm font-medium text-gray-600">
                     Page {pagination.page} of {pagination.totalPages}
                   </span>
                   <button
                     onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
                     disabled={pagination.page === pagination.totalPages}
-                    className="px-4 py-2 border rounded-lg disabled:opacity-50"
+                    className="rounded-lg border px-4 py-2 font-semibold disabled:opacity-50"
                   >
                     Next
                   </button>

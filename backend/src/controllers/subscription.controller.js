@@ -4,6 +4,7 @@ const billingService = require('../services/subscription/billing.service');
 const { validationResult } = require('express-validator');
 const User = require('../models/User.model');
 const Product = require('../models/Product.model');
+const { isSellerUser } = require('../utils/userCategory');
 
 const sendValidationErrors = (req, res) => {
   const errors = validationResult(req);
@@ -23,7 +24,7 @@ const getSmsCreditBalance = (subscription) => {
   return Math.max(0, allocated - used);
 };
 
-const isSellerAccount = (user) => ['seller', 'farmer'].includes(String(user?.role || '').toLowerCase());
+const isSellerAccount = (user) => isSellerUser(user);
 
 const buildProviderSnapshot = (provider) => {
   if (!provider) return null;
@@ -205,7 +206,7 @@ exports.subscribe = async (req, res, next) => {
   try {
     if (sendValidationErrors(req, res)) return;
 
-    const { planId, paymentMethod, paymentCompleted, paymentReference } = req.body;
+    const { planId, paymentMethod, paymentCompleted, paymentReference, agentNationalId } = req.body;
     
     // Special handling for Mizigo (commission-based)
     if (planId === 'mizigo') {
@@ -215,6 +216,7 @@ exports.subscribe = async (req, res, next) => {
         {
           paymentCompleted,
           paymentReference,
+          agentNationalId,
           userRole: req.user.role // 'DRIVER' or 'FLEET_OWNER'
         }
       );
@@ -229,6 +231,7 @@ exports.subscribe = async (req, res, next) => {
     const subscription = await billingService.subscribe(req.user.id, planId, paymentMethod, {
       paymentCompleted,
       paymentReference,
+      agentNationalId,
     });
     
     res.status(200).json({
@@ -688,7 +691,7 @@ exports.getUpgradeOptions = async (req, res, next) => {
 };
 
 /**
- * Get performance report (PDF generation endpoint)
+ * Get performance report (CSV-ready report endpoint)
  * GET /api/v1/subscriptions/report/:type
  */
 exports.getReport = async (req, res, next) => {

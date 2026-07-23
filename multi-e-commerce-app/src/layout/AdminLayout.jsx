@@ -8,6 +8,7 @@ import {
   FaShoppingCart,
   FaTags,
   FaEnvelopeOpenText,
+  FaClipboardList,
   FaChartLine,
   FaTruck,
   FaLayerGroup,
@@ -47,10 +48,12 @@ const AdminLayout = () => {
       title: 'Marketplace',
       items: [
         { path: '/admin/users', label: 'Users', icon: FaUsers, hint: 'KYC and documents' },
+        { path: '/admin/documents', label: 'Documents', icon: FaClipboardList, hint: 'All user files' },
         { path: '/admin/products', label: 'Products', icon: FaBox, hint: 'Active and inactive' },
         { path: '/admin/orders', label: 'Orders', icon: FaShoppingCart, hint: 'Order operations' },
         { path: '/admin/categories', label: 'Categories', icon: FaTags, hint: 'Catalog structure' },
         { path: '/admin/subscriptions', label: 'Subscriptions', icon: FaCrown, hint: 'Seller plans' },
+        { path: '/admin/agent-referrals', label: 'Agent Referrals', icon: FaIdBadge, hint: 'Seller referrals' },
       ],
     },
     {

@@ -1,7 +1,7 @@
 // src/pages/AdminProducts.jsx
 import React, { useEffect, useState } from 'react';
 import api from '../config/axios';
-import { FaSearch, FaBox, FaStore, FaChartLine, FaFilter, FaEdit, FaTrash, FaSave, FaTimes, FaFilePdf } from 'react-icons/fa';
+import { FaSearch, FaBox, FaStore, FaChartLine, FaFilter, FaEdit, FaTrash, FaSave, FaTimes, FaFileCsv } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 
@@ -222,17 +222,17 @@ const AdminProducts = () => {
 
   const exportAdminReport = async () => {
     try {
-      const response = await api.get('/v1/admin/reports/summary.pdf', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const response = await api.get('/v1/admin/reports/summary.csv', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `admin_report_${new Date().toISOString().slice(0, 10)}.pdf`);
+      link.setAttribute('download', `admin_report_${new Date().toISOString().slice(0, 10)}.csv`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to export PDF report');
+      toast.error(error.response?.data?.message || 'Failed to export CSV report');
     }
   };
   const topInventoryProducts = [...products]
@@ -306,8 +306,8 @@ const AdminProducts = () => {
               onClick={exportAdminReport}
               className="inline-flex items-center gap-2 rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white hover:bg-black"
             >
-              <FaFilePdf />
-              Export PDF Report
+              <FaFileCsv />
+              Export CSV Report
             </button>
           </div>
           <p className="text-[#6B7280]">Lango Lako la Biashara Smart - Oversee all products listed on the platform</p>

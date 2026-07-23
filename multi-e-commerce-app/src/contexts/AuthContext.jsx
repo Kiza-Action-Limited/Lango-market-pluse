@@ -124,6 +124,7 @@ export const AuthProvider = ({ children }) => {
         paymentMethod: paymentMeta.paymentMethod || 'mpesa',
         paymentCompleted: paymentMeta.paymentCompleted ?? true,
         paymentReference: paymentMeta.paymentReference,
+        agentNationalId: paymentMeta.agentNationalId,
       });
 
       const refreshedUser = await authService.getCurrentUser();

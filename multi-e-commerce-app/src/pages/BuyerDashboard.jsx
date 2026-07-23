@@ -25,6 +25,36 @@ const statusGroups = {
   delivered: ['delivered', 'DELIVERED', 'completed', 'RELEASED'],
 };
 
+const readMetadata = (source, key) => {
+  const metadata = source?.metadata;
+  if (!metadata) return undefined;
+  if (typeof metadata.get === 'function') return metadata.get(key);
+  return metadata[key];
+};
+
+const getLogisticsPreference = (order = {}) => {
+  const preference = order.logisticsPreference || {};
+  const provider = preference.requestedProvider;
+  const providerObject = provider && typeof provider === 'object' ? provider : null;
+  const logistics = order.logistics || {};
+  const profile = providerObject?.logisticsProfile || {};
+
+  return {
+    id: providerObject?._id || providerObject?.id || provider || readMetadata(logistics, 'selectedProviderId') || '',
+    name:
+      preference.providerName ||
+      providerObject?.businessName ||
+      providerObject?.fullName ||
+      providerObject?.name ||
+      readMetadata(logistics, 'selectedProviderName') ||
+      logistics.driverName ||
+      '',
+    phone: preference.providerPhone || providerObject?.phone || readMetadata(logistics, 'selectedProviderPhone') || logistics.driverPhone || '',
+    hub: preference.providerHub || profile.baseHub || profile.locationHub || '',
+    source: preference.selectionSource || readMetadata(logistics, 'selectedBy') || 'default',
+  };
+};
+
 const StatTile = ({ icon: Icon, label, value, detail, tone = 'orange' }) => {
   const tones = {
     orange: 'border-[#F97316]/20 bg-[#FFF7ED] text-[#F97316]',
@@ -82,6 +112,7 @@ const BuyerDashboard = () => {
   const activeTrackingOrder = useMemo(() => (
     orders.find((order) => statusGroups.active.includes(order.status)) || latestOrder || null
   ), [latestOrder, orders]);
+  const latestLogisticsPreference = getLogisticsPreference(latestOrder || {});
 
   const loadLiveTracking = async ({ silent = false } = {}) => {
     if (!activeTrackingOrder?.id) return;
@@ -124,7 +155,7 @@ const BuyerDashboard = () => {
   }, [activeTrackingOrder?.id, activeTrackingOrder?.status]);
 
   return (
-    <div className="min-h-full bg-gray-50 p-4 sm:p-6">
+    <div className="dashboard-shell min-h-full bg-gray-50 p-4 sm:p-6">
       <div className="mx-auto max-w-screen-2xl space-y-6">
         <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -135,17 +166,17 @@ const BuyerDashboard = () => {
                 See seller preparation, logistics movement, escrow protection, and delivery confirmation in one workspace.
               </p>
             </div>
-            <div className="flex flex-wrap gap-3">
+            <div className="dashboard-actionbar">
               <Link
                 to="/products"
-                className="inline-flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
               >
                 <FaSearch />
                 Browse products
               </Link>
               <Link
                 to="/buyer/orders"
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50"
               >
                 <FaBoxOpen />
                 View orders
@@ -181,8 +212,8 @@ const BuyerDashboard = () => {
         />
 
         <section className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
-          <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
+          <div className="min-w-0 rounded-lg border border-gray-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-4 sm:px-5">
               <div>
                 <h3 className="font-semibold text-gray-950">Recent orders</h3>
                 <p className="text-sm text-gray-500">Latest buyer activity</p>
@@ -198,36 +229,42 @@ const BuyerDashboard = () => {
               </div>
             ) : orders.length ? (
               <div className="divide-y divide-gray-100">
-                {orders.slice(0, 5).map((order) => (
-                  <div key={order.id} className="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
-                    <div className="min-w-0">
-                      <p className="font-mono text-sm font-semibold text-gray-900">#{String(order.id).slice(-8)}</p>
-                      <p className="mt-1 truncate text-sm text-gray-600">
-                        {order.items?.[0]?.name || 'Order item'} {order.items?.length > 1 ? `+ ${order.items.length - 1} more` : ''}
-                      </p>
+                {orders.slice(0, 5).map((order) => {
+                  const provider = getLogisticsPreference(order);
+                  return (
+                    <div key={order.id} className="flex flex-col gap-3 px-4 py-4 sm:px-5 md:flex-row md:items-center md:justify-between">
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm font-semibold text-gray-900">#{String(order.id).slice(-8)}</p>
+                        <p className="mt-1 truncate text-sm text-gray-600">
+                          {order.items?.[0]?.name || 'Order item'} {order.items?.length > 1 ? `+ ${order.items.length - 1} more` : ''}
+                        </p>
+                        <p className="mt-1 truncate text-xs text-sky-700">
+                          Logistics: {provider.name || 'Seller preferred provider'}{provider.source === 'buyer' ? ' - buyer selected' : ''}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                        <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold capitalize text-gray-700">
+                          {String(order.status).replace(/_/g, ' ')}
+                        </span>
+                        <span className="font-semibold text-green-700">{formatCurrency(order.total)}</span>
+                        <Link
+                          to={`/buyer/orders/${order.id}/track`}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#F97316]/30 px-3 py-2 text-sm font-semibold text-[#F97316] hover:bg-[#FFF7ED]"
+                        >
+                          <FaTruck />
+                          Track
+                        </Link>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold capitalize text-gray-700">
-                        {String(order.status).replace(/_/g, ' ')}
-                      </span>
-                      <span className="font-semibold text-green-700">{formatCurrency(order.total)}</span>
-                      <Link
-                        to={`/buyer/orders/${order.id}/track`}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[#F97316]/30 px-3 py-2 text-sm font-semibold text-[#F97316] hover:bg-[#FFF7ED]"
-                      >
-                        <FaTruck />
-                        Track
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="p-8 text-center">
                 <FaShoppingCart className="mx-auto text-3xl text-[#F97316]" />
                 <h3 className="mt-3 font-semibold text-gray-950">No orders yet</h3>
                 <p className="mt-1 text-sm text-gray-500">Start with trusted sellers in the market.</p>
-                <Link to="/products" className="mt-4 inline-flex rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white">
+                <Link to="/products" className="mt-4 inline-flex items-center justify-center rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white">
                   Browse products
                 </Link>
               </div>
@@ -242,6 +279,16 @@ const BuyerDashboard = () => {
                   <p className="mt-2 text-sm text-gray-600">
                     Order #{String(latestOrder.id).slice(-8)} is currently {String(latestOrder.status).replace(/_/g, ' ')}.
                   </p>
+                  <div className="mt-3 rounded-md border border-sky-100 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                    <p className="font-semibold">
+                      Logistics: {latestLogisticsPreference.name || 'Seller preferred provider'}
+                    </p>
+                    <p className="mt-1 text-xs text-sky-700">
+                      {latestLogisticsPreference.source === 'buyer'
+                        ? 'Your selected logistics company was sent to the seller.'
+                        : 'The seller can attach their preferred verified logistics company.'}
+                    </p>
+                  </div>
                   <Link
                     to={`/buyer/orders/${latestOrder.id}/track`}
                     className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#0B2D55] px-4 py-2 text-sm font-semibold text-white hover:bg-[#123B6D]"

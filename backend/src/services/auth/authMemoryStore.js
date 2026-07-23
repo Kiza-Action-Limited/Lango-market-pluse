@@ -83,10 +83,21 @@ const updateUserById = (id, updates) => {
   return toPublicUser(user);
 };
 
+const updatePasswordById = async (id, password) => {
+  const key = String(id);
+  const user = users.get(key);
+  if (!user) return null;
+  user.passwordHash = await bcrypt.hash(password, 10);
+  user.updatedAt = new Date();
+  users.set(key, user);
+  return toPublicUser(user);
+};
+
 module.exports = {
   findByPhoneOrEmail,
   createUser,
   validateLogin,
   getUserById,
   updateUserById,
+  updatePasswordById,
 };

@@ -23,6 +23,7 @@ router.get('/mpesa/status/:checkoutRequestId', paymentController.checkMpesaStatu
 router.post('/mpesa/subscription/stkpush', [
   body('planId').isIn(['solo', 'smart', 'growth']).withMessage('Choose a paid seller plan'),
   body('phoneNumber').optional().matches(/^(\+?254|0)?[71][0-9]{8}$/).withMessage('Invalid M-Pesa phone number'),
+  body('agentNationalId').optional({ nullable: true, checkFalsy: true }).matches(/^[0-9]{5,20}$/).withMessage('Agent National ID must contain 5 to 20 digits'),
 ], subscriptionGate.checkRole('OWNER'), paymentController.initiateSubscriptionMpesaPayment);
 
 router.get(

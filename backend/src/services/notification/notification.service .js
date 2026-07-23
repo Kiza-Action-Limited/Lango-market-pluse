@@ -132,7 +132,13 @@ async function dispatch({
 
 /** Return active user IDs for a given platform role. */
 async function getActiveUserIdsByRole(role) {
-  const users = await User.find({ role, isActive: true }).select('_id');
+  const users = await User.find({
+    isActive: true,
+    $or: [
+      { role },
+      { businessType: role },
+    ],
+  }).select('_id');
   return users.map((u) => u._id);
 }
 

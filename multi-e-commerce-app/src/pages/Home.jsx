@@ -18,19 +18,6 @@ const Home = () => {
     <div className="bg-[#F9FAFB] animate-fade-in">
       <UnimartStyleShowcase />
 
-
-      <LazyOnVisible
-        fallback={<div className="h-60 bg-white border-y border-gray-100 skeleton-shimmer" />}
-      >
-        <Suspense fallback={<div className="h-60 bg-white border-y border-gray-100 skeleton-shimmer" />}>
-          <HomeBelowFold
-            categories={data?.categories || []}
-            businessPartners={data?.businessPartners || []}
-            loading={loading}
-          />
-        </Suspense>
-      </LazyOnVisible>
-      
       <section className="py-16 bg-[#F9FAFB]">
         <div className="container mx-auto px-4">
           <h2 className="text-3xl font-bold text-center mb-4 text-[#F97316]">Featured Products</h2>
@@ -56,6 +43,18 @@ const Home = () => {
           )}
         </div>
       </section>
+
+      <LazyOnVisible
+        fallback={<div className="h-60 bg-white border-y border-gray-100 skeleton-shimmer" />}
+      >
+        <Suspense fallback={<div className="h-60 bg-white border-y border-gray-100 skeleton-shimmer" />}>
+          <HomeBelowFold
+            categories={data?.categories || []}
+            businessPartners={data?.businessPartners || []}
+            loading={loading}
+          />
+        </Suspense>
+      </LazyOnVisible>
     </div>
   );
 };
