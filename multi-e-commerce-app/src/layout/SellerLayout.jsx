@@ -1,7 +1,7 @@
 // src/layouts/SellerLayout.jsx
 import React, { Suspense, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { FaTachometerAlt, FaPlus, FaBox, FaShoppingCart, FaCrown, FaBroadcastTower, FaUser, FaSignOutAlt, FaAngleDoubleLeft, FaAngleDoubleRight, FaFileInvoiceDollar, FaWallet, FaEnvelopeOpenText, FaTruck } from 'react-icons/fa';
+import { FaTachometerAlt, FaPlus, FaBox, FaShoppingCart, FaCrown, FaBroadcastTower, FaUser, FaSignOutAlt, FaAngleDoubleLeft, FaAngleDoubleRight, FaFileInvoiceDollar, FaWallet, FaEnvelopeOpenText, FaTruck, FaBook } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/NotificationBell';
 
@@ -15,6 +15,7 @@ const SellerLayout = () => {
     { path: '/seller', label: 'Dashboard', icon: FaTachometerAlt },
     { path: '/seller/add-product', label: 'Add Product', icon: FaPlus },
     { path: '/seller/products', label: 'My Products', icon: FaBox },
+    { path: '/seller/journal', label: 'Journal', icon: FaBook },
     { path: '/seller/orders', label: 'Orders', icon: FaShoppingCart },
     { path: '/seller/logistics-requests', label: 'Buyer Logistics', icon: FaTruck },
     { path: '/seller/rfqs', label: 'RFQs', icon: FaFileInvoiceDollar },
@@ -30,15 +31,16 @@ const SellerLayout = () => {
     ? 'ml-3 max-w-44 opacity-100'
     : 'ml-0 max-w-0 opacity-0';
   const sidebarItemClass = isSidebarOpen ? 'justify-start' : 'justify-center';
+  const contentOffsetClass = isSidebarOpen ? 'md:ml-64' : 'md:ml-20';
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
   return (
-    <div className="flex min-h-dvh overflow-hidden bg-gray-50 md:h-screen">
+    <div className="min-h-dvh bg-gray-50">
       {/* Sidebar */}
-      <aside className={`sticky top-0 hidden h-screen shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 md:block ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
+      <aside className={`fixed inset-y-0 left-0 z-40 hidden h-dvh shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 md:flex md:flex-col ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
         <div className="border-b border-white/15 p-4">
           <div className={`flex h-8 items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
             <h2 className={`min-w-0 items-center whitespace-nowrap text-xl font-bold ${isSidebarOpen ? 'flex justify-start' : 'sr-only'}`}>
@@ -58,7 +60,7 @@ const SellerLayout = () => {
             </button>
           </div>
         </div>
-        <nav className="mt-4 space-y-1 px-3">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
@@ -77,7 +79,7 @@ const SellerLayout = () => {
             );
           })}
         </nav>
-        <div className="mt-8 border-t border-white/20 px-3 pt-4">
+        <div className="border-t border-white/20 px-3 py-4">
           <Link
             to="/seller/profile"
             title="Profile"
@@ -103,12 +105,12 @@ const SellerLayout = () => {
       </aside>
       
       {/* Main Content */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      <div className={`min-w-0 transition-all duration-200 ${contentOffsetClass}`}>
         <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
           <h1 className="truncate text-xl font-semibold text-gray-900">{pageTitle}</h1>
           <NotificationBell />
         </header>
-        <div className="flex-1 overflow-y-auto pb-24 md:pb-0">
+        <div className="pb-24 md:pb-0">
           <Suspense
             fallback={
               <div className="p-6">

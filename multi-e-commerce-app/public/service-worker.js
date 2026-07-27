@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lango-marketpulse-shell-v1';
+const CACHE_NAME = 'lango-marketpulse-shell-v2';
 const SHELL_ASSETS = ['/', '/manifest.webmanifest', '/marketpulse-logo.png'];
 
 self.addEventListener('install', (event) => {
@@ -22,6 +22,10 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhooks/')) return;
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => caches.match('/')));
+    return;
+  }
 
   event.respondWith(
     fetch(request)

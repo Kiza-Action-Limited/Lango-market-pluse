@@ -40,6 +40,8 @@ if (!redisEnabled || !redisUrl) {
     }
   };
 
+  
+
   const smsQueue = new Queue('sms', { connection: redisClient });
   const scarcityQueue = new Queue('scarcity', { connection: redisClient });
   const escrowQueue = new Queue('escrow', { connection: redisClient });

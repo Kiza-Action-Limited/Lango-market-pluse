@@ -63,7 +63,7 @@ const BuyerLayout = () => {
   };
 
   return (
-    <div className="flex min-h-dvh overflow-hidden bg-gray-50 md:h-screen">
+    <div className="flex min-h-dvh bg-gray-50">
       <aside className={`sticky top-0 hidden h-screen shrink-0 overflow-hidden bg-[#0B2D55] text-white transition-all duration-200 md:block ${isSidebarOpen ? 'w-64' : 'w-20'}`}>
         <div className="border-b border-white/15 p-4">
           <div className={`flex h-9 items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
@@ -124,7 +124,7 @@ const BuyerLayout = () => {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold text-gray-900">{pageTitle}</h1>
@@ -134,7 +134,7 @@ const BuyerLayout = () => {
           </div>
           <NotificationBell />
         </header>
-        <div className="flex-1 overflow-y-auto pb-24 md:pb-0">
+        <div className="pb-24 md:pb-0">
           <Suspense
             fallback={
               <div className="p-6">

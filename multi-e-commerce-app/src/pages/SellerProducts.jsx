@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
 import { DonutGauge, KpiCard, Panel, ProgressRow, StatusPill } from '../components/dashboard/DashboardWidgets';
+import BulkProductCsvJournal from '../components/BulkProductCsvJournal';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { productService } from '../services/productService';
 import { formatCurrency } from '../utils/formatters';
@@ -129,7 +130,7 @@ const InventoryQuantityGraph = ({ product }) => {
 };
 
 const SellerProducts = () => {
-  const { hasFeature } = useAuth();
+  const { hasFeature, user } = useAuth();
   const [products, setProducts] = useState([]);
   const [planUsage, setPlanUsage] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -160,6 +161,7 @@ const SellerProducts = () => {
   );
 
   const canManageInventory = hasFeature(SUBSCRIPTION_FEATURES.INVENTORY_LEDGER);
+  const hasBusinessName = Boolean(String(user?.businessName || '').trim());
 
   const handleDeleteProduct = async (productId) => {
     if (!window.confirm('Delete this product?')) return;
@@ -263,6 +265,24 @@ const SellerProducts = () => {
         <KpiCard icon={FaWarehouse} label="Units In Stock" value={totalStock} detail={`${lowStockItems.length} low stock`} color="#3B82F6" points={products.map((product) => getStock(product)).slice(0, 12)} />
         <KpiCard icon={FaChartLine} label="Inventory Value" value={formatCurrency(inventoryValue)} detail="listed stock value" color="#16A34A" points={products.map((product) => Number(product?.price || 0)).slice(0, 12)} />
         <KpiCard icon={FaFilter} label="Categories" value={categoryCounts.length} detail={`${outOfStockItems.length} out of stock`} color="#8B5CF6" points={categoryCounts.map(([, count]) => count)} />
+      </div>
+
+      <div className="mt-4">
+        <BulkProductCsvJournal
+          title="Seller Journal"
+          description="Upload a CSV list to add up to 50 products with pricing, stock, MOQ, RFQ, warehouse, and hub details."
+          storageKey={`marketpulse_seller_product_csv_journal_${user?._id || user?.id || 'default'}`}
+          createProduct={(formData) => productService.create(formData)}
+          disabled={!canManageInventory || !hasBusinessName}
+          disabledMessage={
+            !canManageInventory
+              ? 'Upgrade your subscription to use bulk inventory tools.'
+              : !hasBusinessName
+                ? 'Add your business name in your seller profile before creating products.'
+                : ''
+          }
+          onComplete={() => fetchProducts({ silent: true })}
+        />
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">

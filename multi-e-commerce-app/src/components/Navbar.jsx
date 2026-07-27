@@ -77,8 +77,9 @@ const Navbar = () => {
       <div className="bg-[#F2871A] text-white">
         <div className="mx-auto flex max-w-[1366px] items-center gap-3 px-3 py-2 text-sm md:flex-nowrap">
           <Link to="/" className="flex min-w-0 items-center gap-2 hover:opacity-90" onClick={closeAllMenus}>
-            <div className="h-8 w-8 shrink-0 rounded-full border-2 border-[#06182f] bg-[#0B2D55] sm:h-9 sm:w-9" />
+            
             <span className="truncate rounded-sm bg-[#0B2D55] px-2 py-1 text-xs font-extrabold leading-none tracking-wide min-[380px]:text-sm sm:text-lg">
+              <img src="/marketpulse-logo.png" alt="MarketPulse Logo" className="h-4 w-4 sm:h-5 sm:w-5 inline-block mr-1" />
               LANGO <span className="text-[#F9B233]">MARKET PULSE</span>
             </span>
           </Link>

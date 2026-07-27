@@ -21,8 +21,10 @@ const MainLayout = () => {
           <div className="max-w-screen-2xl mx-auto px-4 md:px-6">
             <div className="h-14 sm:h-16 flex items-center">
               <Link to="/" className="flex items-center gap-2 min-w-max hover:opacity-90" aria-label="MarketPulse Home">
-            <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-[#0B2D55] border-2 border-[#06182f]" />
+            {/* <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-[#0B2D55] border-2 border-[#06182f]" /> */}
+            
             <span className="font-extrabold text-sm sm:text-lg leading-none tracking-wide bg-[#0B2D55] px-2 py-1 rounded-sm">
+              <img src="/marketpulse-logo.png" alt="MarketPulse Logo" className="h-4 w-4 sm:h-5 sm:w-5 inline-block mr-1" />
               LANGO <span className="text-[#F9B233]">MARKET PULSE</span>
             </span>
               </Link>

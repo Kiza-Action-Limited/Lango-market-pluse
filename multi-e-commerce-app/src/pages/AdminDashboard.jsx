@@ -21,14 +21,35 @@ import { formatCurrency, formatDate, formatDateTime } from '../utils/formatters'
 import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByLocationPanel, StatusPill, StoreVisitsBySourcePanel } from '../components/dashboard/DashboardWidgets';
 import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
-import { buildReviewSummary, buildSalesByLocation, buildStoreVisitSources, isPaidOrder } from '../utils/dashboardMetrics';
+import { DASHBOARD_RANGE_OPTIONS, buildDashboardDateRange, buildReviewSummary, buildSalesByLocation, buildStoreVisitSources, isPaidOrder } from '../utils/dashboardMetrics';
 import UserDetailsModal from '../components/admin/UserDetailsModal';
 import LiveLogisticsMapPanel from '../components/logistics/LiveLogisticsMapPanel';
 import SharedGroupTripPanel from '../components/logistics/SharedGroupTripPanel';
 
 const getAdminProductStock = (product) => Number(product?.stock ?? product?.quantityAvailable ?? product?.quantity ?? product?.inventory ?? 0);
 const getAdminProductSku = (product) => product?.sku || product?.trackingSku || product?.SKU || product?.stockKeepingUnit || 'SKU pending';
+const getAdminProductImage = (product) => product?.images?.[0]?.url || product?.images?.[0] || '';
 const getAdminProductThreshold = (product) => Number(product?.minThreshold ?? product?.lowStockThreshold ?? 10);
+const getAdminDocumentUrl = (document = {}) => (
+  document.url ||
+  document.fileUrl ||
+  document.secureUrl ||
+  document.documentUrl ||
+  document.path ||
+  ''
+);
+const getAdminDocumentTitle = (document = {}, fallback = 'User document') => (
+  document.title ||
+  document.originalName ||
+  document.fileName ||
+  document.name ||
+  fallback
+);
+const isAdminImageDocument = (document = {}) => {
+  const mimeType = String(document.mimeType || document.contentType || '').toLowerCase();
+  const url = String(getAdminDocumentUrl(document)).toLowerCase();
+  return mimeType.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(url);
+};
 const readMetadata = (source, key) => {
   const metadata = source?.metadata;
   if (!metadata) return undefined;
@@ -187,14 +208,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [dashboardRange, setDashboardRange] = useState('30d');
+  const [dashboardRange, setDashboardRange] = useState('1m');
   
   // Filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [selectedRole, setSelectedRole] = useState('all');
   const [selectedUserType, setSelectedUserType] = useState('all');
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [dateRange, setDateRange] = useState(() => buildDashboardDateRange('1m'));
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('createdAt');
@@ -223,6 +244,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedLogistics, setSelectedLogistics] = useState(null);
   const [selectedPayment, setSelectedPayment] = useState(null);
+  const [selectedDocument, setSelectedDocument] = useState(null);
   const [itemToDelete, setItemToDelete] = useState(null);
   
   // Form states
@@ -426,25 +448,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
 
   const applyDashboardRange = (range) => {
     setDashboardRange(range);
-    const end = new Date();
-    const start = new Date();
-
-    if (range === 'today') {
-      start.setHours(0, 0, 0, 0);
-    } else if (range === '7d') {
-      start.setDate(end.getDate() - 7);
-    } else if (range === '30d') {
-      start.setDate(end.getDate() - 30);
-    } else if (range === '90d') {
-      start.setDate(end.getDate() - 90);
-    } else if (range === 'year') {
-      start.setFullYear(end.getFullYear() - 1);
-    }
-
-    setDateRange({
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
-    });
+    setDateRange(buildDashboardDateRange(range));
   };
 
   // User Management Functions
@@ -793,27 +797,57 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           ))}
         </div>
       ) : recentUserDocuments.length ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
           {recentUserDocuments.map((document, index) => {
             const userLabel = getAdminDocumentUserName(document);
-            const hasFile = Boolean(document.url);
+            const fileUrl = getAdminDocumentUrl(document);
+            const hasFile = Boolean(fileUrl);
+            const imageDocument = isAdminImageDocument(document);
+            const title = getAdminDocumentTitle(document);
             return (
-              <div key={document._id || document.publicId || `${document.source}-${document.documentNumber}-${index}`} className="rounded-md border border-gray-200 bg-white p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[#111827]" title={document.title || document.originalName}>{document.title || document.originalName || 'User document'}</p>
-                    <p className="mt-1 truncate text-xs text-gray-500" title={userLabel}>{userLabel}</p>
+              <article key={document._id || document.publicId || `${document.source}-${document.documentNumber}-${index}`} className="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDocument(document)}
+                  className="block w-full text-left"
+                >
+                  <div className="relative aspect-[4/3] bg-gray-100">
+                    {imageDocument && fileUrl ? (
+                      <img
+                        src={fileUrl}
+                        alt={title}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 bg-gray-50 text-gray-400">
+                        <FaFileAlt className="text-4xl" />
+                        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-gray-600">
+                          {hasFile ? 'File preview' : 'Record only'}
+                        </span>
+                      </div>
+                    )}
+                    <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-1 text-[11px] font-semibold text-white">
+                      {formatAdminLabel(document.documentType)}
+                    </span>
+                    {!imageDocument && (
+                      <span className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[11px] font-semibold text-gray-700">
+                        {document.mimeType ? formatAdminLabel(document.mimeType.split('/').pop()) : 'metadata'}
+                      </span>
+                    )}
                   </div>
-                  <FaFileAlt className="shrink-0 text-[#F97316]" />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-semibold text-gray-600">{formatAdminLabel(document.source)}</span>
-                  <span className="rounded-full border border-orange-100 bg-orange-50 px-2 py-1 text-[11px] font-semibold text-orange-700">{formatAdminLabel(document.documentType)}</span>
-                  {!hasFile && <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">Database record</span>}
-                </div>
-                <p className="mt-3 truncate text-xs text-gray-500">{document.originalName || document.mimeType || document.documentNumber || 'Verification record'} {formatAdminFileSize(document.size)}</p>
-                <p className="mt-1 text-xs text-gray-400">{formatDateTime(document.uploadedAt)}</p>
-                <div className="mt-3 flex gap-2">
+                  <div className="p-3">
+                    <p className="truncate text-sm font-semibold text-[#111827]" title={title}>{title}</p>
+                    <p className="mt-1 truncate text-xs text-gray-500" title={userLabel}>{userLabel}</p>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">{formatAdminLabel(document.source)}</span>
+                      {!hasFile && <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">DB record</span>}
+                    </div>
+                    <p className="mt-2 truncate text-xs text-gray-500">{document.originalName || document.mimeType || document.documentNumber || 'Verification record'} {formatAdminFileSize(document.size)}</p>
+                    <p className="mt-1 text-xs text-gray-400">{formatDateTime(document.uploadedAt)}</p>
+                  </div>
+                </button>
+                <div className="flex gap-2 border-t border-gray-100 p-3">
                   <button
                     type="button"
                     onClick={() => handleViewUserDetails(document.user)}
@@ -823,7 +857,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                   </button>
                   {hasFile && (
                     <a
-                      href={document.url}
+                      href={fileUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-[#374151]"
@@ -832,7 +866,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                     </a>
                   )}
                 </div>
-              </div>
+              </article>
             );
           })}
         </div>
@@ -885,6 +919,76 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
       />
     ) : null
   );
+
+  const renderDocumentPreviewModal = () => {
+    if (!selectedDocument) return null;
+
+    const fileUrl = getAdminDocumentUrl(selectedDocument);
+    const imageDocument = isAdminImageDocument(selectedDocument);
+    const title = getAdminDocumentTitle(selectedDocument);
+    const userLabel = getAdminDocumentUserName(selectedDocument);
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-xl bg-white shadow-xl">
+          <div className="flex items-start justify-between gap-4 border-b border-gray-200 p-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-xl font-bold text-[#111827]">{title}</h2>
+              <p className="mt-1 text-sm text-gray-500">{userLabel} | {formatAdminLabel(selectedDocument.documentType)} | {formatAdminLabel(selectedDocument.source)}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedDocument(null)}
+              className="rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+              aria-label="Close document preview"
+            >
+              <FaTimesCircle className="text-xl" />
+            </button>
+          </div>
+
+          <div className="max-h-[calc(92vh-152px)] overflow-auto bg-gray-100 p-4">
+            {imageDocument && fileUrl ? (
+              <img src={fileUrl} alt={title} className="mx-auto max-h-[72vh] max-w-full rounded-lg bg-white object-contain shadow-sm" />
+            ) : (
+              <div className="mx-auto flex min-h-96 max-w-2xl flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center">
+                <FaFileAlt className="mb-3 text-5xl text-gray-300" />
+                <h3 className="text-lg font-semibold text-[#111827]">No image preview available</h3>
+                <p className="mt-2 text-sm text-gray-500">This document is saved as metadata or as a non-image file.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 p-4">
+            <div className="text-xs text-gray-500">
+              <span>{selectedDocument.originalName || selectedDocument.mimeType || 'Document record'}</span>
+              <span className="ml-2">{formatAdminFileSize(selectedDocument.size)}</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleViewUserDetails(selectedDocument.user)}
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-gray-200 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                <FaEye />
+                User
+              </button>
+              {fileUrl && (
+                <a
+                  href={fileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white hover:bg-[#374151]"
+                >
+                  <FaExternalLinkAlt />
+                  Open file
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   if (section === 'dashboard') {
     const totalUsers = Number(stats.users.total || 0);
@@ -1076,24 +1180,18 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                 <span className={`h-2 w-2 rounded-full bg-green-500 ${isRealtimeRefreshing ? 'animate-pulse' : ''}`} />
                 Live - {formatRealtimeStamp(lastUpdated)}
               </div>
-              <div className="flex overflow-hidden rounded-md border border-gray-200 bg-white">
-                {[
-                  ['today', 'Today'],
-                  ['7d', '7D'],
-                  ['30d', '30D'],
-                  ['90d', '90D'],
-                  ['year', 'Year'],
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => applyDashboardRange(value)}
-                    className={`h-10 px-3 text-xs font-medium ${dashboardRange === value ? 'bg-[#111827] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <label className="relative">
+                <FaCalendarAlt className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <select
+                  value={dashboardRange}
+                  onChange={(event) => applyDashboardRange(event.target.value)}
+                  className="h-10 rounded-md border border-gray-200 bg-white pl-9 pr-8 text-xs font-semibold text-gray-700 outline-none hover:bg-gray-50 focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                >
+                  {DASHBOARD_RANGE_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
               <button onClick={refreshData} disabled={refreshing} className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50">
                 <FaSync className={refreshing ? 'animate-spin' : ''} /> Refresh
               </button>
@@ -1340,9 +1438,18 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                 {topStockProducts.slice(0, 3).map((product) => (
                   <div key={product._id || product.id || getAdminProductSku(product)} className="rounded-md border border-gray-100 bg-gray-50 p-2">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-[#111827]" title={product.name}>{product.name}</p>
-                        <p className="truncate font-mono text-[11px] text-[#F97316]" title={getAdminProductSku(product)}>{getAdminProductSku(product)}</p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded bg-white">
+                          {getAdminProductImage(product) ? (
+                            <img src={getAdminProductImage(product)} alt={product.name} className="h-full w-full object-cover" />
+                          ) : (
+                            <FaBox className="text-gray-400" size={13} />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold text-[#111827]" title={product.name}>{product.name}</p>
+                          <p className="truncate font-mono text-[11px] text-[#F97316]" title={getAdminProductSku(product)}>{getAdminProductSku(product)}</p>
+                        </div>
                       </div>
                       <span className="text-xs font-semibold text-gray-700">{getAdminProductStock(product)}</span>
                     </div>
@@ -1391,15 +1498,24 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
                 <ProgressRow label="Active products" value={activeProducts} max={Math.max(totalProducts, 1)} color="#16A34A" detail={`${activeProducts}`} />
                 <ProgressRow label="Low stock" value={lowStockCount} max={Math.max(products.length, 1)} color="#F59E0B" detail={`${lowStockCount}`} />
                 <ProgressRow label="Out of stock" value={outOfStockProducts} max={Math.max(products.length, 1)} color="#DC2626" detail={`${outOfStockProducts}`} />
-                <div className="space-y-2 pt-2">
+                <div className="grid grid-cols-1 gap-2 pt-2 min-[420px]:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                   {topStockProducts.map((product) => (
-                    <div key={product._id || product.id || getAdminProductSku(product)} className="rounded-md bg-gray-50 px-3 py-2 text-sm">
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <span className="block truncate text-[#111827]">{product.name}</span>
-                          <span className="block truncate font-mono text-xs text-[#F97316]">{getAdminProductSku(product)}</span>
+                    <div key={product._id || product.id || getAdminProductSku(product)} className="rounded-md bg-gray-50 p-2 text-sm">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded bg-white">
+                            {getAdminProductImage(product) ? (
+                              <img src={getAdminProductImage(product)} alt={product.name} className="h-full w-full object-cover" />
+                            ) : (
+                              <FaBox className="text-gray-400" size={13} />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="block truncate text-xs font-semibold text-[#111827]" title={product.name}>{product.name}</span>
+                            <span className="block truncate font-mono text-[11px] text-[#F97316]" title={getAdminProductSku(product)}>{getAdminProductSku(product)}</span>
+                          </div>
                         </div>
-                        <span className="font-semibold text-gray-700">{getAdminProductStock(product)}</span>
+                        <span className="shrink-0 text-xs font-semibold text-gray-700">{getAdminProductStock(product)}</span>
                       </div>
                       <AdminInventoryQuantityGraph product={product} compact />
                     </div>
@@ -1435,14 +1551,14 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             </Panel>
 
             <Panel title="Top Selling Products" className="xl:col-span-4" action={<button onClick={() => navigate('/admin/products')} className="text-xs font-medium text-[#F97316]">View all</button>}>
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                 {(analytics?.topProducts || []).slice(0, 5).map((product, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-3">
+                  <div key={idx} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[#111827]">{product.product?.name || 'Product'}</p>
-                      <p className="text-xs text-gray-500">{product.totalSold || 0} units sold</p>
+                      <p className="truncate text-xs font-semibold text-[#111827]" title={product.product?.name || 'Product'}>{product.product?.name || 'Product'}</p>
+                      <p className="text-[11px] text-gray-500">{product.totalSold || 0} sold</p>
                     </div>
-                    <p className="shrink-0 text-sm font-semibold text-[#16A34A]">{formatCurrency(product.revenue || 0)}</p>
+                    <p className="shrink-0 text-xs font-bold text-[#16A34A]">{formatCurrency(product.revenue || 0)}</p>
                   </div>
                 ))}
                 {(!analytics?.topProducts || analytics.topProducts.length === 0) && <p className="text-sm text-gray-500">No product analytics yet.</p>}
@@ -1545,6 +1661,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           </div>
         </div>
         {renderUserDetailsModal()}
+        {renderDocumentPreviewModal()}
       </div>
     );
   }
@@ -1576,6 +1693,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           </div>
         </div>
         {renderUserDetailsModal()}
+        {renderDocumentPreviewModal()}
       </div>
     );
   }
@@ -2384,52 +2502,54 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
           </div>
           
           {/* Products Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {products.map((product) => {
               const stock = getAdminProductStock(product);
               const sku = getAdminProductSku(product);
+              const image = getAdminProductImage(product);
               return (
-              <div key={product._id || product.id || sku} className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-                <img
-                  src={product.images?.[0]?.url || product.images?.[0] || 'https://via.placeholder.com/300x200'}
-                  alt={product.name}
-                  className="w-full h-48 object-cover"
-                  onError={(e) => e.target.src = 'https://via.placeholder.com/300x200'}
-                />
-                <div className="p-4">
-                  <h3 className="font-semibold text-lg text-[#111827] mb-2">{product.name}</h3>
-                  <p className="text-gray-600 text-sm mb-2 line-clamp-2">{product.description}</p>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-2xl font-bold text-[#16A34A]">{formatCurrency(product.price)}</span>
-                    <span className={`px-2 py-1 rounded-full text-xs ${
-                      stock > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      Stock: {stock}
-                    </span>
+              <div key={product._id || product.id || sku} className="rounded-md border border-gray-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
+                <div className="flex items-start gap-3">
+                  <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-md bg-gray-100">
+                    {image ? (
+                      <img src={image} alt={product.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <FaBox className="text-gray-400" />
+                    )}
                   </div>
-                  <div className="mb-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
-                    <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-xs text-gray-500">Tracking SKU</p>
-                        <p className="truncate font-mono text-xs font-semibold text-[#111827]" title={sku}>{sku}</p>
+                        <h3 className="truncate text-sm font-semibold text-[#111827]" title={product.name}>{product.name}</h3>
+                        <p className="truncate text-[11px] text-gray-500" title={product.description}>{product.description || 'No description'}</p>
                       </div>
-                      <span className="text-xs font-semibold text-[#F97316]">{stock} {product.unit || ''}</span>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        stock > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {stock}
+                      </span>
                     </div>
-                    <AdminInventoryQuantityGraph product={product} compact />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[#16A34A]">{formatCurrency(product.price)}</span>
+                      <span className="truncate font-mono text-[11px] text-[#F97316]" title={sku}>{sku}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-500">Seller: {product.seller?.businessName || product.seller?.name}</span>
-                    <button
-                      onClick={() => handleToggleProductStatus(product._id)}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium ${
-                        product.isActive 
-                          ? 'bg-red-500 text-white hover:bg-red-600' 
-                          : 'bg-green-500 text-white hover:bg-green-600'
-                      }`}
-                    >
-                      {product.isActive ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </div>
+                </div>
+                <div className="mt-3">
+                  <AdminInventoryQuantityGraph product={product} compact />
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate text-xs text-gray-500">Seller: {product.seller?.businessName || product.seller?.name || 'Unknown'}</span>
+                  <button
+                    onClick={() => handleToggleProductStatus(product._id)}
+                    className={`shrink-0 rounded-md px-2 py-1 text-xs font-semibold ${
+                      product.isActive
+                        ? 'bg-red-500 text-white hover:bg-red-600'
+                        : 'bg-green-500 text-white hover:bg-green-600'
+                    }`}
+                  >
+                    {product.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
                 </div>
               </div>
             );

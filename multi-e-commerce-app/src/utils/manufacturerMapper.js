@@ -25,6 +25,8 @@ const isMoqBusiness = (type = '') => {
   return t === 'manufacturer' || t === 'wholesaler';
 };
 
+const getProductId = (product = {}) => clean(product?.id || product?._id);
+
 const getProductSellerId = (product = {}) =>
   clean(
     product?.seller?.id ||
@@ -34,6 +36,15 @@ const getProductSellerId = (product = {}) =>
       product?.userId ||
       product?.createdBy ||
       product?.vendorId
+  );
+
+const getProductBusinessId = (product = {}) =>
+  clean(
+    product?.business?.id ||
+      product?.business?._id ||
+      product?.businessId ||
+      product?.companyId ||
+      product?.storeId
   );
 
 const getProductSellerName = (product = {}) =>
@@ -52,42 +63,72 @@ const getProductSellerName = (product = {}) =>
 const getProductSellerType = (product = {}) =>
   clean(product?.seller?.businessType || product?.seller?.role || product?.businessType || product?.sellerType);
 
+const getBusinessId = (business = {}) => clean(business?.id || business?._id || business?.userId || business?.ownerId);
+
+const getBusinessName = (business = {}) =>
+  clean(business?.name || business?.businessName || business?.storeName || business?.companyName);
+
+const getProductCategoryId = (product = {}, linkedBusiness = null) => {
+  const category = product?.category;
+  if (typeof category === 'object' && category) {
+    return clean(category.id || category._id || category.slug || category.value || category.name);
+  }
+  return clean(product?.categoryId || product?.category || linkedBusiness?.categoryId || linkedBusiness?.category || 'all');
+};
+
+const getProductImage = (product = {}) =>
+  product?.images?.[0]?.url || product?.images?.[0] || product?.image || product?.thumbnail || '';
+
 export const buildSupplierCards = (products = [], users = [], premiumProfiles = [], businesses = []) => {
   const sellerUsers = users.filter((user) => user?.role === 'seller');
   const businessById = new Map(
-    businesses.map((biz) => [
-      String(biz?.id || biz?._id || biz?.userId || ''),
-      biz,
-    ])
+    businesses
+      .map((biz) => [getBusinessId(biz), biz])
+      .filter(([id]) => id)
   );
   const businessByName = new Map(
-    businesses.map((biz) => [
-      normalize(biz?.name || biz?.businessName || biz?.storeName || ''),
-      biz,
-    ])
+    businesses
+      .map((biz) => [normalize(getBusinessName(biz)), biz])
+      .filter(([name]) => name)
   );
 
   const bySeller = products.reduce((acc, product) => {
+    const productId = getProductId(product);
+    const productName = clean(product?.name);
+    const status = normalize(product?.status);
+    if (!productId || !productName || product?.isActive === false || ['draft', 'inactive', 'deleted'].includes(status)) {
+      return acc;
+    }
+
     const sellerId = getProductSellerId(product);
+    const businessId = getProductBusinessId(product);
     const sellerName = getProductSellerName(product);
-    const sellerKey = sellerId || sellerName || `unknown-supplier-${product?.id || product?._id || Math.random()}`;
+    const linkedBusiness =
+      businessById.get(String(sellerId || '')) ||
+      businessById.get(String(businessId || '')) ||
+      businessByName.get(normalize(sellerName));
+    const sellerKey = sellerId || businessId || getBusinessId(linkedBusiness) || sellerName || getBusinessName(linkedBusiness);
+    if (!sellerKey) return acc;
+
     if (!acc[sellerKey]) acc[sellerKey] = [];
     acc[sellerKey].push(product);
     return acc;
   }, {});
 
-  return Object.entries(bySeller).map(([sellerKey, sellerProducts], index) => {
+  const productSuppliers = Object.entries(bySeller).map(([sellerKey, sellerProducts], index) => {
     const first = sellerProducts[0];
     const productSellerId = getProductSellerId(first);
+    const productBusinessId = getProductBusinessId(first);
     const productSellerName = getProductSellerName(first);
-    const businessByIdMatch = businessById.get(String(productSellerId || ''));
+    const businessByIdMatch = businessById.get(String(productSellerId || '')) || businessById.get(String(productBusinessId || ''));
     const businessByNameMatch = businessByName.get(normalize(productSellerName));
     const linkedBusiness = businessByIdMatch || businessByNameMatch || null;
 
     const sellerName =
       productSellerName ||
-      clean(linkedBusiness?.name || linkedBusiness?.businessName || linkedBusiness?.storeName) ||
-      'Unknown Supplier';
+      getBusinessName(linkedBusiness);
+    if (!sellerName) return null;
+
     const matchedUser =
       sellerUsers.find(
         (user) =>
@@ -128,9 +169,9 @@ export const buildSupplierCards = (products = [], users = [], premiumProfiles = 
       null;
 
     return {
-      id: String(first?.seller?.id || first?.seller?._id || sellerKey || `supplier-${index + 1}`),
+      id: String(productSellerId || productBusinessId || getBusinessId(linkedBusiness) || sellerKey),
       name: sellerName,
-      categoryId: first?.categoryId || 'all',
+      categoryId: getProductCategoryId(first, linkedBusiness),
       verified: true,
       years: 1 + (index % 12),
       staffRange: `${10 + index * 8}+ staff`,
@@ -148,15 +189,14 @@ export const buildSupplierCards = (products = [], users = [], premiumProfiles = 
       website: premiumProfile?.businessUrls?.[0] || '',
       capabilities,
       products: sellerProducts.map((product, i) => ({
-        id: product.id || product._id,
+        id: getProductId(product),
         name: product.name,
-        image: product.images?.[0]?.url || product.images?.[0],
+        image: getProductImage(product),
         priceText: `${formatCurrency(product.price, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
         minOrder: `Min. order: ${10 + i * 5} pieces`,
       })),
       coverImage:
-        sellerProducts[0]?.images?.[0]?.url ||
-        sellerProducts[0]?.images?.[0] ||
+        getProductImage(sellerProducts[0]) ||
         linkedBusiness?.logo ||
         linkedBusiness?.image ||
         '',
@@ -170,7 +210,67 @@ export const buildSupplierCards = (products = [], users = [], premiumProfiles = 
         : [],
       farmerOptional: normalize(first?.seller?.businessType) === 'farmer',
     };
-  });
+  }).filter(Boolean);
+
+  const mappedSupplierKeys = new Set(
+    productSuppliers.flatMap((supplier) => [
+      normalize(supplier.id),
+      normalize(supplier.name),
+    ])
+  );
+
+  const businessSuppliers = businesses
+    .filter((business) => {
+      const id = getBusinessId(business);
+      const name = getBusinessName(business);
+      const status = normalize(business?.status);
+      if (!id || !name || business?.isActive === false || ['draft', 'inactive', 'deleted'].includes(status)) {
+        return false;
+      }
+      return !mappedSupplierKeys.has(normalize(id)) && !mappedSupplierKeys.has(normalize(name));
+    })
+    .map((business, index) => {
+      const businessType = toTitle(business?.businessType || business?.type || business?.role || 'supplier');
+      const capabilities = Array.isArray(business?.capabilities) && business.capabilities.length
+        ? business.capabilities.slice(0, 4)
+        : ['Verified business profile', 'Direct supplier contact', 'Marketplace sourcing', `${businessType} services`];
+
+      return {
+        id: String(getBusinessId(business)),
+        name: getBusinessName(business),
+        categoryId: clean(business?.categoryId || business?.category || 'all'),
+        verified: business?.verified !== false,
+        years: Number(business?.yearsActive || business?.years || 1 + (index % 12)),
+        staffRange: business?.staffRange || business?.employees || `${10 + index * 8}+ staff`,
+        annualSales:
+          business?.annualSales ||
+          business?.annualRevenue ||
+          `${formatCurrency((Number(business?.revenue) || 1000) * 12, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          })}+`,
+        rating: Number(business?.rating || 0).toFixed(1),
+        reviews: Number(business?.reviewsCount || business?.reviewCount || 0),
+        businessType,
+        contactEmail: business?.email || business?.contactEmail || '',
+        contactPhone: business?.phone || business?.contactPhone || '',
+        website: business?.website || '',
+        capabilities,
+        products: [],
+        coverImage: business?.logo || business?.image || business?.coverImage || '',
+        createdAt: business?.createdAt || null,
+        premiumProfile: null,
+        moqOptions: isMoqBusiness(business?.businessType)
+          ? [
+              { label: 'MQQ1', value: '10 - 2,999 pieces', pricce: '' },
+              { label: 'MQQ2', value: '3,000+ pieces', pricce: '' },
+            ]
+          : [],
+        farmerOptional: normalize(business?.businessType) === 'farmer',
+      };
+    });
+
+  return [...productSuppliers, ...businessSuppliers];
 };
 
 export const buildCapabilityChips = (suppliers = []) => {

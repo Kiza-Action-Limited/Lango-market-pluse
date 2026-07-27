@@ -55,8 +55,8 @@ export const authService = {
     return response.data?.data || response.data;
   },
 
-  getCurrentUser: async () => {
-    const response = await api.get('/v1/auth/me');
+  getCurrentUser: async (currentUser) => {
+    const response = await api.get('/v1/auth/me', currentUser ? { params: { currentUser } } : {});
     return response.data?.data?.user || response.data?.user || null;
   },
 

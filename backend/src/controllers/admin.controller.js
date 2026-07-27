@@ -830,9 +830,9 @@ exports.getAllUsers = async (req, res, next) => {
     const { role, status, search, page = 1, limit = 20 } = req.query;
     const pageNumber = Math.max(1, Number(page) || 1);
     const pageSize = Math.min(200, Math.max(1, Number(limit) || 20));
-    const andConditions = [];
+    const andConditions = [{ role: { $ne: 'admin' } }];
 
-    if (role && role !== 'all') {
+    if (role && role !== 'all' && role !== 'admin') {
       if (['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business', 'logistics'].includes(role)) {
         andConditions.push({ $or: [{ role }, { businessType: role }] });
       } else if (role === 'consumer') {
@@ -863,7 +863,7 @@ exports.getAllUsers = async (req, res, next) => {
       ] });
     }
 
-    const query = andConditions.length ? { $and: andConditions } : {};
+    const query = { $and: andConditions };
     
     const [users, total, summaryRows, documentUsers] = await Promise.all([
       User.find(query)
@@ -874,6 +874,7 @@ exports.getAllUsers = async (req, res, next) => {
         .lean(),
       User.countDocuments(query),
       User.aggregate([
+        { $match: { role: { $ne: 'admin' } } },
         {
           $group: {
             _id: null,
@@ -892,7 +893,7 @@ exports.getAllUsers = async (req, res, next) => {
           },
         },
       ]),
-      User.find({})
+      User.find({ role: { $ne: 'admin' } })
         .select('adminDocuments logisticsProfile kycDetails kycVerified verificationStatus')
         .lean(),
     ]);
@@ -942,6 +943,9 @@ exports.getUserDetails = async (req, res, next) => {
     const user = await User.findById(req.params.userId).select('-password').lean();
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (user.role === 'admin') {
+      return res.status(403).json({ success: false, message: 'Admin account details are only available from Admin Profile' });
     }
     const userId = user._id;
     
@@ -1070,6 +1074,15 @@ exports.updateUser = async (req, res, next) => {
       phone,
       address,
     } = req.body;
+
+    const existingUser = await User.findById(req.params.userId).select('role');
+    if (!existingUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (existingUser.role === 'admin') {
+      return res.status(403).json({ success: false, message: 'Admin accounts are managed from Admin Profile only' });
+    }
+
     const updates = {};
     
     const normalizedRequestedRole = role ? String(role).trim().toLowerCase() : null;
@@ -1128,14 +1141,57 @@ exports.updateUser = async (req, res, next) => {
     updates.updatedAt = new Date();
     
     const user = await User.findByIdAndUpdate(req.params.userId, updates, { new: true }).select('-password');
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
     
     res.status(200).json({
       success: true,
       message: 'User updated successfully',
       user
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Delete a non-admin user account
+ * DELETE /api/v1/admin/users/:userId
+ */
+exports.deleteUser = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array() });
+    }
+
+    const user = await User.findById(req.params.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const requestingAdminId = req.user?._id || req.user?.id;
+    if (String(user._id) === String(requestingAdminId)) {
+      return res.status(400).json({ success: false, message: 'You cannot delete your own admin account' });
+    }
+
+    if (user.role === 'admin') {
+      return res.status(403).json({ success: false, message: 'Admin accounts are managed from Admin Profile only' });
+    }
+
+    const [productResult] = await Promise.all([
+      Product.updateMany(
+        { seller: user._id },
+        { $set: { isPublished: false, warehouseStatus: 'restricted' } }
+      ),
+      Subscription.deleteMany({ user: user._id }),
+      AgentReferral.deleteMany({ seller: user._id }),
+    ]);
+
+    await user.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: 'User deleted successfully',
+      unpublishedProducts: productResult.modifiedCount || 0,
     });
   } catch (error) {
     next(error);
@@ -1151,6 +1207,9 @@ exports.getUserDocuments = async (req, res, next) => {
     const user = await User.findById(req.params.userId).select('-password').lean();
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (user.role === 'admin') {
+      return res.status(403).json({ success: false, message: 'Admin account details are only available from Admin Profile' });
     }
 
     res.status(200).json({
@@ -1179,7 +1238,7 @@ exports.getAllUserDocuments = async (req, res, next) => {
     const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
     const searchTerm = String(search || '').trim().toLowerCase();
 
-    const users = await User.find({})
+    const users = await User.find({ role: { $ne: 'admin' } })
       .select('fullName name email phone businessName role businessType adminDocuments logisticsProfile kycDetails kycVerified verificationStatus createdAt updatedAt')
       .sort('-updatedAt')
       .lean();
@@ -1283,6 +1342,9 @@ exports.uploadUserDocument = async (req, res, next) => {
     const user = await User.findById(req.params.userId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (user.role === 'admin') {
+      return res.status(403).json({ success: false, message: 'Admin account details are only available from Admin Profile' });
     }
 
     const {
@@ -3032,7 +3094,7 @@ const getAdminExportRows = async (type, filters = {}) => {
 
   switch (type) {
     case 'users': {
-      const users = await User.find({})
+      const users = await User.find({ role: { $ne: 'admin' } })
         .select('fullName name email phone role businessType businessName verificationStatus isActive isBlocked createdAt')
         .sort('-createdAt')
         .limit(limit)
@@ -3223,7 +3285,7 @@ const getAdminExportRows = async (type, filters = {}) => {
     }
 
     case 'documents': {
-      const users = await User.find({})
+      const users = await User.find({ role: { $ne: 'admin' } })
         .select('fullName name email phone role businessType businessName adminDocuments logisticsProfile kycDetails verificationStatus kycVerified')
         .sort('-updatedAt')
         .limit(limit)

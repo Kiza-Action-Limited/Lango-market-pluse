@@ -57,6 +57,7 @@ const AISourcingHub = lazy(() => import('./pages/AISourcingHub'));
 const MizigoEngine = lazy(() => import('./pages/MizigoEngine'));
 const SellerDashboard = lazy(() => import('./pages/SellerDashboard'));
 const SellerProducts = lazy(() => import('./pages/SellerProducts'));
+const SellerJournal = lazy(() => import('./pages/SellerJournal'));
 const AddProduct = lazy(() => import('./pages/AddProduct'));
 const EditProduct = lazy(() => import('./pages/EditProduct'));
 const SellerOrders = lazy(() => import('./pages/SellerOrders'));
@@ -208,6 +209,7 @@ function App() {
                           <Route path="add-product" element={<AddProduct />} />
                           <Route path="edit-product/:id" element={<EditProduct />} />
                           <Route path="products" element={<SellerProducts />} />
+                          <Route path="journal" element={<SellerJournal />} />
                           <Route path="orders" element={<SellerOrders />} />
                           <Route path="logistics-requests" element={<SellerLogisticsRequests />} />
                           <Route path="rfqs" element={<SellerRFQs />} />

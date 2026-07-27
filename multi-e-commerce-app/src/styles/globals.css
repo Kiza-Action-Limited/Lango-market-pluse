@@ -22,8 +22,11 @@
   }
 
   html {
+    min-height: 100%;
+    height: auto;
     width: 100%;
     overflow-x: hidden;
+    overflow-y: auto;
     text-size-adjust: 100%;
     -webkit-text-size-adjust: 100%;
     scroll-behavior: smooth;
@@ -31,17 +34,22 @@
   
   body {
     @apply bg-gray-50 text-dark;
+    height: auto;
     min-height: 100dvh;
     width: 100%;
     overflow-x: hidden;
+    overflow-y: auto;
+    position: static;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-    overscroll-behavior-y: none;
+    overscroll-behavior-y: auto;
   }
 
   #root {
+    height: auto;
     min-height: 100dvh;
     width: 100%;
+    overflow: visible;
     isolation: isolate;
   }
 

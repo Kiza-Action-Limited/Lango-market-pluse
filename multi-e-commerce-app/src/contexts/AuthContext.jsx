@@ -51,7 +51,7 @@ export const AuthProvider = ({ children }) => {
       setUser(currentUser);
       return currentUser;
     } catch (error) {
-      console.error('Error fetching user:', error);
+      console.error('Error fetching user', error);
       logout();
       return null;
     } finally {

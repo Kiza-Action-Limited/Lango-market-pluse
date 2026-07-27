@@ -7,13 +7,16 @@ import {
   FaClipboardList,
   FaEnvelope,
   FaEye,
+  FaFileCsv,
   FaFilter,
   FaIdCard,
   FaPhoneAlt,
   FaSearch,
   FaShieldAlt,
+  FaSortAmountDown,
   FaStore,
   FaSyncAlt,
+  FaTrash,
   FaTruck,
   FaUser,
   FaUserCheck,
@@ -33,7 +36,6 @@ const roleFilters = [
   ['retailer', 'Retailers'],
   ['manufacturer', 'Manufacturers'],
   ['logistics', 'Logistics'],
-  ['admin', 'Admins'],
 ];
 const statusFilters = [
   ['all', 'All status'],
@@ -49,6 +51,18 @@ const statusFilters = [
   ['rejected', 'KYC rejected'],
   ['restricted', 'Restricted'],
 ];
+const sortOptions = [
+  ['role_asc', 'Role A-Z'],
+  ['role_desc', 'Role Z-A'],
+  ['joined_desc', 'Newest joined'],
+  ['joined_asc', 'Oldest joined'],
+  ['activity_desc', 'Recent activity'],
+  ['name_asc', 'Name A-Z'],
+];
+const exportModes = [
+  ['directory', 'User directory CSV'],
+  ['activity', 'Platform activity CSV'],
+];
 
 const formatLabel = (value) => String(value || '')
   .replace(/_/g, ' ')
@@ -59,6 +73,54 @@ const getDisplayName = (user = {}) => user.businessName || user.fullName || user
 const getUserId = (user = {}) => user._id || user.id || user.userId;
 
 const getKycStatus = (user = {}) => user.verificationStatus || (user.kycVerified ? 'verified' : 'unverified');
+
+const isAdminAccount = (user = {}) => getEffectiveUserCategory(user) === 'admin';
+
+const getVisibleUserRows = (rows = []) => rows.filter((user) => user && !isAdminAccount(user));
+
+const getUserRoleLabel = (user = {}) => {
+  const category = getEffectiveUserCategory(user);
+  if (category === 'admin') return 'admin';
+  return isSellerUser(user) ? 'seller' : user.role || category;
+};
+
+const getUserActivityDate = (user = {}) => user.lastLogin || user.lastActiveAt || user.lastActivityAt || user.updatedAt || user.createdAt;
+
+const getUserActivityCount = (user = {}) => Number(
+  user.activityCount ??
+    user.totalActivity ??
+    user.orderCount ??
+    user.totalOrders ??
+    user.productCount ??
+    user.totalProducts ??
+    user.documentCount ??
+    0
+);
+
+const parseDateValue = (value) => {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+};
+
+const escapeCsvCell = (value = '') => {
+  const text = String(value ?? '');
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+const downloadCsv = (filename, headers, rows) => {
+  const csv = [headers, ...rows]
+    .map((row) => row.map(escapeCsvCell).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
 
 const getVerificationTone = (status) => {
   if (status === 'verified' || status === 'gold') return 'border-green-200 bg-green-50 text-green-700';
@@ -97,22 +159,32 @@ const StatusBadge = ({ children, tone = 'gray' }) => {
 
 const AdminUsers = () => {
   const [searchParams] = useSearchParams();
+  const initialRoleFilter = searchParams.get('role') === 'admin' ? 'all' : searchParams.get('role') || 'all';
   const [users, setUsers] = useState([]);
   const [summary, setSummary] = useState({});
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserDetails, setSelectedUserDetails] = useState(null);
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState(searchParams.get('role') || 'all');
+  const [roleFilter, setRoleFilter] = useState(initialRoleFilter);
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || 'all');
+  const [sortBy, setSortBy] = useState('role_asc');
+  const [exportRole, setExportRole] = useState(initialRoleFilter);
+  const [exportMode, setExportMode] = useState('directory');
+  const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
     const roleFromUrl = searchParams.get('role');
     const statusFromUrl = searchParams.get('status');
-    if (roleFromUrl) setRoleFilter(roleFromUrl);
+    if (roleFromUrl) {
+      const safeRole = roleFromUrl === 'admin' ? 'all' : roleFromUrl;
+      setRoleFilter(safeRole);
+      setExportRole(safeRole);
+    }
     if (statusFromUrl) setStatusFilter(statusFromUrl);
   }, [searchParams]);
 
@@ -123,12 +195,13 @@ const AdminUsers = () => {
         params: {
           page: nextPage,
           limit: pagination.limit,
-          role: roleFilter,
+          role: roleFilter === 'admin' ? 'all' : roleFilter,
           status: statusFilter,
           search: search.trim() || undefined,
+          sortBy,
         },
       });
-      setUsers(Array.isArray(response.data.users) ? response.data.users.filter(Boolean) : []);
+      setUsers(Array.isArray(response.data.users) ? getVisibleUserRows(response.data.users) : []);
       setSummary(response.data.summary || {});
       setPagination(response.data.pagination || { page: nextPage, limit: pagination.limit, total: 0, pages: 1 });
       setPage(response.data.pagination?.page || nextPage);
@@ -145,7 +218,7 @@ const AdminUsers = () => {
       fetchUsers({ nextPage: 1 });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [roleFilter, statusFilter, search]);
+  }, [roleFilter, statusFilter, search, sortBy]);
 
   const applyUpdatedUser = (updatedUser) => {
     if (!updatedUser) return;
@@ -174,6 +247,36 @@ const AdminUsers = () => {
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to update user');
       throw error;
+    }
+  };
+
+  const deleteUser = async (user) => {
+    const userId = getUserId(user);
+    if (!userId) return;
+
+    if (isAdminAccount(user)) {
+      toast.error('Admin account details are only managed from Admin Profile');
+      return;
+    }
+
+    const displayName = getDisplayName(user);
+    const confirmed = window.confirm(`Delete ${displayName}? This removes the account from the platform.`);
+    if (!confirmed) return;
+
+    setDeletingUserId(userId);
+    try {
+      await api.delete(`/v1/admin/users/${userId}`);
+      setUsers((currentUsers) => currentUsers.filter((currentUser) => String(getUserId(currentUser)) !== String(userId)));
+      setPagination((currentPagination) => ({
+        ...currentPagination,
+        total: Math.max(0, Number(currentPagination.total || 0) - 1),
+      }));
+      toast.success('User deleted');
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete user');
+    } finally {
+      setDeletingUserId(null);
     }
   };
 
@@ -226,7 +329,7 @@ const AdminUsers = () => {
   };
 
   const stats = useMemo(() => ({
-    total: summary.total ?? pagination.total ?? 0,
+    total: Math.max(0, Number(summary.total ?? pagination.total ?? 0) - Number(summary.admins ?? 0)),
     active: summary.active ?? 0,
     blocked: summary.blocked ?? 0,
     sellers: summary.sellers ?? 0,
@@ -240,6 +343,154 @@ const AdminUsers = () => {
     documents: summary.documents ?? 0,
   }), [summary, pagination.total]);
 
+  const sortedUsers = useMemo(() => {
+    const sorted = [...users];
+    sorted.sort((a, b) => {
+      if (sortBy === 'role_desc') {
+        return getUserRoleLabel(b).localeCompare(getUserRoleLabel(a)) || getDisplayName(a).localeCompare(getDisplayName(b));
+      }
+      if (sortBy === 'joined_desc') {
+        return parseDateValue(b.createdAt) - parseDateValue(a.createdAt);
+      }
+      if (sortBy === 'joined_asc') {
+        return parseDateValue(a.createdAt) - parseDateValue(b.createdAt);
+      }
+      if (sortBy === 'activity_desc') {
+        return parseDateValue(getUserActivityDate(b)) - parseDateValue(getUserActivityDate(a)) || getUserActivityCount(b) - getUserActivityCount(a);
+      }
+      if (sortBy === 'name_asc') {
+        return getDisplayName(a).localeCompare(getDisplayName(b));
+      }
+      return getUserRoleLabel(a).localeCompare(getUserRoleLabel(b)) || getDisplayName(a).localeCompare(getDisplayName(b));
+    });
+    return sorted;
+  }, [sortBy, users]);
+
+  const buildDirectoryRows = (rows) => ({
+    headers: [
+      'User ID',
+      'Name',
+      'Business Name',
+      'Role',
+      'Business Type',
+      'Email',
+      'Phone',
+      'Location',
+      'KYC Status',
+      'Phone Verified',
+      'Email Verified',
+      'Documents',
+      'Access',
+      'Joined',
+      'Updated',
+      'Last Login',
+    ],
+    rows: rows.map((user) => [
+      getUserId(user),
+      getDisplayName(user),
+      user.businessName || '',
+      getUserRoleLabel(user),
+      user.businessType || getEffectiveUserCategory(user),
+      user.email || '',
+      user.phone || '',
+      user.locationHub || user.city || '',
+      getKycStatus(user),
+      user.isPhoneVerified ? 'yes' : 'no',
+      user.isEmailVerified ? 'yes' : 'no',
+      Number(user.documentCount || 0),
+      user.isBlocked ? 'blocked' : 'active',
+      user.createdAt || '',
+      user.updatedAt || '',
+      user.lastLogin || '',
+    ]),
+  });
+
+  const buildActivityRows = (rows) => ({
+    headers: [
+      'User ID',
+      'Name',
+      'Role',
+      'Business Type',
+      'Access',
+      'Activity Count',
+      'Orders',
+      'Products',
+      'Documents',
+      'Total Spent',
+      'Wallet Balance',
+      'Escrow Balance',
+      'SMS Credits',
+      'Last Activity',
+      'Last Login',
+      'Joined',
+      'KYC Status',
+    ],
+    rows: rows.map((user) => [
+      getUserId(user),
+      getDisplayName(user),
+      getUserRoleLabel(user),
+      user.businessType || getEffectiveUserCategory(user),
+      user.isBlocked ? 'blocked' : 'active',
+      getUserActivityCount(user),
+      user.orderCount ?? user.totalOrders ?? '',
+      user.productCount ?? user.totalProducts ?? '',
+      Number(user.documentCount || 0),
+      user.totalSpent ?? user.totalSales ?? '',
+      user.walletBalance ?? '',
+      user.escrowBalance ?? '',
+      user.smsCredits ?? '',
+      getUserActivityDate(user) || '',
+      user.lastLogin || '',
+      user.createdAt || '',
+      getKycStatus(user),
+    ]),
+  });
+
+  const fetchUsersForExport = async () => {
+    const response = await api.get('/v1/admin/users', {
+      params: {
+        page: 1,
+        limit: 1000,
+        role: exportRole,
+        status: statusFilter,
+        search: search.trim() || undefined,
+        sortBy,
+        includeActivity: exportMode === 'activity',
+      },
+    });
+    const rows = response.data?.users || response.data?.data || [];
+    return Array.isArray(rows) ? getVisibleUserRows(rows) : [];
+  };
+
+  const handleExportUsersCsv = async () => {
+    setExporting(true);
+    try {
+      const rows = await fetchUsersForExport();
+      const sortedRows = [...rows].sort((a, b) => (
+        sortBy === 'role_desc'
+          ? getUserRoleLabel(b).localeCompare(getUserRoleLabel(a))
+          : sortBy === 'activity_desc'
+            ? parseDateValue(getUserActivityDate(b)) - parseDateValue(getUserActivityDate(a))
+            : sortBy === 'joined_desc'
+              ? parseDateValue(b.createdAt) - parseDateValue(a.createdAt)
+              : sortBy === 'joined_asc'
+                ? parseDateValue(a.createdAt) - parseDateValue(b.createdAt)
+                : sortBy === 'name_asc'
+                  ? getDisplayName(a).localeCompare(getDisplayName(b))
+                  : getUserRoleLabel(a).localeCompare(getUserRoleLabel(b))
+      ));
+      const payload = exportMode === 'activity' ? buildActivityRows(sortedRows) : buildDirectoryRows(sortedRows);
+      const roleLabel = exportRole === 'all' ? 'all_roles' : exportRole;
+      downloadCsv(`admin_users_${exportMode}_${roleLabel}_${new Date().toISOString().slice(0, 10)}.csv`, payload.headers, payload.rows);
+      toast.success(`Exported ${sortedRows.length} user${sortedRows.length === 1 ? '' : 's'}`);
+    } catch (error) {
+      console.error('Error exporting users:', error);
+      toast.error(error.response?.data?.message || 'Failed to export users CSV');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
       <div className="mx-auto max-w-screen-2xl space-y-6">
@@ -248,7 +499,7 @@ const AdminUsers = () => {
             <div>
               <p className="text-xs font-semibold uppercase text-[#F97316]">Admin users</p>
               <h1 className="mt-2 text-2xl font-bold text-gray-950">Professional user management</h1>
-              <p className="mt-1 text-sm text-gray-600">Manage buyers, sellers, logistics providers, admins, verification, documents, and account access.</p>
+              <p className="mt-1 text-sm text-gray-600">Manage buyers, sellers, logistics providers, verification, documents, and account access.</p>
             </div>
             <button
               type="button"
@@ -272,7 +523,7 @@ const AdminUsers = () => {
         </section>
 
         <section className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[1fr_220px_220px_auto] lg:items-center">
+          <div className="grid gap-3 lg:grid-cols-[1fr_190px_190px_190px_auto] lg:items-center">
             <div className="relative">
               <FaSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -287,7 +538,10 @@ const AdminUsers = () => {
               <FaUsers className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <select
                 value={roleFilter}
-                onChange={(event) => setRoleFilter(event.target.value)}
+                onChange={(event) => {
+                  setRoleFilter(event.target.value);
+                  setExportRole(event.target.value);
+                }}
                 className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm font-semibold text-gray-800 outline-none focus:border-[#F97316]"
               >
                 {roleFilters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -303,9 +557,54 @@ const AdminUsers = () => {
                 {statusFilters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
+            <label className="relative">
+              <FaSortAmountDown className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+                className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm font-semibold text-gray-800 outline-none focus:border-[#F97316]"
+              >
+                {sortOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
             <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
-              Showing <span className="font-semibold text-gray-950">{users.length}</span> of <span className="font-semibold text-gray-950">{pagination.total || 0}</span>
+              Showing <span className="font-semibold text-gray-950">{users.length}</span> non-admin users
             </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 border-t border-gray-100 pt-4 lg:grid-cols-[220px_220px_1fr_auto] lg:items-center">
+            <label className="relative">
+              <FaFileCsv className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                value={exportMode}
+                onChange={(event) => setExportMode(event.target.value)}
+                className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm font-semibold text-gray-800 outline-none focus:border-[#F97316]"
+              >
+                {exportModes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="relative">
+              <FaUsers className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <select
+                value={exportRole}
+                onChange={(event) => setExportRole(event.target.value)}
+                className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm font-semibold text-gray-800 outline-none focus:border-[#F97316]"
+              >
+                {roleFilters.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <p className="text-sm text-gray-500">
+              Export all matching users by role/status/search, or export platform activity columns for audits.
+            </p>
+            <button
+              type="button"
+              onClick={handleExportUsersCsv}
+              disabled={exporting}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#111827] px-4 text-sm font-semibold text-white hover:bg-black disabled:opacity-60"
+            >
+              <FaFileCsv />
+              {exporting ? 'Exporting...' : 'Export CSV'}
+            </button>
           </div>
         </section>
 
@@ -337,12 +636,12 @@ const AdminUsers = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {users.map((user) => {
+                  {sortedUsers.map((user) => {
                     const userId = getUserId(user);
                     const displayName = getDisplayName(user);
                     const category = getEffectiveUserCategory(user);
                     const kycStatus = getKycStatus(user);
-                    const roleLabel = isSellerUser(user) ? 'seller' : user.role || category;
+                    const roleLabel = getUserRoleLabel(user);
 
                     return (
                       <tr key={userId} className="bg-white hover:bg-gray-50">
@@ -439,6 +738,15 @@ const AdminUsers = () => {
                             >
                               {user.isBlocked ? <FaUserCheck /> : <FaBan />}
                               {user.isBlocked ? 'Unblock' : 'Block'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteUser(user)}
+                              disabled={String(deletingUserId) === String(userId)}
+                              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              <FaTrash />
+                              {String(deletingUserId) === String(userId) ? 'Deleting...' : 'Delete'}
                             </button>
                           </div>
                         </td>

@@ -1,5 +1,58 @@
 export const PAID_ORDER_STATUSES = new Set(['payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed']);
 
+export const DASHBOARD_RANGE_OPTIONS = [
+  { value: 'today', label: 'Today' },
+  { value: '2d', label: '2D' },
+  { value: '3d', label: '3D' },
+  { value: '1w', label: '1W' },
+  { value: '2w', label: '2W' },
+  { value: '3w', label: '3W' },
+  { value: '1m', label: '1M' },
+  { value: '2m', label: '2M' },
+  { value: '3m', label: '3M' },
+  { value: '4m', label: '4M' },
+  { value: '6m', label: '6M' },
+  { value: '7m', label: '7M' },
+  { value: '8m', label: '8M' },
+  { value: '9m', label: '9M' },
+  { value: '10m', label: '10M' },
+  { value: '11m', label: '11M' },
+  { value: '1y', label: '1Y' },
+  { value: '2y', label: '2Y' },
+];
+
+export const buildDashboardDateRange = (range) => {
+  const end = new Date();
+  const start = new Date(end);
+  const normalized = String(range || '1m').toLowerCase();
+
+  if (normalized === 'today') {
+    start.setHours(0, 0, 0, 0);
+  } else if (normalized === '7d') {
+    start.setDate(end.getDate() - 7);
+  } else if (normalized === '30d') {
+    start.setMonth(end.getMonth() - 1);
+  } else if (normalized === '90d') {
+    start.setMonth(end.getMonth() - 3);
+  } else if (normalized === 'year') {
+    start.setFullYear(end.getFullYear() - 1);
+  } else {
+    const match = normalized.match(/^(\d+)([dwmy])$/);
+    const amount = Number(match?.[1] || 1);
+    const unit = match?.[2] || 'm';
+
+    if (unit === 'd') start.setDate(end.getDate() - amount);
+    else if (unit === 'w') start.setDate(end.getDate() - (amount * 7));
+    else if (unit === 'm') start.setMonth(end.getMonth() - amount);
+    else if (unit === 'y') start.setFullYear(end.getFullYear() - amount);
+  }
+
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+};
+
 export const isPaidOrder = (order) => PAID_ORDER_STATUSES.has(order?.status) || order?.paymentStatus === 'completed';
 
 export const getOrderAmount = (order) => Number(order?.totalAmount ?? order?.total ?? order?.amount ?? 0);

@@ -59,24 +59,25 @@ const getRangeStart = (range) => {
     start.setHours(0, 0, 0, 0);
     return start;
   }
-  if (normalized === '7d') {
-    start.setDate(now.getDate() - 7);
-    return start;
-  }
-  if (normalized === '30d') {
-    start.setDate(now.getDate() - 30);
-    return start;
-  }
-  if (normalized === '90d') {
-    start.setDate(now.getDate() - 90);
-    return start;
-  }
-  if (normalized === 'year') {
-    start.setFullYear(now.getFullYear() - 1);
-    return start;
-  }
+  const legacyRanges = {
+    '7d': { amount: 7, unit: 'd' },
+    '30d': { amount: 1, unit: 'm' },
+    '90d': { amount: 3, unit: 'm' },
+    year: { amount: 1, unit: 'y' },
+  };
+  const parsedRange = legacyRanges[normalized] || (() => {
+    const match = normalized.match(/^(\d+)([dwmy])$/);
+    return match ? { amount: Number(match[1]), unit: match[2] } : null;
+  })();
 
-  return null;
+  if (!parsedRange) return null;
+
+  if (parsedRange.unit === 'd') start.setDate(now.getDate() - parsedRange.amount);
+  else if (parsedRange.unit === 'w') start.setDate(now.getDate() - (parsedRange.amount * 7));
+  else if (parsedRange.unit === 'm') start.setMonth(now.getMonth() - parsedRange.amount);
+  else if (parsedRange.unit === 'y') start.setFullYear(now.getFullYear() - parsedRange.amount);
+
+  return start;
 };
 
 const buildDateFilter = ({ range, startDate, endDate } = {}) => {

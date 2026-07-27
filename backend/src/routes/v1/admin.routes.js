@@ -59,6 +59,7 @@ router.put('/users/:userId', param('userId').isMongoId(), [
   body('phone').optional({ nullable: true, checkFalsy: true }).matches(/^\+?254[0-9]{9}$/),
   body('address').optional({ nullable: true }).trim().isLength({ max: 240 }),
 ], adminController.updateUser);
+router.delete('/users/:userId', param('userId').isMongoId(), adminController.deleteUser);
 router.post(
   '/users/:userId/documents',
   param('userId').isMongoId(),

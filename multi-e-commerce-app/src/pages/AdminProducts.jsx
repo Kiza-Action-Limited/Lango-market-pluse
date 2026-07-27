@@ -4,6 +4,8 @@ import api from '../config/axios';
 import { FaSearch, FaBox, FaStore, FaChartLine, FaFilter, FaEdit, FaTrash, FaSave, FaTimes, FaFileCsv } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
+import BulkProductCsvJournal from '../components/BulkProductCsvJournal';
+import { getEffectiveUserCategory } from '../utils/userCategory';
 
 const AdminProducts = () => {
   const [products, setProducts] = useState([]);
@@ -24,6 +26,8 @@ const AdminProducts = () => {
   });
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [sellerOptions, setSellerOptions] = useState([]);
+  const [selectedSellerId, setSelectedSellerId] = useState('');
 
   const productCategories = [
     'electronics',
@@ -82,11 +86,14 @@ const AdminProducts = () => {
     product?.sellerName ||
     product?.vendorName ||
     'Unknown Seller';
+  const getSellerUserId = (seller) => seller?._id || seller?.id || seller?.userId;
+  const getSellerDisplayName = (seller) => seller?.businessName || seller?.fullName || seller?.name || seller?.email || seller?.phone || 'Unnamed seller';
   const getImage = (product) => product?.images?.[0]?.url || product?.images?.[0] || '';
   const formatOption = (value) => String(value || '').replace(/-/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 
   useEffect(() => {
     fetchProducts();
+    fetchSellerOptions();
   }, []);
 
   const fetchProducts = async () => {
@@ -156,6 +163,43 @@ const AdminProducts = () => {
     active: products.filter((p) => isProductActive(p)).length,
     inactive: products.filter((p) => !isProductActive(p)).length,
     totalValue: products.reduce((sum, p) => sum + ((Number(p.price) || 0) * getStock(p)), 0),
+  };
+
+  const fetchSellerOptions = async () => {
+    try {
+      const response = await api.get('/v1/admin/users', {
+        params: { role: 'all', status: 'all', limit: 200 },
+      });
+      const users = Array.isArray(response.data?.users) ? response.data.users : [];
+      const sellerCategories = new Set(['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business']);
+      const sellers = users.filter((user) => getSellerUserId(user) && sellerCategories.has(getEffectiveUserCategory(user)));
+      setSellerOptions(sellers);
+      setSelectedSellerId((current) => current || getSellerUserId(sellers[0]) || '');
+    } catch (error) {
+      console.error('Error fetching sellers for product helper:', error);
+      setSellerOptions([]);
+    }
+  };
+
+  const createProductForSeller = async (formData) => {
+    const requests = [
+      () => api.post('/v1/admin/products', formData),
+      () => api.post('/admin/products', formData),
+    ];
+    let lastError;
+
+    for (const request of requests) {
+      try {
+        return await request();
+      } catch (error) {
+        lastError = error;
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
   };
 
   const openEditProduct = (product) => {
@@ -311,6 +355,55 @@ const AdminProducts = () => {
             </button>
           </div>
           <p className="text-[#6B7280]">Lango Lako la Biashara Smart - Oversee all products listed on the platform</p>
+        </div>
+
+        <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <BulkProductCsvJournal
+            title="Admin Seller Journal"
+            description="Select a seller, then upload a CSV list to help them add up to 50 products with full inventory details."
+            storageKey="marketpulse_admin_product_csv_journal"
+            createProduct={createProductForSeller}
+            extraFields={{
+              sellerId: selectedSellerId,
+              seller: selectedSellerId,
+              createdForSellerId: selectedSellerId,
+            }}
+            disabled={!selectedSellerId}
+            disabledMessage="Choose a seller before creating products for them."
+            onComplete={fetchProducts}
+          />
+          <aside className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center gap-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-[#F97316]/10 text-[#F97316]">
+                <FaStore />
+              </span>
+              <div>
+                <h2 className="text-base font-bold text-[#111827]">Seller assignment</h2>
+                <p className="text-sm text-gray-500">Admin-created rows are assigned here.</p>
+              </div>
+            </div>
+            <label className="block text-sm font-semibold text-[#111827]">
+              Seller
+              <select
+                value={selectedSellerId}
+                onChange={(event) => setSelectedSellerId(event.target.value)}
+                className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+              >
+                <option value="">Choose seller</option>
+                {sellerOptions.map((seller) => {
+                  const sellerId = getSellerUserId(seller);
+                  return (
+                    <option key={sellerId} value={sellerId}>
+                      {getSellerDisplayName(seller)}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <p className="mt-3 text-xs text-gray-500">
+              Existing products can still be edited below with the Edit button on each product card.
+            </p>
+          </aside>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">

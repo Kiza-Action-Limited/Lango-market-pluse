@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { FaPlus, FaEdit, FaTrash, FaBox, FaDollarSign, FaShoppingCart, FaLock, FaUnlockAlt, FaClipboardList, FaWarehouse, FaPercent, FaStar, FaUsers, FaFileExport, FaEye, FaFileInvoiceDollar, FaCreditCard, FaDownload, FaComments, FaCheckCircle, FaBook, FaReceipt, FaSave, FaUndo, FaWallet, FaShieldAlt, FaTruck } from 'react-icons/fa';
+import { FaPlus, FaEdit, FaTrash, FaBox, FaDollarSign, FaShoppingCart, FaLock, FaUnlockAlt, FaClipboardList, FaWarehouse, FaPercent, FaStar, FaUsers, FaFileExport, FaEye, FaFileInvoiceDollar, FaCreditCard, FaDownload, FaComments, FaCheckCircle, FaBook, FaReceipt, FaSave, FaUndo, FaWallet, FaShieldAlt, FaTruck, FaCalendarAlt } from 'react-icons/fa';
 import { formatCurrency } from '../utils/formatters';
 import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
 import { productService } from '../services/productService';
@@ -15,7 +15,7 @@ import { CustomerReviewsPanel, DonutGauge, KpiCard, Panel, ProgressRow, SalesByL
 import NotificationPreferencesCard from '../components/NotificationPreferencesCard';
 import SellerWalletConsole from '../components/SellerWalletConsole';
 import { formatRealtimeStamp, useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
-import { buildReviewSummary, buildSalesByLocation, isPaidOrder } from '../utils/dashboardMetrics';
+import { DASHBOARD_RANGE_OPTIONS, buildDashboardDateRange, buildReviewSummary, buildSalesByLocation, isPaidOrder } from '../utils/dashboardMetrics';
 import { clearPendingSubscriptionPayment, listPendingSubscriptionPayments } from '../utils/subscriptionPaymentRecovery';
 import { formatProductCategory, getEffectiveLowStockThreshold } from '../utils/inventorySensitivity';
 
@@ -75,27 +75,6 @@ const getSellerExportMeta = (type) => sellerCsvExportMeta[type] || {
   label: formatSellerExportLabel(type),
   detail: 'Download seller report',
 };
-const buildDashboardDateRange = (range) => {
-  const end = new Date();
-  const start = new Date(end);
-
-  if (range === 'today') {
-    start.setHours(0, 0, 0, 0);
-  } else if (range === '7d') {
-    start.setDate(end.getDate() - 7);
-  } else if (range === '30d') {
-    start.setDate(end.getDate() - 30);
-  } else if (range === '90d') {
-    start.setDate(end.getDate() - 90);
-  } else if (range === 'year') {
-    start.setFullYear(end.getFullYear() - 1);
-  }
-
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
-};
 const initialSellerJournalForm = {
   entryType: 'offline_sale',
   productId: '',
@@ -146,8 +125,8 @@ const SellerDashboard = () => {
   const [journalSaving, setJournalSaving] = useState(false);
   const [pendingSubscriptionPayments, setPendingSubscriptionPayments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [dashboardRange, setDashboardRange] = useState('30d');
-  const [dateRange, setDateRange] = useState(() => buildDashboardDateRange('30d'));
+  const [dashboardRange, setDashboardRange] = useState('1m');
+  const [dateRange, setDateRange] = useState(() => buildDashboardDateRange('1m'));
 
   useEffect(() => {
     fetchSellerData();
@@ -577,24 +556,18 @@ const SellerDashboard = () => {
             <span className={`h-2 w-2 rounded-full bg-green-500 ${isRealtimeRefreshing ? 'animate-pulse' : ''}`} />
             Live - {formatRealtimeStamp(lastUpdated)}
           </div>
-          <div className="flex overflow-hidden rounded-md border border-gray-200 bg-white">
-            {[
-              ['today', 'Today'],
-              ['7d', '7D'],
-              ['30d', '30D'],
-              ['90d', '90D'],
-              ['year', 'Year'],
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => applyDashboardRange(value)}
-                className={`h-10 px-3 text-xs font-medium ${dashboardRange === value ? 'bg-[#111827] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <label className="relative">
+            <FaCalendarAlt className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <select
+              value={dashboardRange}
+              onChange={(event) => applyDashboardRange(event.target.value)}
+              className="h-10 rounded-md border border-gray-200 bg-white pl-9 pr-8 text-xs font-semibold text-gray-700 outline-none hover:bg-gray-50 focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+            >
+              {DASHBOARD_RANGE_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
           {canManageInventory ? (
             <Link to="/seller/add-product" className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-medium text-white hover:bg-[#EA580C]">
               <FaPlus />
@@ -1248,17 +1221,17 @@ const SellerDashboard = () => {
         </Panel>
 
         <Panel title="Top Selling Products" action={<Link to="/seller/products" className="text-xs font-medium text-[#F97316]">View all</Link>} className="xl:col-span-4">
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
             {(topProducts.length ? topProducts : products.slice(0, 5)).map((product) => (
-              <div key={product.id || product._id} className="flex items-center gap-3">
-                <div className="h-10 w-10 overflow-hidden rounded-md bg-gray-100">
-                  {productImage(product) ? <img src={productImage(product)} alt={product.name} className="h-full w-full object-cover" /> : <FaBox className="m-3 text-gray-400" />}
+              <div key={product.id || product._id} className="flex min-w-0 items-center gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
+                <div className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded bg-white">
+                  {productImage(product) ? <img src={productImage(product)} alt={product.name} className="h-full w-full object-cover" /> : <FaBox className="text-gray-400" />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-[#111827]">{product.name}</p>
-                  <p className="text-xs text-gray-500">Stock {product.quantityAvailable ?? product.stock ?? 0}</p>
+                  <p className="truncate text-xs font-semibold text-[#111827]" title={product.name}>{product.name}</p>
+                  <p className="text-[11px] text-gray-500">Stock {product.quantityAvailable ?? product.stock ?? 0}</p>
                 </div>
-                <p className="text-sm font-semibold text-[#111827]">{formatCurrency(product.price)}</p>
+                <p className="shrink-0 text-xs font-bold text-[#111827]">{formatCurrency(product.price)}</p>
               </div>
             ))}
             {!products.length && <p className="text-sm text-gray-500">No products yet.</p>}
@@ -1348,19 +1321,24 @@ const SellerDashboard = () => {
         </Panel>
 
         <Panel title="Product Actions" className="xl:col-span-5">
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {products.slice(0, 5).map((product) => (
-              <div key={product.id || product._id} className="flex items-center justify-between gap-3 rounded-md border border-gray-100 p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-[#111827]">{product.name}</p>
-                  <p className="text-xs text-gray-500">{formatCurrency(product.price)} - Stock {product.quantityAvailable ?? product.stock ?? 0}</p>
+              <div key={product.id || product._id} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
+                <div className="min-w-0 flex items-center gap-2">
+                  <div className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded bg-white">
+                    {productImage(product) ? <img src={productImage(product)} alt={product.name} className="h-full w-full object-cover" /> : <FaBox className="text-gray-400" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-[#111827]" title={product.name}>{product.name}</p>
+                    <p className="truncate text-[11px] text-gray-500">{formatCurrency(product.price)} | Stock {product.quantityAvailable ?? product.stock ?? 0}</p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <Link to={`/seller/edit-product/${product.id || product._id}`} className="rounded-md border border-gray-200 p-2 text-gray-600 hover:text-[#F97316]" title="Edit product">
-                    <FaEdit />
+                  <Link to={`/seller/edit-product/${product.id || product._id}`} className="grid h-8 w-8 place-items-center rounded-md border border-gray-200 bg-white text-gray-600 hover:text-[#F97316]" title="Edit product">
+                    <FaEdit size={12} />
                   </Link>
-                  <button onClick={() => handleDeleteProduct(product.id || product._id)} className="rounded-md border border-red-100 p-2 text-red-600 hover:bg-red-50" title="Delete product">
-                    <FaTrash />
+                  <button onClick={() => handleDeleteProduct(product.id || product._id)} className="grid h-8 w-8 place-items-center rounded-md border border-red-100 bg-white text-red-600 hover:bg-red-50" title="Delete product">
+                    <FaTrash size={12} />
                   </button>
                 </div>
               </div>
