@@ -1,16 +1,12 @@
 {
   "version": 2,
-  "builds": [
+  "installCommand": "cd multi-e-commerce-app && npm install",
+  "buildCommand": "cd multi-e-commerce-app && npm run build",
+  "outputDirectory": "multi-e-commerce-app/dist",
+  "rewrites": [
     {
-      "src": "multi-e-commerce-app/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
-  ],
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
