@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <script>
-      if (window.location.protocol === 'file:') {
-        document.documentElement.innerHTML = '<head><title>Open Lango MarketPulse with the local server</title><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><style>body{margin:0;min-height:100vh;background:#f8fafc;color:#111827;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:24px}.shell{max-width:560px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 20px 50px rgba(15,23,42,.12);padding:28px}.brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}.mark{height:42px;width:42px;border-radius:10px;background:#0B2D55}.eyebrow{color:#F97316;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin:0 0 6px}h1{font-size:24px;line-height:1.15;margin:0;color:#111827}p{color:#4b5563;line-height:1.6}.code{background:#111827;color:#fff;border-radius:10px;padding:14px 16px;font-family:"Cascadia Mono","SFMono-Regular",Consolas,monospace;font-size:14px;overflow:auto}.url{font-weight:700;color:#0B2D55}</style></head><body><main class="shell"><div class="brand"><div class="mark"></div><div><p class="eyebrow">Lango MarketPulse</p><h1>Use the local web server</h1></div></div><p>This React application cannot run from a <strong>file://</strong> URL. Browsers block module scripts, manifests, and app assets from local file origins for security.</p><p>Start the frontend server from the project terminal:</p><div class="code">cd multi-e-commerce-app<br>npm.cmd run dev</div><p>Then open <span class="url">http://localhost:3000</span>. For phone testing on the same Wi-Fi, use <span class="url">npm.cmd run dev:mobile</span>.</p></main></body>';
-        window.stop();
-      }
+      // if (window.location.protocol === 'file:') {
+      //   document.documentElement.innerHTML = '<head><title>Open Lango MarketPulse with the local server</title><meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><style>body{margin:0;min-height:100vh;background:#f8fafc;color:#111827;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:24px}.shell{max-width:560px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 20px 50px rgba(15,23,42,.12);padding:28px}.brand{display:flex;align-items:center;gap:12px;margin-bottom:18px}.mark{height:42px;width:42px;border-radius:10px;background:#0B2D55}.eyebrow{color:#F97316;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin:0 0 6px}h1{font-size:24px;line-height:1.15;margin:0;color:#111827}p{color:#4b5563;line-height:1.6}.code{background:#111827;color:#fff;border-radius:10px;padding:14px 16px;font-family:"Cascadia Mono","SFMono-Regular",Consolas,monospace;font-size:14px;overflow:auto}.url{font-weight:700;color:#0B2D55}</style></head><body><main class="shell"><div class="brand"><div class="mark"></div><div><p class="eyebrow">Lango MarketPulse</p><h1>Use the local web server</h1></div></div><p>This React application cannot run from a <strong>file://</strong> URL. Browsers block module scripts, manifests, and app assets from local file origins for security.</p><p>Start the frontend server from the project terminal:</p><div class="code">cd multi-e-commerce-app<br>npm.cmd run dev</div><p>Then open <span class="url">http://localhost:3000</span>. For phone testing on the same Wi-Fi, use <span class="url">npm.cmd run dev:mobile</span>.</p></main></body>';
+      //   window.stop();
+      // }
     </script>
     <link rel="icon" type="image/png" href="/marketpulse-logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -19,6 +19,7 @@
     <link rel="apple-touch-icon" href="/marketpulse-logo.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Lango| Market Pulse</title>
+
   </head>
   <body>
     <div id="root"></div>
