@@ -4,17 +4,38 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
+const envValue = (value) => String(value || '').trim();
+
+const normalizeEnvironment = (value) => {
+  const normalized = envValue(value).toLowerCase();
+  return normalized === 'production' || normalized === 'live' ? 'production' : 'sandbox';
+};
+
+const maskSecret = (value) => {
+  const secret = envValue(value);
+  if (!secret) return '';
+  if (secret.length <= 10) return `${secret.slice(0, 2)}...`;
+  return `${secret.slice(0, 8)}...${secret.slice(-4)}`;
+};
+
+const buildSmsError = (message, statusCode, code) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
 class AfricaTalkingService {
   constructor() {
-    this.environment = process.env.AFRICASTALKING_ENV || process.env.AT_ENV || 'sandbox';
+    this.environment = normalizeEnvironment(process.env.AFRICASTALKING_ENV || process.env.AT_ENV);
     this.baseURL = this.environment === 'production'
       ? 'https://api.africastalking.com/version1'
       : 'https://api.sandbox.africastalking.com/version1';
-    this.apiKey = process.env.AFRICASTALKING_API_KEY || process.env.AT_API_KEY;
-    this.username = process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME;
-    this.senderId = process.env.AFRICASTALKING_SENDER_ID || process.env.AT_SENDER_ID || 'LangoMarket';
-    this.otpSenderId = process.env.AFRICASTALKING_OTP_SENDER_ID || process.env.OTP_SMS_SENDER_ID || this.senderId;
-    this.productName = process.env.AFRICASTALKING_PRODUCT_NAME || 'Lango Market Pulse';
+    this.apiKey = envValue(process.env.AFRICASTALKING_API_KEY || process.env.AT_API_KEY);
+    this.username = envValue(process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME);
+    this.senderId = envValue(process.env.AFRICASTALKING_SENDER_ID || process.env.AT_SENDER_ID);
+    this.otpSenderId = envValue(process.env.AFRICASTALKING_OTP_SENDER_ID || process.env.OTP_SMS_SENDER_ID) || this.senderId;
+    this.productName = envValue(process.env.AFRICASTALKING_PRODUCT_NAME) || 'Lango Market Pulse';
     this.isInitialized = false;
     
     // Rate limiting configuration
@@ -28,21 +49,45 @@ class AfricaTalkingService {
    */
   initialize() {
     if (!this.apiKey || !this.username) {
-      const errorMsg = `Africa's Talking credentials missing. 
-        API Key: ${!!this.apiKey}, Username: ${!!this.username}
-        Check AFRICASTALKING_API_KEY/AFRICASTALKING_USERNAME or AT_API_KEY/AT_USERNAME in .env`;
-      console.error(errorMsg);
-      throw new Error('Africa\'s Talking credentials missing');
+      logger.error('Africa\'s Talking credentials missing', {
+        hasApiKey: Boolean(this.apiKey),
+        hasUsername: Boolean(this.username),
+        environment: this.environment,
+      });
+      throw buildSmsError(
+        'SMS provider is not configured. Please contact support.',
+        503,
+        'SMS_PROVIDER_NOT_CONFIGURED'
+      );
+    }
+
+    if (this.environment === 'sandbox' && this.username !== 'sandbox') {
+      logger.error('Africa\'s Talking sandbox username mismatch', {
+        username: this.username,
+        environment: this.environment,
+      });
+      throw buildSmsError(
+        'SMS provider sandbox credentials are mismatched. Please contact support.',
+        503,
+        'SMS_PROVIDER_CONFIG_MISMATCH'
+      );
+    }
+
+    if (this.environment === 'production' && this.username === 'sandbox') {
+      logger.error('Africa\'s Talking production environment cannot use sandbox username');
+      throw buildSmsError(
+        'SMS provider production credentials are mismatched. Please contact support.',
+        503,
+        'SMS_PROVIDER_CONFIG_MISMATCH'
+      );
     }
     
-    // Log masked API key for debugging
-    const maskedKey = this.apiKey.substring(0, 10) + '...' + this.apiKey.substring(this.apiKey.length - 5);
     logger.info('Africa\'s Talking service initialized', {
       username: this.username,
-      senderId: this.senderId,
-      otpSenderId: this.otpSenderId,
+      senderId: this.getSenderId(this.senderId) || 'default',
+      otpSenderId: this.getSenderId(this.otpSenderId) || 'default',
       environment: this.environment,
-      apiKeyPrefix: maskedKey
+      apiKey: maskSecret(this.apiKey),
     });
     
     this.isInitialized = true;
@@ -114,36 +159,20 @@ class AfricaTalkingService {
    * Direct SMS sending (without queue) - FIXED VERSION
    */
   async sendSMSDirect(to, message, options = {}) {
-    // Format phone numbers - ensure they start with 254 and are exactly 10 digits after 254
-    const numbers = to.split(',').map(num => {
-      let cleaned = num.toString().replace(/\D/g, '');
-      
-      // Remove leading 0
-      if (cleaned.startsWith('0')) {
-        cleaned = cleaned.substring(1);
+    const formattedRecipients = to.split(',').map(num => this.formatPhoneNumber(num));
+    for (const recipient of formattedRecipients) {
+      if (!this.validatePhoneNumber(recipient)) {
+        throw buildSmsError(
+          `Invalid phone number format: ${recipient}. Use format: 2547XXXXXXXX or 2541XXXXXXXX`,
+          400,
+          'INVALID_PHONE'
+        );
       }
-      
-      // Ensure we have the right format
-      if (!cleaned.startsWith('254')) {
-        cleaned = '254' + cleaned;
-      }
-      
-      // If it starts with 254 and has more than 12 digits, trim to 12
-      if (cleaned.startsWith('254') && cleaned.length > 12) {
-        cleaned = cleaned.substring(0, 12);
-      }
-      
-      // If it starts with 254 and has less than 12 digits, pad with zeros (shouldn't happen)
-      if (cleaned.startsWith('254') && cleaned.length < 12) {
-        // This shouldn't happen for valid numbers
-        logger.warn(`Phone number too short after formatting: ${cleaned} (original: ${num})`);
-      }
-      
-      return cleaned;
-    }).join(',');
+    }
+    const numbers = formattedRecipients.join(',');
     
     // Prepare data according to Africa's Talking API spec
-    const senderId = options.senderId || options.from || this.senderId;
+    const senderId = this.getSenderId(options.senderId || options.from || this.senderId);
     
     // Only include from parameter if it's not 'sandbox' or empty
     const data = {
@@ -152,8 +181,7 @@ class AfricaTalkingService {
       message: message,
     };
     
-    // Only add from/senderId if it's not the default sandbox value
-    if (senderId && senderId !== 'sandbox' && senderId !== '') {
+    if (senderId) {
       data.from = senderId;
     }
 
@@ -208,25 +236,42 @@ class AfricaTalkingService {
         cost: cost
       };
     } catch (error) {
-      const errorDetails = error.response?.data || error.message;
+      const errorDetails = error.response?.data || error.message || error.code || 'Unknown SMS provider error';
       const statusCode = error.response?.status;
       
       logger.error('SMS sending failed:', {
         to: numbers,
         error: errorDetails,
         statusCode: statusCode,
-        fullError: error.message
+        provider: 'africastalking',
+        environment: this.environment,
       });
       
       // Provide more specific error messages
       if (statusCode === 401) {
-        throw new Error('Authentication failed. Please verify your Africa\'s Talking API key and username. Ensure you\'re using the correct sandbox credentials.');
+        throw buildSmsError(
+          'SMS provider authentication failed. Please contact support.',
+          503,
+          'SMS_PROVIDER_AUTH_FAILED'
+        );
       } else if (statusCode === 403) {
-        throw new Error('Insufficient balance. Please top up your Africa\'s Talking account or switch to sandbox mode.');
+        throw buildSmsError(
+          'SMS provider rejected the request. Please contact support.',
+          503,
+          'SMS_PROVIDER_FORBIDDEN'
+        );
       } else if (statusCode === 400) {
-        throw new Error(`Invalid request: ${errorDetails}`);
+        throw buildSmsError(
+          `Invalid SMS request: ${typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails)}`,
+          400,
+          'SMS_PROVIDER_BAD_REQUEST'
+        );
       } else {
-        throw new Error(`SMS delivery failed: ${typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails)}`);
+        throw buildSmsError(
+          `SMS delivery failed: ${typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails)}`,
+          502,
+          'SMS_PROVIDER_DELIVERY_FAILED'
+        );
       }
     }
   }
@@ -293,7 +338,7 @@ class AfricaTalkingService {
     try {
       const response = await axios({
         method: 'get',
-        url: `${this.baseURL}/user/balance`,
+        url: `${this.baseURL}/user`,
         headers: {
           'apiKey': this.apiKey,
           'Accept': 'application/json',
@@ -315,8 +360,28 @@ class AfricaTalkingService {
         data: balance,
       };
     } catch (error) {
-      logger.error('Balance check failed:', error.response?.data || error.message);
-      throw new Error(`Failed to fetch balance: ${error.message}`);
+      const errorDetails = error.response?.data || error.message || error.code || 'Unknown SMS provider error';
+      const statusCode = error.response?.status;
+      logger.error('Balance check failed:', {
+        error: errorDetails,
+        statusCode,
+        provider: 'africastalking',
+        environment: this.environment,
+      });
+
+      if (statusCode === 401) {
+        throw buildSmsError(
+          'SMS provider authentication failed. Please contact support.',
+          503,
+          'SMS_PROVIDER_AUTH_FAILED'
+        );
+      }
+
+      throw buildSmsError(
+        `Failed to fetch SMS balance: ${typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails)}`,
+        statusCode === 400 ? 400 : 502,
+        'SMS_PROVIDER_BALANCE_FAILED'
+      );
     }
   }
 
@@ -361,7 +426,7 @@ class AfricaTalkingService {
     // Check for exact 12 digits starting with 254
     // 2547XXXXXXXX (Safaricom)
     // 2541XXXXXXXX (Airtel/Telkom)
-    const pattern = /^254[1-9]\d{8}$/;
+    const pattern = /^254[17]\d{8}$/;
     
     const isValid = pattern.test(cleaned);
     
@@ -376,32 +441,25 @@ class AfricaTalkingService {
    * Format phone number to E.164 format (254XXXXXXXXX)
    */
   formatPhoneNumber(phone) {
-    let cleaned = phone.toString().replace(/\D/g, '');
-    
-    // Remove leading + if present
-    cleaned = cleaned.replace(/^\+/, '');
-    
-    // If it starts with 0, remove it
-    if (cleaned.startsWith('0')) {
-      cleaned = cleaned.substring(1);
-    }
-    
-    // If it doesn't start with 254, add it
-    if (!cleaned.startsWith('254')) {
-      cleaned = '254' + cleaned;
-    }
-    
-    // Ensure exactly 12 digits total
-    if (cleaned.length > 12) {
-      // If it's longer than 12 digits, keep the first 12
-      cleaned = cleaned.substring(0, 12);
-    } else if (cleaned.length < 12) {
-      // If it's shorter, log warning but keep as is (might be invalid)
-      logger.warn(`Phone number too short after formatting: ${cleaned} (original: ${phone})`);
+    let cleaned = String(phone || '').replace(/\D/g, '');
+
+    if (cleaned.startsWith('2540')) {
+      cleaned = `254${cleaned.slice(4)}`;
+    } else if (cleaned.startsWith('0')) {
+      cleaned = `254${cleaned.slice(1)}`;
+    } else if (/^[17]\d{8}$/.test(cleaned)) {
+      cleaned = `254${cleaned}`;
     }
     
     logger.debug(`Formatted phone: ${phone} -> ${cleaned}`);
     return cleaned;
+  }
+
+  getSenderId(senderId) {
+    const normalized = envValue(senderId);
+    if (!normalized || normalized.toLowerCase() === 'sandbox') return '';
+    if (this.environment === 'sandbox') return '';
+    return normalized;
   }
 
   /**

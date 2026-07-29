@@ -133,16 +133,15 @@ const consumeVerifiedOtp = async (channel, identifier) => {
  * @returns {Promise<Object>}
  */
 const sendPhoneOtp = async (phone) => {
+  const formattedPhone = africaTalkingService.formatPhoneNumber(phone);
+
   // Validate phone
-  if (!phone || !africaTalkingService.validatePhoneNumber(phone)) {
-    const err = new Error('Invalid phone number format. Use format: 2547XXXXXXXX');
+  if (!formattedPhone || !africaTalkingService.validatePhoneNumber(formattedPhone)) {
+    const err = new Error('Invalid phone number format. Use format: 2547XXXXXXXX or 2541XXXXXXXX');
     err.statusCode = 400;
     err.code = 'INVALID_PHONE';
     throw err;
   }
-
-  // Format phone number
-  const formattedPhone = africaTalkingService.formatPhoneNumber(phone);
 
   // Rate limit check
   const resend = await store.get(resendKey('phone', formattedPhone));

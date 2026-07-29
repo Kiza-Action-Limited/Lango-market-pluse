@@ -6,6 +6,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const jwt = require('jsonwebtoken');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
+const { africaTalkingService } = require('../config/africastalking');
 const { 
   sendPhoneOtp, 
   verifyPhoneOtp, 
@@ -152,6 +153,23 @@ const saveImageLocally = async (req, file, folderName) => {
 
 const saveLogoLocally = (req, file) => saveImageLocally(req, file, 'business-logos');
 
+const phoneLookupValues = (phone) => {
+  const raw = String(phone || '').trim();
+  const formatted = africaTalkingService.formatPhoneNumber(raw);
+  const values = new Set([raw, formatted]);
+
+  if (formatted.startsWith('254') && formatted.length === 12) {
+    values.add(`+${formatted}`);
+    values.add(`0${formatted.slice(3)}`);
+  }
+
+  return Array.from(values).filter(Boolean);
+};
+
+const findUserByPhoneInput = async (phone) => User
+  .findOne({ phone: { $in: phoneLookupValues(phone) } })
+  .lean();
+
 exports.uploadBusinessLogo = async (req, res) => {
   try {
     if (!req.file) {
@@ -264,7 +282,7 @@ exports.sendPhoneVerificationOtp = async (req, res) => {
 
     const { phone } = req.body;
     const normalizedPhone = String(phone || '').trim();
-    const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+    const existingUser = await findUserByPhoneInput(normalizedPhone);
     if (existingUser) {
       return res.status(409).json({
         success: false,
@@ -455,7 +473,7 @@ exports.resendOtpCode = async (req, res) => {
     let result;
     if (channel === 'phone') {
       const normalizedPhone = String(identifier || '').trim();
-      const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+      const existingUser = await findUserByPhoneInput(normalizedPhone);
       if (existingUser) {
         return res.status(409).json({
           success: false,
@@ -522,7 +540,7 @@ exports.sendPhoneOtp = async (req, res) => {
 
     const { phone } = req.body;
     const normalizedPhone = String(phone || '').trim();
-    const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+    const existingUser = await findUserByPhoneInput(normalizedPhone);
     if (existingUser) {
       return res.status(409).json({
         success: false,
@@ -604,7 +622,7 @@ exports.resendPhoneOtp = async (req, res) => {
 
     const { phone } = req.body;
     const normalizedPhone = String(phone || '').trim();
-    const existingUser = await User.findOne({ phone: normalizedPhone }).lean();
+    const existingUser = await findUserByPhoneInput(normalizedPhone);
     if (existingUser) {
       return res.status(409).json({
         success: false,
