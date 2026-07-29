@@ -39,26 +39,37 @@ const app = express();
 
 app.set('etag', false);
 
-const PRODUCTION_FRONTEND_URL = 'https://lango-market-pluse-five.vercel.app';
+const PRODUCTION_FRONTEND_URLS = [
+  'https://lango-market-pluse-five.vercel.app',
+  'https://lango-market-pluse.vercel.app',
+  '
+];
+
+const normalizeOrigins = (value = '') =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const isAllowedVercelOrigin = (origin) => /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
 
 // CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {
-    const envOrigins = (process.env.FRONTEND_URL || '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const envOrigins = normalizeOrigins(process.env.FRONTEND_URL || '');
 
     const allowedOrigins = new Set([
       'http://localhost:5173',
       'http://localhost:3001',
       'http://localhost:3000',
       'http://localhost:5000',
-      PRODUCTION_FRONTEND_URL,
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:3000',
+      ...PRODUCTION_FRONTEND_URLS,
       ...envOrigins,
     ]);
 
-    if (!origin || allowedOrigins.has(origin)) {
+    if (!origin || allowedOrigins.has(origin) || isAllowedVercelOrigin(origin)) {
       return callback(null, true);
     }
 
