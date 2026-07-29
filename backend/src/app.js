@@ -41,8 +41,7 @@ app.set('etag', false);
 
 const PRODUCTION_FRONTEND_URLS = [
   'https://lango-market-pluse-five.vercel.app',
-  'https://lango-market-pluse.vercel.app',
-  '
+ 
 ];
 
 const normalizeOrigins = (value = '') =>
