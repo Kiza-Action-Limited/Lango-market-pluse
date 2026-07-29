@@ -11,18 +11,22 @@ class EmailService {
 
   initTransporter() {
     try {
-      if (!process.env.SMTP_USER || !process.env.SMTP_PASS || !process.env.SMTP_HOST) {
+      const smtpHost = process.env.SMTP_HOST || process.env.MAIL_HOST;
+      const smtpUser = process.env.SMTP_USER || process.env.MAIL_USER;
+      const smtpPass = process.env.SMTP_PASS || process.env.MAIL_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASSWORD;
+
+      if (!smtpUser || !smtpPass || !smtpHost) {
         logger.warn('Email service not fully configured. Set SMTP_USER, SMTP_PASS, SMTP_HOST in .env');
         return;
       }
 
       this.transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: parseInt(process.env.SMTP_PORT || '587'),
+        host: smtpHost,
+        port: parseInt(process.env.SMTP_PORT || process.env.MAIL_PORT || '587', 10),
         secure: process.env.SMTP_SECURE === 'true',
         auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
+          user: smtpUser,
+          pass: smtpPass,
         },
       });
 
@@ -41,7 +45,7 @@ class EmailService {
       }
 
       const mailOptions = {
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        from: process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env.MAIL_FROM || process.env.SMTP_USER || process.env.MAIL_USER,
         to,
         subject,
         html,

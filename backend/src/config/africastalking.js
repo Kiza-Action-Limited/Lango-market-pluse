@@ -13,6 +13,7 @@ class AfricaTalkingService {
     this.apiKey = process.env.AFRICASTALKING_API_KEY || process.env.AT_API_KEY;
     this.username = process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME;
     this.senderId = process.env.AFRICASTALKING_SENDER_ID || process.env.AT_SENDER_ID || 'LangoMarket';
+    this.otpSenderId = process.env.AFRICASTALKING_OTP_SENDER_ID || process.env.OTP_SMS_SENDER_ID || this.senderId;
     this.productName = process.env.AFRICASTALKING_PRODUCT_NAME || 'Lango Market Pulse';
     this.isInitialized = false;
     
@@ -38,6 +39,7 @@ class AfricaTalkingService {
     logger.info('Africa\'s Talking service initialized', {
       username: this.username,
       senderId: this.senderId,
+      otpSenderId: this.otpSenderId,
       environment: this.environment
     });
     
@@ -53,10 +55,10 @@ class AfricaTalkingService {
     this.processing = true;
     
     while (this.requestQueue.length > 0) {
-      const { to, message, resolve, reject } = this.requestQueue.shift();
+      const { to, message, options, resolve, reject } = this.requestQueue.shift();
       
       try {
-        const result = await this.sendSMSDirect(to, message);
+        const result = await this.sendSMSDirect(to, message, options);
         resolve(result);
       } catch (error) {
         reject(error);
@@ -108,7 +110,7 @@ class AfricaTalkingService {
   /**
    * Direct SMS sending (without queue) - FIXED VERSION
    */
-  async sendSMSDirect(to, message) {
+  async sendSMSDirect(to, message, options = {}) {
     // Format phone numbers - ensure they start with 254
     const numbers = to.split(',').map(num => {
       let cleaned = num.toString().replace(/\D/g, '');
@@ -124,11 +126,12 @@ class AfricaTalkingService {
     }).join(',');
     
     // Prepare data according to Africa's Talking API spec
+    const senderId = options.senderId || options.from || this.senderId;
     const data = {
       username: this.username,
       to: numbers,
       message: message,
-      from: this.senderId,
+      ...(senderId ? { from: senderId } : {}),
     };
 
     logger.info(`Sending SMS to ${numbers}`, { messageLength: message.length });
@@ -213,7 +216,10 @@ class AfricaTalkingService {
     
     logger.info(`Sending OTP SMS to ${formattedPhone}`, { codeLength: code.length });
     
-    const result = await this.sendSMS(formattedPhone, message);
+    const result = await this.sendSMS(formattedPhone, message, {
+      senderId: this.otpSenderId,
+      purpose: 'signup_phone_verification',
+    });
     
     logger.info(`OTP SMS sent to ${formattedPhone}`, {
       messageId: result.messageId,
@@ -387,6 +393,7 @@ class AfricaTalkingService {
         message: 'Africa\'s Talking connection successful',
         balance: balance.balance,
         senderId: this.senderId,
+        otpSenderId: this.otpSenderId,
         environment: this.environment
       };
     } catch (error) {

@@ -3,12 +3,12 @@
 
 const requiredEnvVars = {
   // Email configuration
-  SMTP_USER: process.env.SMTP_USER,
-  SMTP_PASS: process.env.SMTP_PASS,
+  SMTP_USER: process.env.SMTP_USER || process.env.MAIL_USER,
+  SMTP_PASS: process.env.SMTP_PASS || process.env.MAIL_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASSWORD,
   
   // Africa's Talking configuration
-  AT_API_KEY: process.env.AT_API_KEY,
-  AT_USERNAME: process.env.AT_USERNAME,
+  AFRICASTALKING_API_KEY: process.env.AFRICASTALKING_API_KEY || process.env.AT_API_KEY,
+  AFRICASTALKING_USERNAME: process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME,
 };
 
 const validateConfig = () => {

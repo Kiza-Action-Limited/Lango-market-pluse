@@ -1,39 +1,35 @@
 const User = require('../../models/User.model');
 const logger = require('../../utils/logger');
+const { africaTalkingService } = require('../../config/africastalking');
 
 class SMSService {
   constructor() {
-    this.isConfigured = !!(process.env.AFRICASTALKING_API_KEY && process.env.AFRICASTALKING_USERNAME);
+    this.isConfigured = !!(
+      (process.env.AFRICASTALKING_API_KEY || process.env.AT_API_KEY) &&
+      (process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME)
+    );
   }
 
   formatPhoneNumber(phone) {
-    let cleaned = phone.replace(/[\s-()]/g, '');
-    if (cleaned.startsWith('0')) {
-      cleaned = '254' + cleaned.substring(1);
-    }
-    if (!cleaned.startsWith('+')) {
-      if (!cleaned.startsWith('254')) {
-        cleaned = '254' + cleaned;
-      }
-      cleaned = '+' + cleaned;
-    }
-    return cleaned;
+    return africaTalkingService.formatPhoneNumber(phone);
   }
 
   async sendToPhone(phoneNumber, message) {
     try {
       if (!this.isConfigured) {
-        logger.warn('Africa\'s Talking not configured. SMS message:', message);
+        logger.warn('Africa\'s Talking not configured. SMS queued in mock mode.', {
+          messageLength: String(message || '').length,
+        });
         return { success: true, message: 'SMS queued (mock mode)' };
       }
 
       const formattedPhone = this.formatPhoneNumber(phoneNumber);
-      logger.info(`Sending SMS to ${formattedPhone}: ${message}`);
-      return {
-        success: true,
-        message: 'SMS sent successfully',
+      logger.info('Sending SMS notification', {
         phone: formattedPhone,
-      };
+        messageLength: String(message || '').length,
+      });
+
+      return await africaTalkingService.sendSMS(formattedPhone, message);
     } catch (error) {
       logger.error('Error sending SMS:', error);
       throw error;

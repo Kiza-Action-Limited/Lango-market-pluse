@@ -12,8 +12,17 @@ const logger = require('../utils/logger'); // Optional: add logger utility
 class EmailService {
   constructor() {
     this.transporter = null;
-    this.defaultFrom = process.env.EMAIL_FROM || '"Lango Market Pulse" <noreply@langomarket.com>';
-    this.supportEmail = process.env.EMAIL_SUPPORT || 'support@langomarket.com';
+    this.defaultFrom =
+      process.env.EMAIL_FROM ||
+      process.env.SMTP_FROM ||
+      process.env.MAIL_FROM ||
+      '"Lango Market Pulse" <noreply@langomarket.com>';
+    this.otpFrom =
+      process.env.EMAIL_OTP_FROM ||
+      process.env.SMTP_OTP_FROM ||
+      process.env.OTP_EMAIL_FROM ||
+      this.defaultFrom;
+    this.supportEmail = process.env.EMAIL_SUPPORT || process.env.SUPPORT_EMAIL || 'support@langomarket.com';
     this.isInitialized = false;
   }
 
@@ -25,12 +34,12 @@ class EmailService {
     if (this.isInitialized) return true;
 
     const config = {
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      host: process.env.SMTP_HOST || process.env.MAIL_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || process.env.MAIL_PORT || '587', 10),
       secure: process.env.SMTP_SECURE === 'true',
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        user: process.env.SMTP_USER || process.env.MAIL_USER,
+        pass: process.env.SMTP_PASS || process.env.MAIL_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASSWORD,
       },
       pool: true, // Use pooled connections
       maxConnections: 5,
@@ -41,7 +50,7 @@ class EmailService {
 
     // Validate required config
     if (!config.auth.user || !config.auth.pass) {
-      throw new Error('SMTP credentials missing. Check SMTP_USER and SMTP_PASS in .env');
+      throw new Error('SMTP credentials missing. Check SMTP_USER/SMTP_PASS or MAIL_USER/MAIL_PASS in .env');
     }
 
     this.transporter = nodemailer.createTransport(config);
@@ -183,7 +192,7 @@ class EmailService {
       </html>
     `;
 
-    return this.sendEmail({ to, subject, text, html });
+    return this.sendEmail({ to, subject, text, html, from: this.otpFrom });
   }
 
   /**
