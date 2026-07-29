@@ -135,6 +135,8 @@ console.log(' Mounting routes...');
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/v1/products', productRoutes);
+app.use('/api/products', productRoutes);
+app.use('/v1/products', productRoutes);
 app.use('/api/v1/orders', orderRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/notifications', notificationRoutes);
