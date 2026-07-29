@@ -1,8 +1,5 @@
 {
   "version": 2,
-  "installCommand": "cd multi-e-commerce-app && npm install",
-  "buildCommand": "cd multi-e-commerce-app && npm run build",
-  "outputDirectory": "multi-e-commerce-app/dist",
   "rewrites": [
     {
       "source": "/(.*)",
