@@ -1,6 +1,17 @@
 {
   "version": 2,
+  "installCommand": "cd multi-e-commerce-app && npm install",
+  "buildCommand": "cd multi-e-commerce-app && npm run build",
+  "outputDirectory": "multi-e-commerce-app/dist",
   "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://lango-market-pluse-4fje.onrender.com/api/$1"
+    },
+    {
+      "source": "/webhooks/(.*)",
+      "destination": "https://lango-market-pluse-4fje.onrender.com/webhooks/$1"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

@@ -39,6 +39,8 @@ const app = express();
 
 app.set('etag', false);
 
+const PRODUCTION_FRONTEND_URL = 'https://lango-market-pluse-five.vercel.app';
+
 // CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {
@@ -52,6 +54,7 @@ const corsOptions = {
       'http://localhost:3001',
       'http://localhost:3000',
       'http://localhost:5000',
+      PRODUCTION_FRONTEND_URL,
       ...envOrigins,
     ]);
 

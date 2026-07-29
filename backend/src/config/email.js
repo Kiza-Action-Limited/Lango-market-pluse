@@ -245,7 +245,7 @@ class EmailService {
    * @returns {Promise<Object>}
    */
   async sendPasswordResetEmail(to, resetToken, expiresIn = 60) {
-    const frontendUrl = String(process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:5173')
+    const frontendUrl = String(process.env.FRONTEND_URL || process.env.APP_URL || 'https://lango-market-pluse-five.vercel.app')
       .split(',')[0]
       .trim()
       .replace(/\/$/, '');
