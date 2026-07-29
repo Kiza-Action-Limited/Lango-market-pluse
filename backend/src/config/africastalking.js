@@ -35,14 +35,17 @@ class AfricaTalkingService {
       throw new Error('Africa\'s Talking credentials missing');
     }
     
-    this.isInitialized = true;
+    // Log masked API key for debugging
+    const maskedKey = this.apiKey.substring(0, 10) + '...' + this.apiKey.substring(this.apiKey.length - 5);
     logger.info('Africa\'s Talking service initialized', {
       username: this.username,
       senderId: this.senderId,
       otpSenderId: this.otpSenderId,
-      environment: this.environment
+      environment: this.environment,
+      apiKeyPrefix: maskedKey
     });
     
+    this.isInitialized = true;
     return true;
   }
 
@@ -111,30 +114,53 @@ class AfricaTalkingService {
    * Direct SMS sending (without queue) - FIXED VERSION
    */
   async sendSMSDirect(to, message, options = {}) {
-    // Format phone numbers - ensure they start with 254
+    // Format phone numbers - ensure they start with 254 and are exactly 10 digits after 254
     const numbers = to.split(',').map(num => {
       let cleaned = num.toString().replace(/\D/g, '');
-      // Remove leading 0 or +254 and ensure 254 format
+      
+      // Remove leading 0
       if (cleaned.startsWith('0')) {
-        cleaned = '254' + cleaned.substring(1);
-      } else if (cleaned.startsWith('254')) {
-        cleaned = cleaned;
-      } else if (cleaned.length === 9) {
+        cleaned = cleaned.substring(1);
+      }
+      
+      // Ensure we have the right format
+      if (!cleaned.startsWith('254')) {
         cleaned = '254' + cleaned;
       }
+      
+      // If it starts with 254 and has more than 12 digits, trim to 12
+      if (cleaned.startsWith('254') && cleaned.length > 12) {
+        cleaned = cleaned.substring(0, 12);
+      }
+      
+      // If it starts with 254 and has less than 12 digits, pad with zeros (shouldn't happen)
+      if (cleaned.startsWith('254') && cleaned.length < 12) {
+        // This shouldn't happen for valid numbers
+        logger.warn(`Phone number too short after formatting: ${cleaned} (original: ${num})`);
+      }
+      
       return cleaned;
     }).join(',');
     
     // Prepare data according to Africa's Talking API spec
     const senderId = options.senderId || options.from || this.senderId;
+    
+    // Only include from parameter if it's not 'sandbox' or empty
     const data = {
       username: this.username,
       to: numbers,
       message: message,
-      ...(senderId ? { from: senderId } : {}),
     };
+    
+    // Only add from/senderId if it's not the default sandbox value
+    if (senderId && senderId !== 'sandbox' && senderId !== '') {
+      data.from = senderId;
+    }
 
-    logger.info(`Sending SMS to ${numbers}`, { messageLength: message.length });
+    logger.info(`Sending SMS to ${numbers}`, { 
+      messageLength: message.length,
+      senderId: data.from || 'default'
+    });
 
     try {
       const response = await axios({
@@ -183,33 +209,38 @@ class AfricaTalkingService {
       };
     } catch (error) {
       const errorDetails = error.response?.data || error.message;
+      const statusCode = error.response?.status;
+      
       logger.error('SMS sending failed:', {
         to: numbers,
         error: errorDetails,
-        statusCode: error.response?.status,
-        fullError: error
+        statusCode: statusCode,
+        fullError: error.message
       });
       
-      if (error.response?.status === 401) {
-        throw new Error('Authentication failed. Check your API key and username.');
-      } else if (error.response?.status === 403) {
-        throw new Error('Insufficient balance. Please top up your Africa\'s Talking account.');
+      // Provide more specific error messages
+      if (statusCode === 401) {
+        throw new Error('Authentication failed. Please verify your Africa\'s Talking API key and username. Ensure you\'re using the correct sandbox credentials.');
+      } else if (statusCode === 403) {
+        throw new Error('Insufficient balance. Please top up your Africa\'s Talking account or switch to sandbox mode.');
+      } else if (statusCode === 400) {
+        throw new Error(`Invalid request: ${errorDetails}`);
       } else {
-        throw new Error(`SMS delivery failed: ${JSON.stringify(errorDetails)}`);
+        throw new Error(`SMS delivery failed: ${typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails)}`);
       }
     }
   }
 
   /**
-   * Send OTP via SMS - FIXED for 25411 or 25476 numbers
+   * Send OTP via SMS - FIXED for proper phone number formatting
    */
   async sendOtpSMS(phone, code, expiresIn = 5) {
     // Format phone number first
     const formattedPhone = this.formatPhoneNumber(phone);
     
-    // Validate phone number supports both 25411 and 25476
+    // Validate phone number format (must be 2547XXXXXXXX or 2541XXXXXXXX)
     if (!this.validatePhoneNumber(formattedPhone)) {
-      throw new Error(`Invalid phone number: ${phone}. Must be 25411XXXXXX or 25476XXXXXX format`);
+      throw new Error(`Invalid phone number: ${phone}. Must be in format 2547XXXXXXXX or 2541XXXXXXXX`);
     }
     
     const message = `Your verification code is ${code}. Valid for ${expiresIn} minutes. Never share this code with anyone. ${this.productName}`;
@@ -322,28 +353,20 @@ class AfricaTalkingService {
   }
 
   /**
-   * Validate phone number format - Supports 25411 and 25476
+   * Validate phone number format - Supports 2547 and 2541 formats
    */
   validatePhoneNumber(phone) {
     const cleaned = phone.toString().replace(/\D/g, '');
     
-    // Support both 25411 and 25476 formats
-    // 25411XXXXXX (Safaricom)
-    // 25476XXXXXX (Safaricom)
-    // 2547XXXXXXXX (generic Safaricom)
-    // 2541XXXXXXXX (Airtel)
-    const patterns = [
-      /^2541[1-9]\d{7}$/,     // 25411XXXXXX
-      /^2547[0-9]\d{7}$/,     // 25476XXXXXX, 25470XXXXXX, 25471XXXXXX, etc.
-      /^254[1-9]\d{8}$/,      // Generic 254 format
-      /^0[1-9]\d{8}$/,        // Local format starting with 0
-      /^[1-9]\d{8}$/          // Local format without leading 0
-    ];
+    // Check for exact 12 digits starting with 254
+    // 2547XXXXXXXX (Safaricom)
+    // 2541XXXXXXXX (Airtel/Telkom)
+    const pattern = /^254[1-9]\d{8}$/;
     
-    const isValid = patterns.some(pattern => pattern.test(cleaned));
+    const isValid = pattern.test(cleaned);
     
     if (!isValid) {
-      logger.warn(`Invalid phone number: ${phone} (cleaned: ${cleaned})`);
+      logger.warn(`Invalid phone number: ${phone} (cleaned: ${cleaned}) - Expected format: 254XXXXXXXXX`);
     }
     
     return isValid;
@@ -358,23 +381,23 @@ class AfricaTalkingService {
     // Remove leading + if present
     cleaned = cleaned.replace(/^\+/, '');
     
+    // If it starts with 0, remove it
     if (cleaned.startsWith('0')) {
-      // 07XXXXXXXX or 01XXXXXXXX -> 2547XXXXXXXX or 2541XXXXXXXX
-      cleaned = '254' + cleaned.substring(1);
-    } else if (cleaned.length === 9) {
-      // 7XXXXXXXX -> 2547XXXXXXXX
-      cleaned = '254' + cleaned;
-    } else if (cleaned.length === 12 && cleaned.startsWith('254')) {
-      // Already in correct format
-      cleaned = cleaned;
-    } else if (cleaned.length === 13 && cleaned.startsWith('254')) {
-      // Extra digit, keep as is
-      cleaned = cleaned;
+      cleaned = cleaned.substring(1);
     }
     
-    // Final validation for 25411 or 25476
-    if (!cleaned.match(/^2541\d{8}$/) && !cleaned.match(/^2547\d{8}$/)) {
-      logger.warn(`Formatted number may be invalid: ${cleaned} (original: ${phone})`);
+    // If it doesn't start with 254, add it
+    if (!cleaned.startsWith('254')) {
+      cleaned = '254' + cleaned;
+    }
+    
+    // Ensure exactly 12 digits total
+    if (cleaned.length > 12) {
+      // If it's longer than 12 digits, keep the first 12
+      cleaned = cleaned.substring(0, 12);
+    } else if (cleaned.length < 12) {
+      // If it's shorter, log warning but keep as is (might be invalid)
+      logger.warn(`Phone number too short after formatting: ${cleaned} (original: ${phone})`);
     }
     
     logger.debug(`Formatted phone: ${phone} -> ${cleaned}`);
