@@ -504,85 +504,88 @@ const AdminProducts = () => {
             <p className="text-[#6B7280]">{search ? `No results for "${search}"` : 'No products are currently listed'}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             {filteredProducts.map((product) => {
               const active = isProductActive(product);
               const stock = getStock(product);
               const id = getProductId(product);
               const image = getImage(product);
               return (
-                <div key={id || `${product.name}-${Math.random()}`} className="bg-white rounded-2xl shadow-md overflow-hidden border border-gray-200 hover:shadow-lg transition-all">
-                  <div className="h-44 bg-linear-to-br from-gray-100 to-gray-200 relative">
-                    {image ? (
-                      <img src={image} alt={product.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-[#6B7280]">
-                        <FaBox className="text-4xl mb-2" />
-                        <span className="text-sm">No Image</span>
-                      </div>
-                    )}
-                    <div className={`absolute top-3 right-3 px-2.5 py-1 rounded-full text-xs font-medium shadow-sm ${active ? 'bg-[#16A34A] text-white' : 'bg-red-500 text-white'}`}>
-                      {active ? 'Active' : 'Inactive'}
-                    </div>
-                  </div>
-
-                  <div className="p-5">
-                    <h3 className="text-lg font-semibold mb-1 text-[#111827] line-clamp-1">{product.name}</h3>
-                    <div className="flex items-center gap-2 mb-2">
-                      <FaStore className="text-[#6B7280] text-xs" />
-                      <p className="text-[#6B7280] text-sm">{getSellerName(product)}</p>
-                    </div>
-                    <p className="text-[#F97316] font-bold text-xl mb-2">{formatCurrency(Number(product.price) || 0)}</p>
-                    <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
-                      <div className="rounded-lg bg-gray-50 p-2">
-                        <p className="text-xs text-gray-500">Tracking SKU</p>
-                        <p className="truncate font-mono text-xs font-semibold text-[#111827]" title={getSku(product)}>{getSku(product)}</p>
-                      </div>
-                      <div className="rounded-lg bg-gray-50 p-2">
-                        <p className="text-xs text-gray-500">On hand</p>
-                        <p className={`font-semibold ${getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? 'text-[#F97316]' : 'text-[#111827]'}`}>
-                          {stock} {getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? 'Low' : ''}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mb-5">
-                      <InventoryQuantityGraph product={product} />
+                <article key={id || `${product.name}-${Math.random()}`} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                  <div className="flex gap-3">
+                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-gray-100">
+                      {image ? (
+                        <img src={image} alt={product.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="grid h-full place-items-center text-gray-400">
+                          <FaBox className="text-2xl" />
+                        </div>
+                      )}
                     </div>
 
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between rounded-xl bg-gray-50 border border-gray-200 p-3">
-                        <span className="text-sm font-medium text-[#111827]">{active ? 'ON' : 'OFF'}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="truncate text-sm font-bold text-[#111827]" title={product.name}>{product.name}</h3>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                              {active ? 'Active' : 'Inactive'}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex min-w-0 items-center gap-1 text-xs text-gray-500">
+                            <FaStore className="shrink-0" />
+                            <span className="truncate" title={getSellerName(product)}>{getSellerName(product)}</span>
+                          </div>
+                        </div>
+                        <p className="shrink-0 text-sm font-bold text-[#F97316]">{formatCurrency(Number(product.price) || 0)}</p>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-[minmax(0,1.3fr)_auto_auto] items-center gap-2">
+                        <div className="min-w-0 rounded-md bg-gray-50 px-2 py-1.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">SKU</p>
+                          <p className="truncate font-mono text-[11px] font-semibold text-[#111827]" title={getSku(product)}>{getSku(product)}</p>
+                        </div>
+                        <div className="rounded-md bg-gray-50 px-2 py-1.5 text-right">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">On hand</p>
+                          <p className={`text-xs font-bold ${getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? 'text-[#F97316]' : 'text-[#111827]'}`}>
+                            {stock}{getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? ' Low' : ''}
+                          </p>
+                        </div>
                         <button
                           type="button"
                           onClick={() => toggleProductStatus(id, active)}
-                          className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors ${active ? 'bg-[#16A34A]' : 'bg-gray-300'}`}
+                          className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${active ? 'bg-[#16A34A]' : 'bg-gray-300'}`}
                           title={active ? 'Deactivate product' : 'Activate product'}
                         >
-                          <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${active ? 'translate-x-8' : 'translate-x-1'}`} />
+                          <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${active ? 'translate-x-6' : 'translate-x-1'}`} />
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openEditProduct(product)}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#F97316] px-3 py-2 text-sm font-semibold text-[#F97316] hover:bg-[#FFF7ED]"
-                        >
-                          <FaEdit />
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteProduct(product)}
-                          disabled={deletingId === id}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
-                        >
-                          <FaTrash />
-                          {deletingId === id ? 'Deleting...' : 'Delete'}
-                        </button>
+
+                      <div className="mt-3 grid grid-cols-[1fr_auto] items-end gap-3">
+                        <InventoryQuantityGraph product={product} compact />
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openEditProduct(product)}
+                            className="grid h-8 w-8 place-items-center rounded-md border border-gray-200 text-[#F97316] hover:bg-[#FFF7ED]"
+                            title="Edit product"
+                          >
+                            <FaEdit size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProduct(product)}
+                            disabled={deletingId === id}
+                            className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            title={deletingId === id ? 'Deleting product' : 'Delete product'}
+                          >
+                            <FaTrash size={12} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
+                </article>
               );
             })}
           </div>

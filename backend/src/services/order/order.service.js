@@ -6,11 +6,23 @@ const Logistics = require('../../models/Logistics.model');
 const Escrow = require('../../models/Escrow.model');
 const productService = require('../inventory/product.service');
 const escrowService = require('./escrow.service');
+const trustPolicy = require('../trustPolicy.service');
 const notificationService = require('../notification/notification.service');
 const localGeocoder = require('../maps/localGeocoder.service');
 const qrChainSvc = require('./qrChain.service');
 const { smsQueue } = require('../../config/redis');
 const { v4: uuidv4 } = require('uuid');
+
+const MOQ_BUSINESS_TYPES = new Set(['wholesaler', 'manufacturer']);
+const MOQ_EXEMPT_TYPES = new Set(['farmer', 'retailer']);
+
+const normalizeBusinessType = (value) => String(value || '').trim().toLowerCase();
+
+const requiresBulkMinimumOrder = (seller = {}) => {
+  const businessType = normalizeBusinessType(seller.businessType || seller.role);
+  if (MOQ_EXEMPT_TYPES.has(businessType)) return false;
+  return MOQ_BUSINESS_TYPES.has(businessType);
+};
 
 const normalizeDeliveryAddress = (deliveryAddress) => {
   if (!deliveryAddress) return undefined;
@@ -605,10 +617,9 @@ class OrderService {
     const productDoc = await Product.findById(product);
     if (!productDoc) throw httpError('Product not found', 404);
 
-    const seller = await User.findById(productDoc.seller).select('businessType phone locationHub city address location logisticsProfile.currentLocation sellerLogisticsAddon');
+    const seller = await User.findById(productDoc.seller).select('role businessType phone locationHub city address location logisticsProfile.currentLocation sellerLogisticsAddon');
     const buyerDoc = await User.findById(buyer).select('buyerLogisticsPreference');
-    const sellerBusinessType = String(seller?.businessType || '').toLowerCase();
-    const requiresBulkMinimum = sellerBusinessType === 'wholesaler' || sellerBusinessType === 'manufacturer';
+    const requiresBulkMinimum = requiresBulkMinimumOrder(seller);
     const orderQuantity = Number(quantity);
 
     if (requiresBulkMinimum && orderQuantity < 10) {
@@ -940,7 +951,7 @@ class OrderService {
     const order = await this.getOrderById(orderId, userId, userRole);
     const [logistics, escrow] = await Promise.all([
       Logistics.findOne({ order: orderId })
-        .populate('driver', 'fullName name phone logisticsProfile.currentLocation')
+        .populate('driver', 'fullName name phone role verificationStatus logisticsProfile.verificationStatus logisticsProfile.currentLocation')
         .lean()
         .catch(() => null),
       Escrow.findOne({ order: orderId }).lean().catch(() => null),
@@ -948,6 +959,7 @@ class OrderService {
     const sellerTracking = buildSellerTracking(order);
     const logisticsTracking = buildLogisticsTracking(logistics);
     const logisticsSummary = summarizeLogistics(logistics);
+    const trust = trustPolicy.buildTrustChecks({ order, logistics, escrow });
 
     const timeline = [
       ...sellerTracking,
@@ -966,6 +978,7 @@ class OrderService {
       logisticsTracking,
       milestones: buildTrackingMilestones({ order, logistics, escrow }),
       timeline,
+      trust,
       currentStatus: logistics?.status || order.status,
       proofOfDelivery: {
         deliveredAt: logistics?.actualDelivery || order.deliveredAt,

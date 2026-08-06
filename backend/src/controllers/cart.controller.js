@@ -1,6 +1,17 @@
 const Cart = require('../models/Cart.model');
 const Product = require('../models/Product.model');
 
+const MOQ_BUSINESS_TYPES = new Set(['wholesaler', 'manufacturer']);
+const MOQ_EXEMPT_TYPES = new Set(['farmer', 'retailer']);
+
+const normalizeBusinessType = (value) => String(value || '').trim().toLowerCase();
+
+const getMinimumOrderQuantity = (product = {}) => {
+  const businessType = normalizeBusinessType(product.seller?.businessType || product.seller?.role);
+  if (MOQ_EXEMPT_TYPES.has(businessType)) return 1;
+  return MOQ_BUSINESS_TYPES.has(businessType) ? 10 : 1;
+};
+
 const normalizeCartResponse = (cart) => ({
   items: (cart?.items || []).map((item) => ({
     _id: item._id,
@@ -42,7 +53,7 @@ exports.addToCart = async (req, res, next) => {
     const { productId, quantity = 1, variant = null } = req.body;
     const parsedQuantity = Math.max(1, Number(quantity) || 1);
 
-    const product = await Product.findById(productId).populate('seller', 'fullName businessName');
+    const product = await Product.findById(productId).populate('seller', 'fullName businessName businessType role');
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
@@ -52,7 +63,7 @@ exports.addToCart = async (req, res, next) => {
     }
 
     const stock = Number(product.quantityAvailable ?? product.stock ?? 0);
-    const minOrderQuantity = 1;
+    const minOrderQuantity = getMinimumOrderQuantity(product);
     const safeQuantity = Math.max(minOrderQuantity, parsedQuantity);
 
     const cart = await getOrCreateCart(req.user.id);
@@ -69,6 +80,8 @@ exports.addToCart = async (req, res, next) => {
       cart.items[existingIndex].stock = stock;
       cart.items[existingIndex].name = product.name;
       cart.items[existingIndex].image = product.images?.[0] || null;
+      cart.items[existingIndex].seller = product.seller?._id || product.seller;
+      cart.items[existingIndex].minOrderQuantity = minOrderQuantity;
     } else {
       cart.items.push({
         product: product._id,

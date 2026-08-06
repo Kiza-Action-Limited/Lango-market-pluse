@@ -31,6 +31,7 @@ const supportRoutes = require('./routes/v1/support.routes');
 const contactRoutes = require('./routes/v1/contact.routes');
 const businessRoutes = require('./routes/v1/business.routes');
 const sellerRoutes = require('./routes/v1/seller.routes');
+const marketingRoutes = require('./routes/v1/marketing.routes');
 const mpesaWebhookRoutes = require('./routes/webhooks/mpesa.webhook');
 const errorHandler = require('./middleware/errorHandler');
 const requestLogger = require('./middleware/requestLogger');
@@ -204,6 +205,9 @@ app.use('/v1/suppliers', businessRoutes);
 app.use('/api/v1/seller', sellerRoutes);
 app.use('/api/seller', sellerRoutes);
 app.use('/v1/seller', sellerRoutes);
+app.use('/api/v1/marketing', marketingRoutes);
+app.use('/api/marketing', marketingRoutes);
+app.use('/v1/marketing', marketingRoutes);
 app.use('/webhooks/mpesa', mpesaWebhookRoutes);
 app.use('/api/mpesa', mpesaWebhookRoutes);
 
@@ -221,6 +225,7 @@ app.get('/api/test', (req, res) => {
       wishlist: '/api/v1/wishlist',
       categories: '/api/v1/categories',
       categoriesLegacy: '/api/categories',
+      marketing: '/api/v1/marketing',
       admin: '/api/v1/admin',
       adminLegacy: '/api/admin',
       logistics: '/api/v1/logistics',

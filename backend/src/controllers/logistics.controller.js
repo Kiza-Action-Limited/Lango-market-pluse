@@ -24,6 +24,8 @@ const { validationResult } = require('express-validator');
 const dispatchSvc = require('../services/notification/dispatch.service');
 const qrChainSvc = require('../services/order/qrChain.service');
 const escrowService = require('../services/order/escrow.service');
+const auditService = require('../services/audit.service');
+const trustPolicy = require('../services/trustPolicy.service');
 const routeOptimizer = require('../services/logistics/routeOptimizer.service');
 const localGeocoder = require('../services/maps/localGeocoder.service');
 const logger = require('../utils/logger');
@@ -1765,6 +1767,14 @@ exports.getRoute = async (req, res, next) => {
 
 exports.updateLocation = async (req, res, next) => {
   try {
+    if (!trustPolicy.isVerifiedLogisticsUser(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only verified logistics drivers can update trusted trip GPS.',
+        code: 'LOGISTICS_VERIFICATION_REQUIRED',
+      });
+    }
+
     const result = await routeOptimizer.updateLocation(
       req.params.id,
       req.user._id || req.user.id,
@@ -2159,7 +2169,7 @@ exports.getLogisticsByOrder = async (req, res, next) => {
   try {
     const logistics = await Logistics.findOne({ order: req.params.orderId })
       .populate('order')
-      .populate('seller buyer driver', 'name phone email logisticsProfile.currentLocation');
+      .populate('seller buyer driver', 'name fullName businessName phone email role verificationStatus logisticsProfile.verificationStatus logisticsProfile.currentLocation');
 
     if (!logistics) {
       return res.status(404).json({ success: false, message: 'No logistics record found for this order.' });
@@ -2180,7 +2190,11 @@ exports.getLogisticsByOrder = async (req, res, next) => {
       });
     }
 
-    return res.status(200).json({ success: true, data: logistics });
+    const escrow = await Escrow.findOne({ order: req.params.orderId }).lean().catch(() => null);
+    const payload = logistics.toObject ? logistics.toObject({ virtuals: true }) : logistics;
+    payload.trust = trustPolicy.buildTrustChecks({ order: payload.order, logistics: payload, escrow });
+
+    return res.status(200).json({ success: true, data: payload });
   } catch (err) {
     next(err);
   }
@@ -2208,6 +2222,14 @@ exports.updateDriverLocation = async (req, res, next) => {
       return res.status(403).json({ 
         success: false, 
         message: 'Only logistics drivers can update location.' 
+      });
+    }
+
+    if (!trustPolicy.isVerifiedLogisticsUser(driver)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only verified logistics drivers can share trusted live GPS.',
+        code: 'LOGISTICS_VERIFICATION_REQUIRED',
       });
     }
 
@@ -2448,6 +2470,22 @@ exports.updateLogisticsStatus = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Logistics record not found.' });
     }
 
+    if (status === 'in_transit' && !trustPolicy.hasVerifiedQrScan(logistics, 'pickup')) {
+      return res.status(409).json({
+        success: false,
+        message: 'Pickup QR must be confirmed before marking this shipment in transit.',
+        code: 'PICKUP_QR_REQUIRED',
+      });
+    }
+
+    if (status === 'delivered' && !trustPolicy.hasVerifiedQrScan(logistics, 'delivery')) {
+      return res.status(409).json({
+        success: false,
+        message: 'Delivery QR must be confirmed before marking this shipment delivered.',
+        code: 'DELIVERY_QR_REQUIRED',
+      });
+    }
+
     // Verify GPS for delivery status
     if (status === 'delivered' && logistics.shippingAddress?.gpsLat && gpsCoords) {
       const isWithinRadius = isWithinDeliveryRadius(
@@ -2543,12 +2581,12 @@ exports.updateLogisticsStatus = async (req, res, next) => {
 exports.acceptTrip = async (req, res, next) => {
   try {
     const userId = req.user._id || req.user.id;
-    const verificationStatus = req.user.logisticsProfile?.verificationStatus;
 
-    if (verificationStatus !== 'verified') {
+    if (!trustPolicy.isVerifiedLogisticsUser(req.user)) {
       return res.status(403).json({
         success: false,
         message: 'Logistics verification is required before accepting trips.',
+        code: 'LOGISTICS_VERIFICATION_REQUIRED',
       });
     }
 
@@ -2708,6 +2746,13 @@ exports.assignDriver = async (req, res, next) => {
       const driver = await User.findById(requestedDriverId);
       if (!driver || driver.role !== 'logistics') {
         return res.status(400).json({ success: false, message: 'User is not a registered logistics driver.' });
+      }
+      if (!trustPolicy.isVerifiedLogisticsUser(driver)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Only verified logistics drivers can be assigned to trusted shipments.',
+          code: 'LOGISTICS_VERIFICATION_REQUIRED',
+        });
       }
 
       logistics.driver = requestedDriverId;
@@ -3138,6 +3183,31 @@ exports.processQrScan = async (req, res, next) => {
       }
     }
 
+    // GPS proof is required for both handoff steps so the shared timeline is trusted.
+    if (!gpsCoords || !gpsCoords.lat || !gpsCoords.lng) {
+      return res.status(400).json({
+        success: false,
+        message: step === 'pickup'
+          ? 'GPS coordinates required for pickup confirmation'
+          : 'GPS coordinates required for delivery confirmation',
+        errors: [{ message: 'Please enable GPS on your device before scanning this QR code.' }]
+      });
+    }
+
+    if (step === 'pickup') {
+      const isAdmin = userRole === 'admin';
+      const scannerIsVerifiedDriver = trustPolicy.isVerifiedLogisticsUser(req.user);
+      const assignedDriverIsVerified = trustPolicy.isVerifiedLogisticsUser(logistics.driver);
+
+      if (!isAdmin && (!scannerIsVerifiedDriver || !assignedDriverIsVerified)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Only verified logistics drivers can confirm pickup and start live tracking.',
+          code: 'LOGISTICS_VERIFICATION_REQUIRED',
+        });
+      }
+    }
+
     // GPS VERIFICATION for delivery
     if (step === 'delivery') {
       if (!gpsCoords || !gpsCoords.lat || !gpsCoords.lng) {
@@ -3296,11 +3366,27 @@ exports.processQrScan = async (req, res, next) => {
     }
     logistics.qrScans.push({
       step,
-      token,
       scannedBy: userId,
       gpsCoords,
-      timestamp: new Date()
+      verified: true,
+      scannedAt: new Date()
     });
+    logistics.gpsTracking = logistics.gpsTracking || {};
+    logistics.gpsTracking.history = logistics.gpsTracking.history || [];
+    logistics.gpsTracking.history.push({
+      location: { lat: Number(gpsCoords.lat), lng: Number(gpsCoords.lng) },
+      accuracy: gpsCoords.accuracy,
+      speed: gpsCoords.speed,
+      heading: gpsCoords.heading,
+      recordedBy: userId,
+      timestamp: new Date(),
+    });
+    logistics.gpsTracking.current = {
+      lat: Number(gpsCoords.lat),
+      lng: Number(gpsCoords.lng),
+      accuracy: gpsCoords.accuracy,
+      lastUpdate: new Date(),
+    };
 
     let escrowRelease = null;
 
@@ -3379,28 +3465,11 @@ exports.processQrScan = async (req, res, next) => {
       });
 
       if (escrowService && escrowService.releasePayment) {
-        try {
-          escrowRelease = await escrowService.releasePayment(logistics.order._id || logistics.order, {
-            releasedBy: userId,
-            releaseMethod: 'qr_confirmed',
-          });
-          await logistics.populate('driver fleetOwner');
-        } catch (releaseError) {
-          logger.warn('Escrow release after delivery QR failed:', releaseError);
-          return res.status(409).json({
-            success: false,
-            message: releaseError.message || 'Delivery QR accepted, but escrow could not release payouts.',
-            code: 'ESCROW_RELEASE_FAILED',
-            errors: [{
-              message: 'Delivery proof was accepted, but seller and logistics payout release failed.',
-              details: {
-                step,
-                logisticsId: logistics._id,
-                orderId: logistics.order?._id || logistics.order,
-              },
-            }],
-          });
-        }
+        escrowRelease = {
+          released: false,
+          releaseWindowActive: true,
+          releaseDue: logistics.escrowReleaseDue,
+        };
       }
 
       const recipients = [];
@@ -3412,7 +3481,7 @@ exports.processQrScan = async (req, res, next) => {
           userIds: recipients,
           channels: ['push', 'sms'],
           title: '✅ Delivery confirmed',
-          body: `${logistics.cargoType || 'Cargo'} has been delivered successfully. Seller and logistics payouts have been released from escrow.`,
+          body: `${logistics.cargoType || 'Cargo'} has been delivered successfully. Escrow remains protected during the review window.`,
           data: { 
             shipmentId: logistics._id.toString(), 
             status: 'delivered',
@@ -3421,6 +3490,21 @@ exports.processQrScan = async (req, res, next) => {
         });
       }
     }
+
+    const trust = trustPolicy.buildTrustChecks({ order: logistics.order, logistics });
+    await auditService.record({
+      entityType: 'Logistics',
+      entityId: logistics._id,
+      action: step === 'pickup' ? 'PICKUP_QR_GPS_CONFIRMED' : 'DELIVERY_QR_GPS_CONFIRMED',
+      actor: userId,
+      newValue: {
+        step,
+        gpsCoords,
+        logisticsStatus: logistics.status,
+        trust,
+      },
+      req,
+    });
 
     return res.status(200).json({ 
       success: true, 
@@ -3433,6 +3517,7 @@ exports.processQrScan = async (req, res, next) => {
         timestamp: new Date().toISOString(),
         gpsVerified: step === 'delivery' ? true : null,
         gpsAtScan: verificationResult?.gpsAtScan || null,
+        trust,
         tokenStatus: {
           id: verificationResult?._id,
           type: verificationResult?.type,

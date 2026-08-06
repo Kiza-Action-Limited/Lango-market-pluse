@@ -176,7 +176,7 @@ const Navbar = () => {
               )}
             </div>
 
-            <Link to="/register?role=seller" className="font-semibold hover:opacity-90" {...createPrefetchHandlers('/register')}>
+            <Link to="/seller-plans" className="font-semibold hover:opacity-90" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
               Sell on Lango Market Pulse
             </Link>
 
@@ -304,7 +304,7 @@ const Navbar = () => {
               </div>
             )}
 
-            <Link to="/register?role=seller" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/register')}>
+            <Link to="/seller-plans" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
               Sell on Lango Market Pulse
             </Link>
           </div>

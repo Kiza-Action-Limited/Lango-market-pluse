@@ -3,6 +3,7 @@ import { manufacturerService } from '../services/manufacturerService';
 import { buildSupplierCards } from '../utils/manufacturerMapper';
 import { getPremiumProfiles } from '../utils/premiumSellerProfile';
 import { mergeSupplierPredictions, predictSuppliersLocal } from '../utils/supplierPrediction';
+import { isMqqRestrictedBusinessType } from '../utils/moq';
 
 const POLL_MS = 45000;
 const dedupeSuppliers = (suppliers = []) => {
@@ -20,7 +21,7 @@ const dedupeSuppliers = (suppliers = []) => {
 const withOrderTerms = (supplier) => {
   const t = String(supplier?.businessType || '').toLowerCase();
   const moqOptions =
-    t === 'manufacturer' || t === 'wholesaler'
+    isMqqRestrictedBusinessType(t)
       ? [
           { label: 'MQQ1', value: '10 - 2,999 pieces' },
           { label: 'MQQ2', value: '3,000+ pieces' },

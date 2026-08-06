@@ -4,8 +4,29 @@ const normalizeApiBaseUrl = (value = '', fallback = '/api') => {
   const trimmedValue = trimTrailingSlash(String(value || '').trim());
 
   if (!trimmedValue) return fallback;
+  if (/^\/?api\/v\d+$/i.test(trimmedValue)) {
+    const normalized = trimmedValue.startsWith('/') ? trimmedValue : `/${trimmedValue}`;
+    return normalized.replace(/\/v\d+$/i, '');
+  }
   if (trimmedValue === '/api' || trimmedValue.endsWith('/api')) return trimmedValue;
-  if (/^https?:\/\//i.test(trimmedValue)) return `${trimmedValue}/api`;
+
+  if (/^https?:\/\//i.test(trimmedValue)) {
+    try {
+      const url = new URL(trimmedValue);
+      const pathname = trimTrailingSlash(url.pathname);
+
+      if (/\/api\/v\d+$/i.test(pathname)) {
+        url.pathname = pathname.replace(/\/v\d+$/i, '');
+        return trimTrailingSlash(url.toString());
+      }
+
+      if (pathname.endsWith('/api')) return trimTrailingSlash(url.toString());
+      url.pathname = `${pathname === '/' ? '' : pathname}/api`;
+      return trimTrailingSlash(url.toString());
+    } catch {
+      return fallback;
+    }
+  }
 
   return trimmedValue.startsWith('/') ? trimmedValue : `/${trimmedValue}`;
 };

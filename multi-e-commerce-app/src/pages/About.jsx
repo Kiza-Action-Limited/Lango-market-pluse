@@ -1,296 +1,254 @@
 // src/pages/About.jsx
-import React, { useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import {
-  FaTruck,
-  FaShieldAlt,
-  FaMoneyBillWave,
-  FaHeadset,
-  FaStore,
-  FaUsers,
-  FaChartLine,
-  FaHandshake,
-  FaBrain,
+  FaArrowRight,
   FaBolt,
+  FaBrain,
+  FaChartLine,
+  FaCheckCircle,
   FaCrown,
-  FaChevronDown,
-  FaChevronUp,
+  FaHandshake,
+  FaHeadset,
+  FaMoneyBillWave,
+  FaShieldAlt,
+  FaStore,
+  FaTruck,
+  FaUsers,
 } from 'react-icons/fa';
-import { useAuth } from '../context/AuthContext';
-import { FEATURE_LABELS, TRADER_PLANS } from '../config/subscriptionPlans';
-import aboutHeroImage from '../assets/images/360_F_273670292_Gcald9BW9G1oHm8fqEcIPfrghFbfXm9d.webp';
+import { TRADER_PLANS } from '../config/subscriptionPlans';
+import aboutHeroImage from '../assets/images/1000_F_1388403127_VLbGx3CB7xsMA56fZaMgN2TdpDTVY556.webp';
 import businessImage from '../assets/images/240_F_736429436_NpVWpeNSbzAx35soBFulMc5N4MUO30NV.jpg';
 import customerImage from '../assets/images/240_F_725819555_bH4Tv8G1KWOdwC60nwFHDZtGAmTHa2V8.jpg';
 
+const marketplaceStats = [
+  { value: '6+', label: 'Seller types supported' },
+  { value: '24/7', label: 'Order visibility' },
+  { value: '3', label: 'Seller growth tiers' },
+  { value: 'KES', label: 'Local-first commerce' },
+];
+
+const audienceBlocks = [
+  {
+    title: 'For customers',
+    image: customerImage,
+    icon: FaUsers,
+    accent: '#16A34A',
+    text: 'Discover products from farmers, retailers, wholesalers, manufacturers, brands, and small businesses in one trusted marketplace.',
+    points: ['Transparent listings', 'Real-time order tracking', 'Ratings, reviews, and wishlists'],
+    cta: 'Start Shopping',
+    to: '/products',
+  },
+  {
+    title: 'For businesses',
+    image: businessImage,
+    icon: FaStore,
+    accent: '#F97316',
+    text: 'Publish products, manage orders, monitor inventory, and grow with practical tools built for everyday trade operations.',
+    points: ['Storefront and catalog tools', 'Inventory and order dashboards', 'Seller wallet and subscription path'],
+    cta: 'Explore Seller Plans',
+    to: '/seller-plans',
+  },
+];
+
+const trustPillars = [
+  { icon: FaShieldAlt, title: 'Protected commerce', text: 'Checkout, escrow-ready flows, and clear order records help reduce confusion between buyers and sellers.' },
+  { icon: FaTruck, title: 'Trackable logistics', text: 'Delivery updates and logistics visibility keep both parties aligned after the order is placed.' },
+  { icon: FaMoneyBillWave, title: 'Transparent value', text: 'Local pricing, seller details, minimum order rules, and product context make decisions easier.' },
+  { icon: FaHeadset, title: 'Platform support', text: 'Support workflows give customers, sellers, and administrators a shared path for resolving issues.' },
+];
+
+const intelligenceFeatures = [
+  { icon: FaBrain, title: 'Market intelligence', text: 'Signals, alerts, and marketplace data help sellers understand demand and respond faster.' },
+  { icon: FaChartLine, title: 'Growth visibility', text: 'Dashboards turn products, orders, stock movement, and revenue activity into readable decisions.' },
+  { icon: FaBolt, title: 'Operational speed', text: 'QR-linked stock movement, notifications, and seller tools reduce repetitive manual work.' },
+  { icon: FaHandshake, title: 'Trusted relationships', text: 'Profiles, reviews, order history, and clear roles help build stronger marketplace confidence.' },
+];
+
 const About = () => {
-  const { isAuthenticated, isSeller } = useAuth();
-  const [expandedPlanId, setExpandedPlanId] = useState(null);
-
-  const trustFeatures = [
-    { icon: FaTruck, title: 'Reliable Delivery', desc: 'Trackable shipping with clear order updates.' },
-    { icon: FaShieldAlt, title: 'Secure Transactions', desc: 'Protected checkout and trusted payment flows.' },
-    { icon: FaMoneyBillWave, title: 'Fair Pricing', desc: 'Direct seller pricing across multiple vendor types.' },
-    { icon: FaHeadset, title: 'Platform Support', desc: 'Dedicated support for both buyers and sellers.' },
-  ];
-
-  const customerBenefits = [
-    'Browse products from brands, wholesalers, retailers, farmers, and small businesses in one place.',
-    'Compare options quickly by category, price, business type, and product details.',
-    'Save favorites to wishlist, track orders in real time, and manage your purchases from one account.',
-    'Shop confidently with transparent listings, ratings, and reliable checkout flow.',
-  ];
-
-  const businessBenefits = [
-    'Create a storefront and publish products with pricing, stock, images, and variants.',
-    'Reach customers actively searching across multiple categories and seller types.',
-    'Manage orders, monitor product performance, and update inventory from your dashboard.',
-    'Scale from small business to larger operations while keeping full control of your catalog.',
-  ];
-
-  const getSellerPlanLink = (planId) => {
-    const encodedPlan = encodeURIComponent(planId);
-
-    if (isSeller) {
-      return `/seller/subscription-plans?plan=${encodedPlan}`;
-    }
-
-    if (isAuthenticated) {
-      return `/register?role=seller&plan=${encodedPlan}`;
-    }
-
-    return `/register?role=seller&plan=${encodedPlan}`;
-  };
-
   return (
-    <div className="bg-[#F9FAFB] text-[#111827]">
-      {/* Hero Section with new brand colors */}
-      <section className="relative h-75 md:h-90 overflow-hidden">
-        <img src={aboutHeroImage} alt="Lango MarketPulse Trade & Intelligence OS" className="w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-linear-to-r from-[#F97316]/90 to-[#FB923C]/80" />
-        <div className="absolute inset-0 flex items-center">
-          <div className="container mx-auto px-4">
-            <div className="max-w-3xl">
-              <h1 className="text-3xl md:text-5xl font-bold text-white mb-3">
-                About Lango MarketPulse
-              </h1>
-              <p className="text-white/95 text-base md:text-lg mb-2">
-                Lango Lako la Biashara Smart — Your Gateway to Smart Business.
+    <div className="bg-[#F5F7FA] text-[#111827]">
+      <section className="relative min-h-[72vh] overflow-hidden">
+        <img
+          src={aboutHeroImage}
+          alt="Lango MarketPulse marketplace operations"
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div className="absolute inset-0 bg-[#0B1220]/78" />
+        <div className="relative mx-auto flex min-h-[72vh] max-w-screen-2xl items-center px-4 py-16 md:px-6">
+          <div className="max-w-4xl text-white">
+            <p className="inline-flex rounded-md border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#FDBA74]">
+              Trade and Intelligence OS
+            </p>
+            <h1 className="mt-5 text-4xl font-bold leading-tight sm:text-5xl lg:text-6xl">
+              Lango MarketPulse
+            </h1>
+            <p className="mt-5 max-w-3xl text-base leading-7 text-gray-100 sm:text-lg">
+              A professional marketplace built to connect customers, sellers, farmers, retailers,
+              wholesalers, manufacturers, and logistics partners through trusted commerce and practical business intelligence.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Link to="/products" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#F97316] px-5 text-sm font-semibold text-white transition hover:bg-[#EA580C]">
+                Explore Marketplace <FaArrowRight size={13} />
+              </Link>
+              <Link to="/seller-plans" className="inline-flex min-h-12 items-center justify-center rounded-md border border-white/30 bg-white/10 px-5 text-sm font-semibold text-white transition hover:bg-white/20">
+                View Seller Plans
+              </Link>
+            </div>
+          </div>
+        </div>
+        <div className="relative mx-auto -mt-24 max-w-screen-2xl px-4 pb-8 md:px-6">
+          <div className="grid overflow-hidden rounded-lg border border-white/15 bg-white shadow-xl md:grid-cols-4">
+            {marketplaceStats.map((stat) => (
+              <div key={stat.label} className="border-b border-gray-100 p-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">
+                <p className="text-3xl font-bold text-[#F97316]">{stat.value}</p>
+                <p className="mt-1 text-sm font-medium text-[#6B7280]">{stat.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white">
+        <div className="mx-auto grid max-w-screen-2xl gap-8 px-4 py-14 md:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Who we are</p>
+            <h2 className="mt-3 text-3xl font-bold leading-tight text-[#111827] md:text-4xl">
+              A marketplace for commerce that needs clarity, speed, and trust.
+            </h2>
+          </div>
+          <div className="grid gap-4 text-sm leading-7 text-[#374151] md:grid-cols-2">
+            <p>
+              Lango MarketPulse brings product discovery, seller operations, buyer workflows, logistics visibility,
+              and platform support into one practical commerce ecosystem.
+            </p>
+            <p>
+              The platform is designed for local trade realities: direct selling, transparent product information,
+              live order tracking, business growth tools, and admin controls that help protect every party.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-screen-2xl px-4 py-14 md:px-6">
+        <div className="mb-7 max-w-2xl">
+          <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Built for both sides</p>
+          <h2 className="mt-2 text-3xl font-bold text-[#111827]">Buy with confidence. Sell with control.</h2>
+        </div>
+        <div className="grid gap-5 lg:grid-cols-2">
+          {audienceBlocks.map(({ title, image, icon: Icon, accent, text, points, cta, to }) => (
+            <article key={title} className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
+              <img src={image} alt={title} className="h-64 w-full object-cover" />
+              <div className="p-6">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-md bg-gray-50" style={{ color: accent }}>
+                    <Icon />
+                  </span>
+                  <h3 className="text-xl font-bold text-[#111827]">{title}</h3>
+                </div>
+                <p className="mt-4 text-sm leading-7 text-[#6B7280]">{text}</p>
+                <ul className="mt-5 grid gap-2">
+                  {points.map((point) => (
+                    <li key={point} className="flex items-center gap-2 text-sm font-medium text-[#374151]">
+                      <FaCheckCircle className="shrink-0 text-[#16A34A]" />
+                      {point}
+                    </li>
+                  ))}
+                </ul>
+                <Link to={to} className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#111827] px-4 text-sm font-semibold text-white transition hover:bg-black">
+                  {cta} <FaArrowRight size={12} />
+                </Link>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-[#0B1220] text-white">
+        <div className="mx-auto max-w-screen-2xl px-4 py-14 md:px-6">
+          <div className="mb-8 max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-wide text-[#FDBA74]">Trust infrastructure</p>
+            <h2 className="mt-2 text-3xl font-bold">The platform is built around safer, clearer transactions.</h2>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {trustPillars.map(({ icon: Icon, title, text }) => (
+              <article key={title} className="rounded-lg border border-white/10 bg-white/5 p-5 transition hover:bg-white/10">
+                <Icon className="text-2xl text-[#FDBA74]" />
+                <h3 className="mt-4 text-lg font-bold">{title}</h3>
+                <p className="mt-2 text-sm leading-6 text-gray-300">{text}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white">
+        <div className="mx-auto max-w-screen-2xl px-4 py-14 md:px-6">
+          <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Intelligence layer</p>
+              <h2 className="mt-2 text-3xl font-bold text-[#111827]">More than a marketplace.</h2>
+              <p className="mt-4 text-sm leading-7 text-[#6B7280]">
+                Lango MarketPulse helps businesses understand activity, react to demand, and operate with better records.
               </p>
-              <p className="text-white/90 text-sm md:text-base">
-                Trade & Intelligence OS: A unified ecosystem where AI-powered insights meet seamless commerce.
-              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {intelligenceFeatures.map(({ icon: Icon, title, text }) => (
+                <article key={title} className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-5">
+                  <Icon className="text-2xl text-[#F97316]" />
+                  <h3 className="mt-4 font-bold text-[#111827]">{title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-[#6B7280]">{text}</p>
+                </article>
+              ))}
             </div>
           </div>
         </div>
       </section>
 
-      <div className="container mx-auto px-4 py-10 md:py-14">
-        <div className="max-w-6xl mx-auto space-y-10">
-          {/* Who We Are - updated brand description */}
-          <section className="bg-white rounded-xl shadow-md p-6 md:p-8 border-l-4 border-[#FB923C]">
-            <h2 className="text-2xl font-bold mb-4 text-[#F97316]">Who We Are</h2>
-            <p className="text-[#111827] mb-4">
-              <span className="font-semibold text-[#F97316]">Lango MarketPulse</span> connects customers with a wide network of verified businesses,
-              including brands, wholesalers, manufacturers, retailers, farmers, and small businesses.
-              Our goal is to make online commerce more transparent, efficient, and intelligent.
-            </p>
-            <p className="text-[#111827]">
-              As a <span className="text-[#FB923C] font-medium">Trade & Intelligence OS</span>, we blend commerce with smart data — empowering buyers
-              with AI-driven insights and sellers with predictive tools to optimize performance.
-            </p>
-          </section>
-
-          {/* For Customers & For Businesses - using new color accents */}
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl shadow-md overflow-hidden border-t-4 border-[#16A34A]">
-              <img src={customerImage} alt="Customers shopping on Lango MarketPulse" className="w-full h-56 object-cover" />
-              <div className="p-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <FaUsers className="text-[#16A34A]" />
-                  <h3 className="text-xl font-semibold text-[#111827]">For Customers</h3>
-                </div>
-                <ul className="space-y-2 text-[#6B7280] text-sm md:text-base">
-                  {customerBenefits.map((item, index) => (
-                    <li key={index}>✓ {item}</li>
-                  ))}
-                </ul>
-              </div>
+      <section className="mx-auto max-w-screen-2xl px-4 py-14 md:px-6">
+        <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-3">
+              <FaCrown className="text-2xl text-[#F97316]" />
+              <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Seller growth path</p>
             </div>
-
-            <div className="bg-white rounded-xl shadow-md overflow-hidden border-t-4 border-[#F97316]">
-              <img src={businessImage} alt="Businesses selling on Lango MarketPulse" className="w-full h-56 object-cover" />
-              <div className="p-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <FaStore className="text-[#F97316]" />
-                  <h3 className="text-xl font-semibold text-[#111827]">For Businesses</h3>
-                </div>
-                <ul className="space-y-2 text-[#6B7280] text-sm md:text-base">
-                  {businessBenefits.map((item, index) => (
-                    <li key={index}>✓ {item}</li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </section>
-
-          {/* Why Lango MarketPulse - updated with new color palette */}
-          <section>
-            <h2 className="text-2xl font-bold text-center mb-6 text-[#F97316]">Why Lango MarketPulse</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {trustFeatures.map((feature, index) => (
-                <div key={index} className="bg-white rounded-xl shadow-md p-6 text-center hover:shadow-lg transition-shadow">
-                  <feature.icon className="text-4xl text-[#F97316] mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2 text-[#111827]">{feature.title}</h3>
-                  <p className="text-[#6B7280] text-sm">{feature.desc}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Intelligence OS highlight - using Purple & Green */}
-          <section className="bg-linear-to-r from-[#FB923C]/10 to-[#F97316]/10 rounded-xl p-6 md:p-8 border border-[#FB923C]/20">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="flex items-start gap-3">
-                <FaBrain className="text-[#FB923C] text-2xl mt-1" />
-                <div>
-                  <h4 className="font-semibold mb-1 text-[#111827]">AI Intelligence Layer</h4>
-                  <p className="text-sm text-[#6B7280]">Predictive analytics, smart alerts, and trend insights to guide decisions.</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <FaChartLine className="text-[#16A34A] text-2xl mt-1" />
-                <div>
-                  <h4 className="font-semibold mb-1 text-[#111827]">Profit & Growth Indicators</h4>
-                  <p className="text-sm text-[#6B7280]">Real-time success metrics and performance tracking for sellers.</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <FaBolt className="text-[#F97316] text-2xl mt-1" />
-                <div>
-                  <h4 className="font-semibold mb-1 text-[#111827]">Smart Alerts & Notifications</h4>
-                  <p className="text-sm text-[#6B7280]">Instant updates on orders, inventory, and market opportunities.</p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Trust & growth pillars */}
-          <section className="bg-white rounded-xl shadow-md p-6 md:p-8">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="flex items-start gap-3">
-                <FaHandshake className="text-[#F97316] text-2xl mt-1" />
-                <div>
-                  <h4 className="font-semibold mb-1 text-[#111827]">Trusted Marketplace</h4>
-                  <p className="text-sm text-[#6B7280]">Built for long-term customer-business relationships.</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <FaChartLine className="text-[#16A34A] text-2xl mt-1" />
-                <div>
-                  <h4 className="font-semibold mb-1 text-[#111827]">Business Growth Tools</h4>
-                  <p className="text-sm text-[#6B7280]">Practical dashboards and order management for sellers.</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <FaUsers className="text-[#FB923C] text-2xl mt-1" />
-                <div>
-                  <h4 className="font-semibold mb-1 text-[#111827]">Customer-First Experience</h4>
-                  <p className="text-sm text-[#6B7280]">Easy product discovery, checkout, and post-purchase tracking.</p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Seller subscription plans preview */}
-          <section className="bg-white rounded-xl shadow-md p-6 md:p-8 border border-[#F97316]/20">
-            <div className="flex items-center gap-3 mb-2">
-              <FaCrown className="text-[#F97316] text-2xl" />
-              <h2 className="text-2xl font-bold text-[#F97316]">Seller Subscription Plans</h2>
-            </div>
-            <p className="text-[#6B7280] mb-6">
-              Compare seller tiers, open each plan to view more features, then choose your preferred plan.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-              {TRADER_PLANS.map((plan) => {
-                const expanded = expandedPlanId === plan.id;
-                const previewFeatures = plan.featureKeys.slice(0, 4);
-                const detailedFeatures = expanded ? plan.featureKeys : previewFeatures;
-
-                return (
-                  <article key={plan.id} className="border border-gray-200 rounded-xl p-4 bg-[#F9FAFB]">
-                    <h3 className="text-lg font-semibold text-[#111827]">{plan.name}</h3>
-                    <p className="text-[#F97316] font-bold mt-1">{plan.priceLabel}</p>
-                    <p className="text-xs text-[#6B7280] mt-1">{plan.differentiator}</p>
-
-                    <ul className="mt-3 space-y-1 text-sm text-[#374151]">
-                      {detailedFeatures.map((featureKey) => (
-                        <li key={featureKey}>• {FEATURE_LABELS[featureKey] || featureKey}</li>
-                      ))}
-                    </ul>
-
-                    <button
-                      type="button"
-                      onClick={() => setExpandedPlanId(expanded ? null : plan.id)}
-                      className="mt-3 inline-flex items-center gap-2 text-sm text-[#F97316] hover:text-[#EA580C] font-medium"
-                    >
-                      {expanded ? (
-                        <>
-                          View less <FaChevronUp size={12} />
-                        </>
-                      ) : (
-                        <>
-                          View more features <FaChevronDown size={12} />
-                        </>
-                      )}
-                    </button>
-
-                    <div className="mt-4 flex flex-col gap-2">
-                      <Link
-                        to={getSellerPlanLink(plan.id)}
-                        className="inline-block text-center px-4 py-2 bg-[#F97316] text-white rounded-lg hover:bg-[#EA580C] transition-colors text-sm font-medium"
-                      >
-                        Choose Plan
-                      </Link>
-                      {!isAuthenticated && (
-                        <Link
-                          to={`/login?next=${encodeURIComponent(`/seller/subscription-plans?plan=${plan.id}`)}`}
-                          className="inline-block text-center px-4 py-2 border border-gray-300 text-[#111827] rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
-                        >
-                          Sign In As Seller
-                        </Link>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-
-          {/* Call to Action with new button colors */}
-          <section className="bg-white rounded-xl shadow-md p-8 text-center border border-[#F97316]/20">
-            <h2 className="text-2xl font-bold mb-2 text-[#F97316]">Explore Lango MarketPulse</h2>
-            <p className="text-[#6B7280] mb-2 italic">Lango Lako la Biashara Smart</p>
-            <p className="text-[#111827] mb-6">
-              Whether you are buying or selling, Lango MarketPulse gives you the tools, intelligence, and visibility to succeed.
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-              <Link
-                to="/products"
-                className="inline-block px-6 py-3 bg-[#F97316] text-white font-medium rounded-lg hover:bg-[#F97316]/90 transition-colors"
-              >
-                Start Shopping
-              </Link>
-              <Link
-                to="/register?role=seller"
-                className="inline-block px-6 py-3 bg-[#F97316] text-white font-medium rounded-lg hover:bg-[#F97316]/90 transition-colors"
-              >
-                Start Selling
-              </Link>
-            </div>
-          </section>
+            <h2 className="mt-2 text-3xl font-bold text-[#111827]">Plans for small shops, serious operators, and growing teams.</h2>
+          </div>
+          <Link to="/seller-plans" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-[#F97316] px-4 text-sm font-semibold text-white transition hover:bg-[#EA580C]">
+            Open Full Plans Page <FaArrowRight size={12} />
+          </Link>
         </div>
-      </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          {TRADER_PLANS.map((plan) => (
+            <article key={plan.id} className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+              <h3 className="text-xl font-bold text-[#111827]">{plan.name}</h3>
+              <p className="mt-1 text-sm font-semibold text-[#6B7280]">{plan.differentiator}</p>
+              <p className="mt-4 text-2xl font-bold text-[#F97316]">{plan.priceLabel}</p>
+              <p className="mt-2 text-sm leading-6 text-[#6B7280]">{plan.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-[#111827] px-4 py-14 text-white md:px-6">
+        <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-6">
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold uppercase tracking-wide text-[#FDBA74]">Lango Lako la Biashara Smart</p>
+            <h2 className="mt-2 text-3xl font-bold">Ready to move through the marketplace with more confidence?</h2>
+            <p className="mt-3 text-sm leading-6 text-gray-300">
+              Start as a buyer, register as a seller, or explore the business directory to see how Lango MarketPulse connects trade.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Link to="/products" className="inline-flex min-h-12 items-center justify-center rounded-md bg-[#F97316] px-5 text-sm font-semibold text-white transition hover:bg-[#EA580C]">
+              Start Shopping
+            </Link>
+            <Link to="/seller-plans" className="inline-flex min-h-12 items-center justify-center rounded-md border border-white/20 bg-white/10 px-5 text-sm font-semibold text-white transition hover:bg-white/20">
+              Start Selling
+            </Link>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };

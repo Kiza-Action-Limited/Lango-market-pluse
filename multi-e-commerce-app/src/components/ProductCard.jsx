@@ -30,7 +30,7 @@ const ProductCard = ({ product }) => {
   };
 
   return (
-    <div className="group hover-card overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div className="group hover-card w-full max-w-[220px] justify-self-center overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
       <Link to={`/products/${productId}`} className="relative block">
         <div className="aspect-[4/3] bg-gray-100 sm:h-44 sm:aspect-auto">
           {primaryImageUrl ? (

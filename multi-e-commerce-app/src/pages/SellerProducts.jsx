@@ -51,12 +51,6 @@ const getInventoryGraph = (product) => {
   const stock = getStock(product);
   return [{ onHand: stock, reserved: Number(product?.reservedQuantity || 0), available: stock }];
 };
-const formatMovementDate = (value) => {
-  if (!value) return 'Now';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Now';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-};
 const getImage = (product) => {
   const image = product?.images?.[0];
   return typeof image === 'string' ? image : image?.url || '';
@@ -69,46 +63,21 @@ const isActiveProduct = (product) => {
 };
 const categoryLabel = (product) => formatProductCategory(product?.category);
 
-const InventoryMovementHistory = ({ product }) => {
-  const rows = getInventoryGraph(product).slice(-4).reverse();
-
-  return (
-    <div className="rounded-md border border-gray-100 bg-white p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Movement history</p>
-        <span className="text-[11px] text-gray-500">{rows.length} event{rows.length === 1 ? '' : 's'}</span>
-      </div>
-      <div className="space-y-2">
-        {rows.map((point, index) => (
-          <div key={`${point.recordedAt || 'movement'}-${index}`} className="grid grid-cols-[1fr_auto] gap-2 text-xs">
-            <div className="min-w-0">
-              <p className="truncate font-medium text-[#111827]">{String(point.event || 'inventory_adjusted').replace(/_/g, ' ')}</p>
-              <p className="text-gray-500">{formatMovementDate(point.recordedAt)}</p>
-            </div>
-            <div className="text-right">
-              <p className="font-semibold text-[#111827]">{point.onHand} on hand</p>
-              <p className="text-gray-500">{point.available} available</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const InventoryQuantityGraph = ({ product }) => {
+const InventoryQuantityGraph = ({ product, compact = false }) => {
   const points = getInventoryGraph(product);
   const maxValue = Math.max(...points.map((point) => point.onHand), 1);
 
   return (
-    <div className="rounded-md border border-gray-100 bg-gray-50 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inventory graph</p>
-        <p className="text-xs font-medium text-[#111827]">{getStock(product)} {product?.unit || 'units'}</p>
-      </div>
-      <div className="flex h-20 items-end gap-1">
+    <div className={compact ? '' : 'rounded-md border border-gray-100 bg-gray-50 p-3'}>
+      {!compact && (
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Inventory graph</p>
+          <p className="text-xs font-medium text-[#111827]">{getStock(product)} {product?.unit || 'units'}</p>
+        </div>
+      )}
+      <div className={`flex ${compact ? 'h-10' : 'h-20'} items-end gap-1`}>
         {points.map((point, index) => {
-          const height = Math.max(8, (point.onHand / maxValue) * 100);
+          const height = Math.max(compact ? 6 : 8, (point.onHand / maxValue) * 100);
           return (
             <div key={`${point.recordedAt || 'point'}-${index}`} className="flex min-w-0 flex-1 flex-col items-center justify-end">
               <div
@@ -120,11 +89,13 @@ const InventoryQuantityGraph = ({ product }) => {
           );
         })}
       </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
-        <span>Oldest</span>
-        <span>Quantity, not percentage</span>
-        <span>Latest</span>
-      </div>
+      {!compact && (
+        <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
+          <span>Oldest</span>
+          <span>Quantity, not percentage</span>
+          <span>Latest</span>
+        </div>
+      )}
     </div>
   );
 };
@@ -367,7 +338,7 @@ const SellerProducts = () => {
                 <p className="text-sm text-gray-500">{categoryProducts.length} product{categoryProducts.length === 1 ? '' : 's'}</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
               {categoryProducts.map((product) => {
                 const id = getProductId(product);
                 const stock = getStock(product);
@@ -377,86 +348,76 @@ const SellerProducts = () => {
                 const moq = product.minimumOrderQuantity ?? product.wholesale?.minimumOrderQuantity ?? 1;
                 const rfqEnabled = product.rfqEnabled ?? product.wholesale?.rfqEnabled ?? true;
                 return (
-                  <article key={id || product.name} className="overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
-                    <div className="h-44 bg-gray-100">
-                      {image ? (
-                        <img src={image} alt={product.name} className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="grid h-full place-items-center text-gray-400">
-                          <FaBox className="text-4xl" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-4">
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-base font-semibold text-[#111827]">{product.name}</h3>
-                          <p className="mt-1 text-sm font-semibold text-[#F97316]">{formatCurrency(product.price || 0)}</p>
-                        </div>
-                        <StatusPill tone={active ? 'green' : 'gray'}>{active ? 'active' : 'inactive'}</StatusPill>
+                  <article key={id || product.name} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                    <div className="flex gap-3">
+                      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-gray-100">
+                        {image ? (
+                          <img src={image} alt={product.name} className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="grid h-full place-items-center text-gray-400">
+                            <FaBox className="text-2xl" />
+                          </div>
+                        )}
                       </div>
-                      <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
-                        <div className="rounded-md bg-gray-50 p-2">
-                          <p className="text-xs text-gray-500">Tracking SKU</p>
-                          <p className="truncate font-semibold text-[#111827]" title={getSku(product)}>{getSku(product)}</p>
-                        </div>
-                        <div className="rounded-md bg-gray-50 p-2">
-                          <p className="text-xs text-gray-500">Stock</p>
-                          <p className="font-semibold text-[#111827]">{stock}</p>
-                        </div>
-                        <div className="rounded-md bg-gray-50 p-2">
-                          <p className="text-xs text-gray-500">Reserved</p>
-                          <p className="font-semibold text-[#111827]">{Number(product.reservedQuantity || 0)}</p>
-                        </div>
-                        <div className="rounded-md bg-gray-50 p-2">
-                          <p className="text-xs text-gray-500">Rating</p>
-                          <p className="font-semibold text-[#111827]">{Number(product.rating || 0).toFixed(1)}</p>
-                        </div>
-                        <div className="rounded-md bg-gray-50 p-2">
-                          <p className="text-xs text-gray-500">MOQ</p>
-                          <p className="font-semibold text-[#111827]">{moq}</p>
-                        </div>
-                        <div className="rounded-md bg-gray-50 p-2">
-                          <p className="text-xs text-gray-500">RFQ</p>
-                          <p className="font-semibold text-[#111827]">{rfqEnabled ? 'Open' : 'Closed'}</p>
-                        </div>
-                        <div className="col-span-2 rounded-md bg-gray-50 p-2">
-                          <p className="text-xs text-gray-500">Warehouse status</p>
-                          <p className="truncate font-semibold text-[#111827]">{getWarehouseStatus(product)}</p>
-                        </div>
-                      </div>
-                      {tiers.length > 0 && (
-                        <div className="mb-4 rounded-md border border-blue-100 bg-blue-50 p-3">
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">Tier pricing</p>
-                          <div className="space-y-1">
-                            {tiers.slice(0, 3).map((tier, index) => (
-                              <div key={`${tier.minQuantity}-${tier.unitPrice}-${index}`} className="flex items-center justify-between gap-3 text-xs text-blue-900">
-                                <span>{tier.label || `${tier.minQuantity}+ ${product.unit || 'units'}`}</span>
-                                <span className="font-semibold">{formatCurrency(tier.unitPrice)}</span>
-                              </div>
-                            ))}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="truncate text-sm font-bold text-[#111827]" title={product.name}>{product.name}</h3>
+                              <StatusPill tone={active ? 'green' : 'gray'}>{active ? 'active' : 'inactive'}</StatusPill>
+                            </div>
+                            <p className="mt-1 text-sm font-bold text-[#F97316]">{formatCurrency(product.price || 0)}</p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Link to={`/seller/edit-product/${id}`} className="grid h-8 w-8 place-items-center rounded-md border border-gray-200 text-[#F97316] hover:bg-[#FFF7ED]" title="Edit product">
+                              <FaEdit size={12} />
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(id)}
+                              className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50"
+                              title="Delete product"
+                            >
+                              <FaTrash size={12} />
+                            </button>
                           </div>
                         </div>
-                      )}
-                      <div className="mb-4">
-                        <InventoryQuantityGraph product={product} />
-                      </div>
-                      <div className="mb-4">
-                        <InventoryMovementHistory product={product} />
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Link to={`/seller/edit-product/${id}`} className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-gray-200 text-sm font-medium text-[#111827] hover:bg-gray-50">
-                          <FaEdit />
-                          Edit
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteProduct(id)}
-                          className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md border border-red-100 text-sm font-medium text-red-600 hover:bg-red-50"
-                        >
-                          <FaTrash />
-                          Delete
-                        </button>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                          <div className="min-w-0 rounded-md bg-gray-50 px-2 py-1.5 sm:col-span-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">SKU</p>
+                            <p className="truncate font-mono font-semibold text-[#111827]" title={getSku(product)}>{getSku(product)}</p>
+                          </div>
+                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Stock</p>
+                            <p className="font-bold text-[#111827]">{stock}</p>
+                          </div>
+                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Reserved</p>
+                            <p className="font-bold text-[#111827]">{Number(product.reservedQuantity || 0)}</p>
+                          </div>
+                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">MOQ</p>
+                            <p className="font-bold text-[#111827]">{moq}</p>
+                          </div>
+                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">RFQ</p>
+                            <p className="font-bold text-[#111827]">{rfqEnabled ? 'Open' : 'Closed'}</p>
+                          </div>
+                          <div className="min-w-0 rounded-md bg-gray-50 px-2 py-1.5 sm:col-span-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Warehouse</p>
+                            <p className="truncate font-bold text-[#111827]" title={getWarehouseStatus(product)}>{getWarehouseStatus(product)}</p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-[1fr_auto] items-end gap-3">
+                          <InventoryQuantityGraph product={product} compact />
+                          <div className="text-right text-[11px] text-gray-500">
+                            <p>{Number(product.rating || 0).toFixed(1)} rating</p>
+                            {tiers.length > 0 && <p>{tiers.length} tier{tiers.length === 1 ? '' : 's'}</p>}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </article>
@@ -469,7 +430,7 @@ const SellerProducts = () => {
           <div className="rounded-md border border-dashed border-gray-300 bg-white p-10 text-center">
             <FaBox className="mx-auto mb-3 text-4xl text-gray-300" />
             <h2 className="text-lg font-semibold text-[#111827]">No products found</h2>
-            <p className="mt-1 text-sm text-gray-500">{search ? `No results for "${search}"` : 'Add your first product to start selling.'}</p>
+            <p className="mt-1 text-sm text-gray-500">Adjust your search or filter to view more catalog items.</p>
           </div>
         )}
       </div>

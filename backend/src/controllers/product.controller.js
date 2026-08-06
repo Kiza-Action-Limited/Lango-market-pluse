@@ -66,6 +66,7 @@ const buildProductLimitMessage = (plan, productLimit) => {
 };
 
 const PRODUCT_LIMIT_MAX = 100;
+const MAX_PRODUCT_IMAGES = 10;
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = parseInt(value, 10);
@@ -135,6 +136,34 @@ const normalizeWholesalePayload = (body = {}, existing = {}) => {
 };
 
 const normalizeProductCategory = (category) => String(category || '').trim().toLowerCase();
+
+const normalizeProductImageUrls = (value, existingCount = 0) => {
+  const parsed = parseJsonField(value, value);
+  const rawUrls = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'string'
+      ? parsed.split(/[|,\n\r]+/)
+      : [];
+  const availableSlots = Math.max(0, MAX_PRODUCT_IMAGES - existingCount);
+  const seen = new Set();
+
+  return rawUrls
+    .map((image) => (typeof image === 'string' ? image : image?.url))
+    .map((url) => String(url || '').trim())
+    .filter((url) => {
+      if (!url || url.startsWith('blob:') || seen.has(url)) return false;
+      try {
+        const parsedUrl = new URL(url);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) return false;
+      } catch {
+        return false;
+      }
+      seen.add(url);
+      return true;
+    })
+    .slice(0, availableSlots)
+    .map((url) => ({ url }));
+};
 
 const uploadProductImages = async (files = [], userId) => {
   if (!Array.isArray(files) || files.length === 0) return [];
@@ -245,6 +274,25 @@ const buildTrackingSku = (product) => {
   return `${location}-${category}-${productCode}-${quantity}${unit}${suffix ? `-${suffix}` : ''}`;
 };
 
+const MOQ_BUSINESS_TYPES = new Set(['wholesaler', 'manufacturer']);
+const MOQ_EXEMPT_TYPES = new Set(['farmer', 'retailer']);
+
+const normalizeBusinessType = (value) => String(value || '').trim().toLowerCase();
+
+const isMqqRestrictedBusinessType = (seller = {}) => {
+  const businessType = normalizeBusinessType(seller.businessType || seller.role);
+  if (MOQ_EXEMPT_TYPES.has(businessType)) return false;
+  return MOQ_BUSINESS_TYPES.has(businessType);
+};
+
+const getEffectiveMinimumOrderQuantity = (product = {}) => {
+  const sellerType = product.seller?.businessType || product.seller?.role;
+  if (!sellerType) return product.wholesale?.minimumOrderQuantity || 1;
+  return isMqqRestrictedBusinessType(product.seller)
+    ? Math.max(10, Number(product.wholesale?.minimumOrderQuantity || 10))
+    : 1;
+};
+
 const appendInventoryGraph = (product) => {
   if (!product) return product;
   const quantityAvailable = Number(product.quantityAvailable || 0);
@@ -256,7 +304,7 @@ const appendInventoryGraph = (product) => {
     ...product,
     sku,
     trackingSku: sku,
-    minimumOrderQuantity: product.wholesale?.minimumOrderQuantity || 1,
+    minimumOrderQuantity: getEffectiveMinimumOrderQuantity(product),
     rfqEnabled: product.wholesale?.rfqEnabled !== false,
     priceTiers: product.wholesale?.priceTiers || [],
     wholesaleTerms: product.wholesale?.terms || '',
@@ -366,6 +414,8 @@ exports.createProduct = async (req, res, next) => {
       category = 'grocery';
     }
 
+    const remoteImages = normalizeProductImageUrls(req.body.imageUrls, uploadedImages.length);
+
     const productData = {
       name: req.body.name,
       description: req.body.description,
@@ -380,7 +430,7 @@ exports.createProduct = async (req, res, next) => {
       locationHub: req.body.locationHub || '',
       warehouseStatus: normalizeWarehouseStatus(req.body.warehouseStatus),
       wholesale: normalizeWholesalePayload(req.body),
-      images: uploadedImages,
+      images: [...uploadedImages, ...remoteImages],
       customAttributes: customAttributes,
       isPublished: req.body.isPublished === 'true' || req.body.isPublished === true,
       seller: req.user.id,
@@ -516,7 +566,7 @@ exports.getProducts = async (req, res, next) => {
         .sort(sort)
         .skip(skip)
         .limit(limitNum)
-        .populate('seller', 'fullName name email businessName businessType businessLogoUrl')
+        .populate('seller', 'fullName name email businessName businessType role businessLogoUrl')
         .lean(),
       Product.countDocuments(filter),
     ]);
@@ -555,7 +605,7 @@ exports.getFeaturedProducts = async (req, res, next) => {
     const products = await Product.find({ isPublished: true })
       .sort({ rating: -1, soldCount: -1, createdAt: -1 })
       .limit(limit)
-      .populate('seller', 'fullName name email businessName businessType businessLogoUrl')
+      .populate('seller', 'fullName name email businessName businessType role businessLogoUrl')
       .lean();
 
     const productsWithInventoryGraph = products.map(appendInventoryGraph);
@@ -589,7 +639,7 @@ exports.getScarcityBoard = async (req, res, next) => {
 
     const products = await Product.find(query)
       .select('name category quantityAvailable minThreshold reservedQuantity unit price locationHub images seller updatedAt createdAt')
-      .populate('seller', 'fullName name businessName businessType location campus')
+      .populate('seller', 'fullName name businessName businessType role location campus')
       .sort({ updatedAt: -1 })
       .limit(limit)
       .lean();
@@ -744,7 +794,7 @@ exports.getProductById = async (req, res, next) => {
     }
 
     const product = await Product.findById(req.params.id)
-      .populate('seller', 'fullName name email businessName businessType businessLogoUrl')
+      .populate('seller', 'fullName name email businessName businessType role businessLogoUrl')
       .lean();
     const isOwner = req.user && String(product?.seller?._id || product?.seller) === String(req.user.id || req.user._id);
     const isAdmin = req.user?.role === 'admin';

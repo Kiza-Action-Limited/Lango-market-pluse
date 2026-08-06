@@ -1,4 +1,5 @@
 import { formatCurrency } from './formatters';
+import { getMinimumOrderQuantity, isMqqRestrictedBusinessType } from './moq';
 
 const toTitle = (value = '') =>
   String(value)
@@ -21,8 +22,12 @@ export const buildCategoryTabs = (categories = []) => {
 const normalize = (value = '') => String(value).trim().toLowerCase();
 const clean = (value = '') => String(value || '').trim();
 const isMoqBusiness = (type = '') => {
-  const t = normalize(type);
-  return t === 'manufacturer' || t === 'wholesaler';
+  return isMqqRestrictedBusinessType(type);
+};
+
+const getOrderTermText = (product = {}) => {
+  const minOrder = getMinimumOrderQuantity(product);
+  return minOrder > 1 ? `Min. order: ${minOrder} pieces` : 'Any quantity';
 };
 
 const getProductId = (product = {}) => clean(product?.id || product?._id);
@@ -193,7 +198,7 @@ export const buildSupplierCards = (products = [], users = [], premiumProfiles = 
         name: product.name,
         image: getProductImage(product),
         priceText: `${formatCurrency(product.price, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
-        minOrder: `Min. order: ${10 + i * 5} pieces`,
+        minOrder: getOrderTermText(product),
       })),
       coverImage:
         getProductImage(sellerProducts[0]) ||

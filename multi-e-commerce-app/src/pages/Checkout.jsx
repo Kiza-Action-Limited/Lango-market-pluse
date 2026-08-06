@@ -176,7 +176,7 @@ const Checkout = () => {
     e.preventDefault();
 
     const invalidItems = cartItems.filter((item) => {
-      const minOrderQty = item.minOrderQuantity || getMinimumOrderQuantity(item);
+      const minOrderQty = getMinimumOrderQuantity(item);
       return Number(item.quantity || 0) < minOrderQty;
     });
 
@@ -602,7 +602,7 @@ const Checkout = () => {
 
               <div className="mb-4 max-h-64 space-y-3 overflow-y-auto">
                 {cartItems.map((item) => {
-                  const minOrderQty = item.minOrderQuantity || getMinimumOrderQuantity(item);
+                  const minOrderQty = getMinimumOrderQuantity(item);
                   const itemId = item.id || item._id;
 
                   return (

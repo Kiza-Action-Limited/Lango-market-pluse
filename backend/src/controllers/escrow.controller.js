@@ -20,7 +20,7 @@ exports.releaseEscrow = async (req, res, next) => {
     if (sendValidationErrors(req, res)) return;
 
     const { orderId } = req.params;
-    const { forceRelease = false } = req.body; // forceRelease bypasses 72h wait (admin only)
+    const { forceRelease = false, overrideReason = '' } = req.body; // forceRelease bypasses proof checks (admin only)
     
     // Check if user is admin for force release
     const isAdmin = req.user.role === 'admin';
@@ -30,10 +30,17 @@ exports.releaseEscrow = async (req, res, next) => {
         message: 'Only admins can force release escrow',
       });
     }
+    if (forceRelease && String(overrideReason || '').trim().length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Override reason is required before force releasing escrow.',
+      });
+    }
 
     const result = await escrowService.releasePayment(orderId, {
       releasedBy: req.user.id,
       forceRelease,
+      overrideReason: String(overrideReason || '').trim(),
     });
 
     res.status(200).json({

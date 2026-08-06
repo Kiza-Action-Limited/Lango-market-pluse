@@ -74,7 +74,7 @@ const Cart = () => {
               
               <div className="divide-y divide-gray-100">
                 {cartItems.map((item) => {
-                  const minOrderQty = item.minOrderQuantity || getMinimumOrderQuantity(item);
+                  const minOrderQty = getMinimumOrderQuantity(item);
                   const stock = Number(item.stock ?? item.quantityAvailable ?? Number.MAX_SAFE_INTEGER);
                   const itemId = item.id || item._id;
 

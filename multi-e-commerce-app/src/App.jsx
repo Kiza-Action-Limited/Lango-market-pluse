@@ -45,6 +45,7 @@ const Reviews = lazy(() => import('./pages/Reviews'));
 const About = lazy(() => import('./pages/About'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const SubscriptionPlans = lazy(() => import('./pages/SubscriptionPlans'));
+const SellerPlansLanding = lazy(() => import('./pages/SellerPlansLanding'));
 const FAQ = lazy(() => import('./pages/FAQ'));
 const ShippingInfo = lazy(() => import('./pages/ShippingInfo'));
 const Returns = lazy(() => import('./pages/Returns'));
@@ -82,6 +83,7 @@ const AdminAnalytics = lazy(() => import('./pages/AdminAnalytics'));
 const AdminProfile = lazy(() => import('./pages/AdminProfile'));
 const AdminLogistics = lazy(() => import('./pages/AdminLogistics'));
 const AdminFinanceAudit = lazy(() => import('./pages/AdminFinanceAudit'));
+const AdminHomepageAds = lazy(() => import('./pages/AdminHomepageAds'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 
 const HomeEntry = () => {
@@ -144,6 +146,8 @@ function App() {
                       <Route path="forgot-password" element={<ForgotPassword />} />
                       <Route path="products" element={<Products />} />
                       <Route path="business" element={<Business />} />
+                      <Route path="seller-plans" element={<SellerPlansLanding />} />
+                      <Route path="seller-subscription-plans" element={<Navigate to="/seller-plans" replace />} />
                       <Route path="manufacturers" element={<Navigate to="/business" replace />} />
                       <Route path="businesses" element={<BusinessDirectory />} />
                       <Route path="businesses/:businessId" element={<BusinessProfile />} />
@@ -233,6 +237,7 @@ function App() {
                           <Route path="admin/agent-referrals" element={<AdminDashboard section="agent-referrals" />} />
                           <Route path="admin/users" element={<AdminUsers />} />
                           <Route path="admin/categories" element={<AdminCategories />} />
+                          <Route path="admin/homepage-ads" element={<AdminHomepageAds />} />
                           <Route path="admin/orders" element={<AdminOrders />} />
                           <Route path="admin/products" element={<AdminProducts />} />
                           <Route path="admin/subscriptions" element={<AdminSubscriptions />} />

@@ -15,6 +15,8 @@ const Review = require('../models/Review.model');
 const RFQ = require('../models/RFQ.model');
 const billingService = require('../services/subscription/billing.service');
 const escrowService = require('../services/order/escrow.service');
+const auditService = require('../services/audit.service');
+const trustPolicy = require('../services/trustPolicy.service');
 const notificationService = require('../services/notification/notification.service');
 const emailService = require('../services/notification/email.service');
 const smsService = require('../services/notification/sms.service');
@@ -22,6 +24,7 @@ const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { PLANS } = require('../config/subscriptionPlans');
 const { dateStamp, displayName, docId, sendCsv } = require('../utils/csvExport');
 const { validationResult } = require('express-validator');
+const marketingController = require('./marketing.controller');
 
 const getDocId = (value) => value?._id || value?.id || value;
 
@@ -260,6 +263,32 @@ const buildUserDocumentList = (user = {}) => {
   return documents.sort((left, right) => new Date(right.uploadedAt || 0) - new Date(left.uploadedAt || 0));
 };
 
+exports.getHomepageAds = marketingController.getAdminHomepageAds;
+
+exports.updateHomepageAds = marketingController.updateAdminHomepageAds;
+
+exports.uploadHomepageAdImage = async (req, res, next) => {
+  try {
+    if (!req.file?.buffer) {
+      return res.status(400).json({ success: false, message: 'Image file is required' });
+    }
+
+    const placement = String(req.body.placement || 'homepage').replace(/[^a-z0-9-]/gi, '').toLowerCase() || 'homepage';
+    const result = await uploadToCloudinary(req.file.buffer, `admin/marketing/${placement}`, req.file.mimetype);
+
+    res.status(201).json({
+      success: true,
+      message: 'Ad image uploaded successfully',
+      data: {
+        imageUrl: result.secure_url,
+        publicId: result.public_id,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const toFiniteNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
@@ -351,6 +380,7 @@ const buildAdminLogisticsSnapshot = (trip, escrow = null) => {
   const qrScans = Array.isArray(raw.qrScans) ? raw.qrScans : [];
   const pickupScan = qrScans.find((scan) => scan.step === 'pickup' && scan.verified !== false);
   const deliveryScan = qrScans.find((scan) => scan.step === 'delivery' && scan.verified !== false);
+  const trust = trustPolicy.buildTrustChecks({ order: raw.order, logistics: raw, escrow });
 
   return {
     ...raw,
@@ -375,6 +405,7 @@ const buildAdminLogisticsSnapshot = (trip, escrow = null) => {
       nextStep: !pickupScan ? 'pickup' : !deliveryScan ? 'delivery' : 'complete',
       scans: qrScans,
     },
+    trust,
   };
 };
 
@@ -640,6 +671,60 @@ exports.getStats = async (req, res, next) => {
       customer: order.buyer,
       total: order.totalAmount,
     }));
+    const trustCandidateStatuses = [
+      ...activeLogisticsStatuses,
+      'delivered',
+    ];
+    const trustCandidates = await Logistics.find({ status: { $in: trustCandidateStatuses } })
+      .sort({ updatedAt: -1 })
+      .limit(120)
+      .populate('order', 'orderNumber status totalAmount buyer seller logisticsFee')
+      .populate('seller', 'fullName name businessName phone')
+      .populate('buyer', 'fullName name phone')
+      .populate('driver', 'fullName name phone role verificationStatus logisticsProfile.verificationStatus logisticsProfile.currentLocation')
+      .lean({ virtuals: true });
+    const trustEscrows = await Escrow.find({
+      $or: [
+        { logistics: { $in: trustCandidates.map((trip) => trip._id) } },
+        { order: { $in: trustCandidates.map((trip) => getDocId(trip.order)).filter(Boolean) } },
+      ],
+    }).lean();
+    const trustEscrowByLogistics = new Map(trustEscrows.filter((escrow) => escrow.logistics).map((escrow) => [String(escrow.logistics), escrow]));
+    const trustEscrowByOrder = new Map(trustEscrows.filter((escrow) => escrow.order).map((escrow) => [String(escrow.order), escrow]));
+    const trustRisks = trustCandidates
+      .map((trip) => {
+        const escrow = trustEscrowByLogistics.get(String(trip._id)) || trustEscrowByOrder.get(String(getDocId(trip.order) || ''));
+        const trust = trustPolicy.buildTrustChecks({ order: trip.order, logistics: trip, escrow });
+        const failedChecks = trust.checks.filter((check) => !check.passed);
+        if (!failedChecks.length) return null;
+        return {
+          logisticsId: trip._id,
+          orderId: getDocId(trip.order),
+          orderNumber: trip.orderNumber || trip.order?.orderNumber,
+          status: trip.status,
+          seller: trip.seller?.businessName || trip.seller?.fullName || trip.seller?.name || 'Seller',
+          buyer: trip.buyer?.fullName || trip.buyer?.name || 'Buyer',
+          driver: trip.driver?.fullName || trip.driver?.name || trip.driverName || 'Driver pending',
+          lastGpsUpdate: trust.lastGpsUpdate,
+          blockingRiskCount: trust.blockingRiskCount,
+          riskCount: trust.riskCount,
+          failedChecks: failedChecks.map((check) => ({
+            key: check.key,
+            label: check.label,
+            blocking: check.blocking,
+          })),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.blockingRiskCount - a.blockingRiskCount) || (b.riskCount - a.riskCount))
+      .slice(0, 12);
+    const trustRiskTotals = trustRisks.reduce((acc, item) => {
+      item.failedChecks.forEach((check) => {
+        acc.byCheck[check.key] = (acc.byCheck[check.key] || 0) + 1;
+      });
+      if (item.blockingRiskCount > 0) acc.blocking += 1;
+      return acc;
+    }, { total: trustRisks.length, blocking: 0, byCheck: {} });
 
     const workQueues = [
       {
@@ -681,6 +766,14 @@ exports.getStats = async (req, res, next) => {
         detail: `${formatCurrencyLocal(releaseEscrow.amount || 0)} ready for review`,
         route: '/admin/finance-audit',
         tone: 'green',
+      },
+      {
+        key: 'trust',
+        label: 'Trust and proof risks',
+        value: trustRiskTotals.total,
+        detail: `${trustRiskTotals.blocking} blocking payout release, ${trustRiskTotals.byCheck.live_gps_after_pickup || 0} missing live GPS`,
+        route: '/admin/logistics',
+        tone: trustRiskTotals.blocking ? 'red' : trustRiskTotals.total ? 'amber' : 'green',
       },
     ];
     const platformUpdates = [
@@ -801,6 +894,17 @@ exports.getStats = async (req, res, next) => {
             activeProductRate,
             kycVerificationRate,
             gpsCoverageRate,
+          },
+          trust: {
+            risks: trustRisks,
+            totals: trustRiskTotals,
+            rules: [
+              'Verified logistics driver assigned',
+              'Pickup QR confirmed with GPS',
+              'Live GPS recorded after pickup',
+              'Delivery QR confirmed with GPS',
+              'Escrow release blocked until proof is complete unless admin override is justified',
+            ],
           },
           modules: {
             users: { route: '/admin/users', attention: kycPendingUsers + blockedUsers },
@@ -2322,7 +2426,7 @@ exports.getLogistics = async (req, res, next) => {
       })
       .populate('seller', 'fullName name businessName email phone')
       .populate('buyer', 'fullName name email phone userType')
-      .populate('driver', 'fullName name phone logisticsProfile.currentLocation')
+      .populate('driver', 'fullName name phone role verificationStatus logisticsProfile.verificationStatus logisticsProfile.currentLocation')
       .populate('fleetOwner', 'fullName name businessName phone')
       .sort('-createdAt')
       .skip((pageNumber - 1) * pageSize)
@@ -2369,7 +2473,7 @@ exports.getLogisticsLiveTracking = async (req, res, next) => {
       })
       .populate('seller', 'fullName name businessName email phone')
       .populate('buyer', 'fullName name email phone userType')
-      .populate('driver', 'fullName name phone logisticsProfile.currentLocation')
+      .populate('driver', 'fullName name phone role verificationStatus logisticsProfile.verificationStatus logisticsProfile.currentLocation')
       .populate('fleetOwner', 'fullName name businessName phone')
       .lean({ virtuals: true });
 
@@ -2393,6 +2497,15 @@ exports.getLogisticsLiveTracking = async (req, res, next) => {
 
 exports.releaseLogisticsEscrow = async (req, res, next) => {
   try {
+    const forceRelease = req.body.forceRelease === true;
+    const overrideReason = String(req.body.overrideReason || req.body.reason || '').trim();
+    if (forceRelease && overrideReason.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'Override reason is required before force releasing escrow.',
+      });
+    }
+
     const logistics = await Logistics.findById(req.params.logisticsId).select('order orderNumber status').lean();
     if (!logistics) {
       return res.status(404).json({ success: false, message: 'Logistics record not found' });
@@ -2403,8 +2516,22 @@ exports.releaseLogisticsEscrow = async (req, res, next) => {
 
     const result = await escrowService.releasePayment(logistics.order, {
       releasedBy: req.user._id || req.user.id,
-      forceRelease: req.body.forceRelease !== false,
+      forceRelease,
       releaseMethod: 'admin_override',
+      overrideReason,
+    });
+
+    await auditService.record({
+      entityType: 'Logistics',
+      entityId: req.params.logisticsId,
+      action: forceRelease ? 'ADMIN_FORCE_RELEASED_ESCROW' : 'ADMIN_RELEASED_ESCROW',
+      actor: req.user._id || req.user.id,
+      newValue: {
+        order: logistics.order,
+        forceRelease,
+        overrideReason,
+      },
+      req,
     });
 
     const refreshed = await Logistics.findById(req.params.logisticsId)
@@ -2418,7 +2545,7 @@ exports.releaseLogisticsEscrow = async (req, res, next) => {
       })
       .populate('seller', 'fullName name businessName email phone')
       .populate('buyer', 'fullName name email phone userType')
-      .populate('driver', 'fullName name phone logisticsProfile.currentLocation')
+      .populate('driver', 'fullName name phone role verificationStatus logisticsProfile.verificationStatus logisticsProfile.currentLocation')
       .populate('fleetOwner', 'fullName name businessName phone')
       .lean({ virtuals: true });
     const escrow = await Escrow.findOne({ order: logistics.order }).lean();
@@ -2447,6 +2574,22 @@ exports.updateLogisticsTracking = async (req, res, next) => {
     
     if (!logistics) {
       return res.status(404).json({ success: false, message: 'Logistics record not found' });
+    }
+
+    if (status === 'in_transit' && !trustPolicy.hasVerifiedQrScan(logistics, 'pickup')) {
+      return res.status(409).json({
+        success: false,
+        message: 'Pickup QR must be confirmed before marking this shipment in transit.',
+        code: 'PICKUP_QR_REQUIRED',
+      });
+    }
+
+    if (status === 'delivered' && !trustPolicy.hasVerifiedQrScan(logistics, 'delivery')) {
+      return res.status(409).json({
+        success: false,
+        message: 'Delivery QR must be confirmed before marking this shipment delivered.',
+        code: 'DELIVERY_QR_REQUIRED',
+      });
     }
     
     logistics.status = status;

@@ -4,7 +4,7 @@ const { body, param } = require('express-validator');
 const adminController = require('../../controllers/admin.controller');
 const logisticsController = require('../../controllers/logistics.controller');
 const { protect, admin } = require('../../middleware/auth');
-const { uploadDocuments, handleUploadError } = require('../../middleware/upload');
+const { uploadDocuments, upload, handleUploadError } = require('../../middleware/upload');
 
 // All routes require authentication and admin role
 router.use(protect);
@@ -29,6 +29,19 @@ router.get('/export/:type', param('type').isIn([
   'reviews',
   'agent-referrals',
 ]), adminController.exportRecordsCsv);
+
+// Marketing Content
+router.get('/marketing/homepage-ads', adminController.getHomepageAds);
+router.put('/marketing/homepage-ads', [
+  body('slides').optional().isArray({ max: 3 }),
+  body('sideAds').optional().isArray({ max: 4 }),
+], adminController.updateHomepageAds);
+router.post(
+  '/marketing/homepage-ads/images',
+  upload.single('image'),
+  handleUploadError,
+  adminController.uploadHomepageAdImage
+);
 
 // User Management
 router.get('/users', adminController.getAllUsers);
@@ -161,6 +174,7 @@ router.post('/logistics/:id/qr-scan', [
 router.post('/logistics/:logisticsId/escrow/release', [
   param('logisticsId').isMongoId(),
   body('forceRelease').optional().isBoolean(),
+  body('overrideReason').optional().isString().trim().isLength({ min: 8 }),
 ], adminController.releaseLogisticsEscrow);
 router.put('/logistics/:logisticsId/tracking', param('logisticsId').isMongoId(), [
   body('status').isIn(['pending', 'driver_assigned', 'en_route_to_pickup', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'auto_released', 'failed', 'returned', 'disputed']),

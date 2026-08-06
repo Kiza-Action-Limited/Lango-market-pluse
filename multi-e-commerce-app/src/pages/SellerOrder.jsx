@@ -426,6 +426,35 @@ const ProofOfDeliveryPanel = ({ order, logistics }) => {
   );
 };
 
+const TrustProofPanel = ({ logistics }) => {
+  const checks = Array.isArray(logistics?.trust?.checks) ? logistics.trust.checks : [];
+  if (!checks.length) return null;
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 font-semibold text-[#111827]">
+          <FaShieldAlt className="text-[#16A34A]" />
+          Trusted handoff proof
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${logistics.trust.releaseReady ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+          {logistics.trust.releaseReady ? 'RELEASE READY' : 'PROOF REQUIRED'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {checks.map((check) => (
+          <div key={check.key || check.label} className={`rounded-md border p-3 ${check.passed ? 'border-green-100 bg-green-50' : check.blocking ? 'border-red-100 bg-red-50' : 'border-amber-100 bg-amber-50'}`}>
+            <div className="flex items-center gap-2">
+              {check.passed ? <FaCheckCircle className="text-green-700" /> : <FaExclamationTriangle className={check.blocking ? 'text-red-700' : 'text-amber-700'} />}
+              <p className="text-sm font-semibold text-[#111827]">{check.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const DriverAssignmentPanel = ({ logistics, providers, assigning, onAssignDriver }) => {
   const [driverId, setDriverId] = useState('');
   const [driverName, setDriverName] = useState('');
@@ -758,6 +787,7 @@ const LogisticsPanel = ({
         <OrderTimelinePanel order={order} logistics={logistics} escrow={escrow} />
         <EscrowPanel order={order} escrow={escrow} logistics={logistics} />
         <PayoutPanel order={order} escrow={escrow} logistics={logistics} />
+        <TrustProofPanel logistics={logistics} />
         <ProofOfDeliveryPanel order={order} logistics={logistics} />
       </div>
     </div>

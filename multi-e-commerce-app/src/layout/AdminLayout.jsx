@@ -22,6 +22,7 @@ import {
   FaAngleDoubleRight,
   FaTimes,
   FaShieldAlt,
+  FaImages,
 } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/NotificationBell';
@@ -50,6 +51,7 @@ const AdminLayout = () => {
         { path: '/admin/users', label: 'Users', icon: FaUsers, hint: 'KYC and documents' },
         { path: '/admin/documents', label: 'Documents', icon: FaClipboardList, hint: 'All user files' },
         { path: '/admin/products', label: 'Products', icon: FaBox, hint: 'Active and inactive' },
+        { path: '/admin/homepage-ads', label: 'Homepage Ads', icon: FaImages, hint: 'Slider and ad cards' },
         { path: '/admin/orders', label: 'Orders', icon: FaShoppingCart, hint: 'Order operations' },
         { path: '/admin/categories', label: 'Categories', icon: FaTags, hint: 'Catalog structure' },
         { path: '/admin/subscriptions', label: 'Subscriptions', icon: FaCrown, hint: 'Seller plans' },

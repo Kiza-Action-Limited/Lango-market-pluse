@@ -1,10 +1,14 @@
 import { productService } from './productService';
+import { marketingContentService } from './marketingContentService';
 import { prefetchData } from '../hooks/useFetchData';
 
 export const HOME_DATA_KEY = 'home:critical';
 
 export const fetchHomePayload = async () => {
-  const productsRes = await productService.getAll({ page: 1, limit: 100, sortBy: 'newest' });
+  const [productsRes, homepageAds] = await Promise.all([
+    productService.getAll({ page: 1, limit: 100, sortBy: 'newest' }),
+    marketingContentService.getHomepageAds().catch(() => null),
+  ]);
   const sellerProducts = productsRes?.products || productsRes?.data || [];
   const featuredProducts = sellerProducts.slice(0, 8);
 
@@ -26,6 +30,7 @@ export const fetchHomePayload = async () => {
   });
 
   return {
+    homepageAds,
     featuredProducts,
     categories,
     businessPartners: Array.from(bySeller.values()),

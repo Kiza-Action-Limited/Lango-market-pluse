@@ -41,13 +41,13 @@ const ProductRelationSection = ({ title, description, products, loading }) => {
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,220px))] justify-center gap-4">
           {Array.from({ length: 4 }).map((_, index) => (
             <div key={index} className="h-72 rounded-md border border-gray-200 bg-gray-100 animate-pulse" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,220px))] justify-center gap-4">
           {products.map((item) => (
             <ProductCard key={getProductId(item)} product={item} />
           ))}

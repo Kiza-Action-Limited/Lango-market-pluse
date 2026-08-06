@@ -234,12 +234,38 @@ const AdminLogistics = () => {
     if (!selectedTrip?._id) return;
     setActionLoading(true);
     try {
-      const result = await logisticsService.adminReleaseLogisticsEscrow(selectedTrip._id, { forceRelease: true });
+      const result = await logisticsService.adminReleaseLogisticsEscrow(selectedTrip._id, { forceRelease: false });
       const updatedTrip = result?.logistics || result?.data?.logistics;
       if (updatedTrip) setSelectedTrip(updatedTrip);
       toast.success(result?.message || 'Escrow released');
       await fetchData();
     } catch (error) {
+      const status = error?.response?.status;
+      const code = error?.response?.data?.code;
+      if (status === 409 || code === 'TRUST_PROOF_REQUIRED') {
+        const reason = window.prompt(
+          'Trusted proof is incomplete. Enter an admin override reason to force release, or cancel to keep escrow locked.',
+          'Admin reviewed dispute/proof manually'
+        );
+        if (reason && reason.trim().length >= 8) {
+          try {
+            const result = await logisticsService.adminReleaseLogisticsEscrow(selectedTrip._id, {
+              forceRelease: true,
+              overrideReason: reason.trim(),
+            });
+            const updatedTrip = result?.logistics || result?.data?.logistics;
+            if (updatedTrip) setSelectedTrip(updatedTrip);
+            toast.success(result?.message || 'Escrow force released with audit reason');
+            await fetchData();
+            return;
+          } catch (overrideError) {
+            toast.error(overrideError?.response?.data?.message || 'Force release failed');
+            return;
+          }
+        }
+        toast.error('Escrow remains locked until proof is complete or override is justified');
+        return;
+      }
       toast.error(error?.response?.data?.message || 'Escrow release failed');
     } finally {
       setActionLoading(false);

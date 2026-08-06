@@ -385,7 +385,7 @@ const Products = ({ seller = false }) => {
         {/* Products Grid */}
         <div className="min-w-0 flex-1">
           {loading ? (
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:gap-6">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,220px))] justify-center gap-4">
               {Array.from({ length: 9 }).map((_, idx) => (
                 <div key={idx} className="rounded-xl border border-gray-100 bg-white p-3 sm:p-4">
                   <div className="aspect-[4/3] rounded-md bg-gray-200 skeleton-shimmer sm:h-44 sm:aspect-auto" />
@@ -419,7 +419,7 @@ const Products = ({ seller = false }) => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:gap-6">
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,220px))] justify-center gap-4">
                       {group.products.map((product) => (
                         <ProductCard key={product.id || product._id} product={product} />
                       ))}

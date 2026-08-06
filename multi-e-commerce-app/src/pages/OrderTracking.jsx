@@ -666,6 +666,41 @@ const OrderTracking = () => {
     </section>
   );
 
+  const TrustProofPanel = () => {
+    const trust = tracking?.trust;
+    const checks = Array.isArray(trust?.checks) ? trust.checks : [];
+    if (!checks.length) return null;
+
+    return (
+      <section className="mb-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-[#16A34A]">
+              <FaShieldAlt />
+              <h2 className="text-xl font-bold text-[#111827]">Trusted Handoff Proof</h2>
+            </div>
+            <p className="mt-2 text-sm text-[#6B7280]">
+              Buyer and seller see the same QR, GPS, and escrow safety checks.
+            </p>
+          </div>
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${trust.releaseReady ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            {trust.releaseReady ? 'RELEASE READY' : 'PROOF REQUIRED'}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {checks.map((check) => (
+            <div key={check.key || check.label} className={`rounded-lg border p-3 ${check.passed ? 'border-green-100 bg-green-50' : check.blocking ? 'border-red-100 bg-red-50' : 'border-amber-100 bg-amber-50'}`}>
+              <div className="flex items-center gap-2">
+                {check.passed ? <FaCheckCircle className="text-green-700" /> : <FaExclamationTriangle className={check.blocking ? 'text-red-700' : 'text-amber-700'} />}
+                <p className="text-sm font-semibold text-[#111827]">{check.label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  };
+
   const ReceiverQrConfirmationPanel = () => {
     if (!logistics) return null;
 
@@ -947,6 +982,7 @@ const OrderTracking = () => {
           <>
             <FulfillmentOverview />
             <LiveGpsMapPanel />
+            <TrustProofPanel />
             <ReceiverQrConfirmationPanel />
             <LogisticsEscrowFlow order={order} tracking={tracking} trip={logistics} className="mb-6" />
             <EscrowStatusCard />

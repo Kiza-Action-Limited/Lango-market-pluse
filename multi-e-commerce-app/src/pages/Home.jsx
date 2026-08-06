@@ -16,7 +16,7 @@ const Home = () => {
 
   return (
     <div className="bg-[#F9FAFB] animate-fade-in">
-      <UnimartStyleShowcase />
+      <UnimartStyleShowcase homepageAds={data?.homepageAds} />
 
       <section className="py-16 bg-[#F9FAFB]">
         <div className="container mx-auto px-4">
@@ -24,7 +24,7 @@ const Home = () => {
           <p className="text-center text-[#6B7280] mb-12">Curated selections from trusted sellers across Kenya</p>
 
           {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,220px))] justify-center gap-4">
               {Array.from({ length: 8 }).map((_, idx) => (
                 <div key={idx} className="rounded-xl bg-white border border-gray-100 p-4">
                   <div className="h-44 rounded-md bg-gray-200 skeleton-shimmer" />
@@ -35,7 +35,7 @@ const Home = () => {
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 content-fade-in">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,220px))] justify-center gap-4 content-fade-in">
               {featuredProducts.map((product) => (
                 <ProductCard key={product.id || product._id} product={product} />
               ))}

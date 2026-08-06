@@ -15,7 +15,41 @@ import slideImage3 from '../assets/images/240_F_1693527828_L7tgoYmYIn1hayBctZQBp
 import slideImage4 from '../assets/images/240_F_1727631229_Jvja9SE3o82p1C7Io8pDek06qHddbyp8.jpg';
 import slideImage5 from '../assets/images/240_F_1770944832_gErqIw7TSdo3GuKK7fnZ8VyExTFEynyJ.jpg';
 
-const UnimartStyleShowcase = () => {
+const isExternalUrl = (url = '') => /^https?:\/\//i.test(String(url || ''));
+
+const ShowcaseLink = ({ to = '/products', className = '', children, ...props }) => (
+  isExternalUrl(to) ? (
+    <a href={to} target="_blank" rel="noopener noreferrer" className={className} {...props}>
+      {children}
+    </a>
+  ) : (
+    <Link to={to || '/products'} className={className} {...props}>
+      {children}
+    </Link>
+  )
+);
+
+const mergeMarketingItems = (adminItems = [], fallbackItems = [], maxItems = 3) => {
+  const mergedItems = Array.from({ length: maxItems }, (_, index) => {
+    const adminItem = Array.isArray(adminItems) ? adminItems[index] : null;
+    const fallbackItem = fallbackItems[index % fallbackItems.length];
+    return {
+      ...fallbackItem,
+      ...adminItem,
+      image: adminItem?.imageUrl || adminItem?.image || fallbackItem.image,
+      title: adminItem?.title || fallbackItem.title || fallbackItem.alt,
+      alt: adminItem?.title || fallbackItem.alt || fallbackItem.title,
+      linkUrl: adminItem?.linkUrl || fallbackItem.linkUrl || '/products',
+      isActive: adminItem?.isActive !== false,
+    };
+  }).filter((item) => item.isActive && item.image);
+
+  return mergedItems.length
+    ? mergedItems
+    : fallbackItems.slice(0, maxItems);
+};
+
+const UnimartStyleShowcase = ({ homepageAds = null }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [sortBy, setSortBy] = useState('newest');
   const navigate = useNavigate();
@@ -25,22 +59,31 @@ const UnimartStyleShowcase = () => {
 
   const heroSlides = useMemo(
     () => [
-      { image: slideImage1, title: 'Smart accessories sale' },
-      { image: slideImage2, title: 'Fashion spotlight' },
-      { image: slideImage3, title: 'Home essentials' },
-      { image: slideImage4, title: 'Beauty showcase' },
+      { image: slideImage1, title: 'Smart accessories sale', linkUrl: '/products' },
+      { image: slideImage2, title: 'Fashion spotlight', linkUrl: '/products?category=fashion' },
+      { image: slideImage3, title: 'Home essentials', linkUrl: '/products?category=home-garden' },
     ],
     []
   );
 
   const sideAds = useMemo(
     () => [
-      { image: slideImage5, alt: 'Ad card 1' },
-      { image: slideImage2, alt: 'Ad card 2' },
-      { image: slideImage4, alt: 'Ad card 3' },
-      { image: slideImage1, alt: 'Ad card 4' },
+      { image: slideImage5, alt: 'Ad card 1', title: 'Ad card 1', linkUrl: '/products' },
+      { image: slideImage2, alt: 'Ad card 2', title: 'Ad card 2', linkUrl: '/products' },
+      { image: slideImage4, alt: 'Ad card 3', title: 'Ad card 3', linkUrl: '/products' },
+      { image: slideImage1, alt: 'Ad card 4', title: 'Ad card 4', linkUrl: '/products' },
     ],
     []
+  );
+
+  const displaySlides = useMemo(
+    () => mergeMarketingItems(homepageAds?.slides, heroSlides, 3),
+    [homepageAds?.slides, heroSlides]
+  );
+
+  const displaySideAds = useMemo(
+    () => mergeMarketingItems(homepageAds?.sideAds, sideAds, 4),
+    [homepageAds?.sideAds, sideAds]
   );
 
   const tabs = [
@@ -52,10 +95,14 @@ const UnimartStyleShowcase = () => {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setActiveIndex((prev) => (prev + 1) % heroSlides.length);
+      setActiveIndex((prev) => (prev + 1) % displaySlides.length);
     }, 3500);
     return () => clearInterval(timer);
-  }, [heroSlides.length]);
+  }, [displaySlides.length]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [displaySlides.length]);
 
   const handleSortChange = (e) => {
     const value = e.target.value;
@@ -68,41 +115,44 @@ const UnimartStyleShowcase = () => {
       <div className="mx-auto max-w-[1366px] px-3 py-1">
         <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr_240px] gap-3">
           <div className="space-y-3">
-            {sideAds.slice(0, 2).map((ad, idx) => (
-              <div key={idx} className="hover-card relative rounded-2xl overflow-hidden bg-white h-[190px]">
+            {displaySideAds.slice(0, 2).map((ad, idx) => (
+              <ShowcaseLink key={idx} to={ad.linkUrl} className="hover-card relative block rounded-2xl overflow-hidden bg-white h-[190px]">
                 <img src={ad.image} alt={ad.alt} className="w-full h-full object-cover" />
                 <span className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 rounded">AD</span>
-                <button className="absolute right-2 bottom-2 h-7 w-7 rounded-full bg-[#F2871A] text-white flex items-center justify-center">
+                <span className="absolute left-2 bottom-2 max-w-[calc(100%-3rem)] truncate rounded bg-white/90 px-2 py-1 text-xs font-semibold text-[#111827]">
+                  {ad.title}
+                </span>
+                <span className="absolute right-2 bottom-2 h-7 w-7 rounded-full bg-[#F2871A] text-white flex items-center justify-center">
                   <FaChevronRight size={12} />
-                </button>
-              </div>
+                </span>
+              </ShowcaseLink>
             ))}
           </div>
 
           <div className="hover-card relative rounded-2xl overflow-hidden bg-white h-[390px]">
-            <img src={heroSlides[activeIndex].image} alt={heroSlides[activeIndex].title} className="w-full h-full object-cover" />
+            <img src={displaySlides[activeIndex]?.image} alt={displaySlides[activeIndex]?.title} className="w-full h-full object-cover" />
             <button
-              onClick={() => setActiveIndex((prev) => (prev - 1 + heroSlides.length) % heroSlides.length)}
+              onClick={() => setActiveIndex((prev) => (prev - 1 + displaySlides.length) % displaySlides.length)}
               className="absolute left-4 top-1/2 -translate-y-1/2 text-white text-3xl"
             >
               <FaChevronLeft />
             </button>
             <button
-              onClick={() => setActiveIndex((prev) => (prev + 1) % heroSlides.length)}
+              onClick={() => setActiveIndex((prev) => (prev + 1) % displaySlides.length)}
               className="absolute right-4 top-1/2 -translate-y-1/2 text-white text-3xl"
             >
               <FaChevronRight />
             </button>
-            <Link
-              to="/products"
+            <ShowcaseLink
+              to={displaySlides[activeIndex]?.linkUrl || '/products'}
               className="absolute left-7 bottom-8 bg-[#F2871A] text-white px-5 py-2 rounded-full text-lg font-semibold inline-flex items-center gap-2"
             >
               Explore Now
               <FaChevronRight size={12} />
-            </Link>
+            </ShowcaseLink>
 
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2">
-              {heroSlides.map((_, idx) => (
+              {displaySlides.map((_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setActiveIndex(idx)}
@@ -114,14 +164,17 @@ const UnimartStyleShowcase = () => {
           </div>
 
           <div className="space-y-3">
-            {sideAds.slice(2, 4).map((ad, idx) => (
-              <div key={idx} className="hover-card relative rounded-2xl overflow-hidden bg-white h-[190px]">
+            {displaySideAds.slice(2, 4).map((ad, idx) => (
+              <ShowcaseLink key={idx} to={ad.linkUrl} className="hover-card relative block rounded-2xl overflow-hidden bg-white h-[190px]">
                 <img src={ad.image} alt={ad.alt} className="w-full h-full object-cover" />
                 <span className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 rounded">AD</span>
-                <button className="absolute right-2 bottom-2 h-7 w-7 rounded-full bg-[#F2871A] text-white flex items-center justify-center">
+                <span className="absolute left-2 bottom-2 max-w-[calc(100%-3rem)] truncate rounded bg-white/90 px-2 py-1 text-xs font-semibold text-[#111827]">
+                  {ad.title}
+                </span>
+                <span className="absolute right-2 bottom-2 h-7 w-7 rounded-full bg-[#F2871A] text-white flex items-center justify-center">
                   <FaChevronRight size={12} />
-                </button>
-              </div>
+                </span>
+              </ShowcaseLink>
             ))}
           </div>
         </div>

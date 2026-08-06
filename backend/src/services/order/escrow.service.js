@@ -9,6 +9,7 @@ const walletService = require('../payment/wallet.service');
 const productService = require('../inventory/product.service');
 const { escrowQueue } = require('../../config/redis');
 const auditService = require('../audit.service');
+const trustPolicy = require('../trustPolicy.service');
 const axios = require('axios');
 
 const AUTO_RELEASE_MS = 72 * 60 * 60 * 1000;
@@ -254,7 +255,7 @@ class EscrowService {
   }
 
   async releasePayment(orderId, options = {}) {
-    const { releasedBy, forceRelease = false, releaseMethod = 'manual_confirm', refundAmount = 0 } = options;
+    const { releasedBy, forceRelease = false, releaseMethod = 'manual_confirm', refundAmount = 0, overrideReason = '' } = options;
     const order = await Order.findById(orderId);
     if (!order) throw httpError('Order not found', 404);
     const escrow = await this.getOrCreateDisputeEscrow(order);
@@ -276,9 +277,25 @@ class EscrowService {
       });
     }
 
+    const logistics = await Logistics.findOne({ order: orderId }).populate('driver fleetOwner');
+    const trust = trustPolicy.assertTrustedRelease({ order, logistics, escrow, forceRelease });
+
+    if (forceRelease) {
+      await auditService.record({
+        entityType: 'Escrow',
+        entityId: escrow._id,
+        action: 'TRUST_PROOF_OVERRIDE',
+        actor: releasedBy,
+        newValue: {
+          releaseMethod,
+          overrideReason,
+          trust,
+        },
+      });
+    }
+
     await this.cancelAutoRelease(orderId);
 
-    const logistics = await Logistics.findOne({ order: orderId }).populate('driver fleetOwner');
     const seller = await User.findById(order.seller);
     const buyer = await User.findById(order.buyer);
     const driver = logistics?.driver?._id ? logistics.driver : null;
@@ -398,7 +415,7 @@ class EscrowService {
       entityId: escrow._id,
       action: 'ESCROW_RELEASED',
       actor: releasedBy,
-      newValue: { split, payoutRouting, releaseMethod, payouts },
+      newValue: { split, payoutRouting, releaseMethod, payouts, trust, overrideReason: forceRelease ? overrideReason : undefined },
     });
 
     return { released: true, escrow, split, payouts };

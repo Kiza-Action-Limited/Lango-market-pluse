@@ -58,16 +58,62 @@ a {
   text-decoration: none;
 }
 
+:where(button, a, input, select, textarea) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(button, a[href], [role='button']) {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    transform 180ms ease,
+    filter 180ms ease;
+}
+
+:where(button, [role='button']) {
+  transform-origin: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(button:not(:disabled), [role='button']:not([aria-disabled='true'])):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgb(15 23 42 / 0.1);
+  }
+
+  :where(button:not(:disabled), [role='button']:not([aria-disabled='true'])):active {
+    transform: translateY(0) scale(0.98);
+    box-shadow: 0 4px 10px rgb(15 23 42 / 0.08);
+  }
+
+  :where(a[href].inline-flex, a[href].inline-block, a[href].btn-primary, a[href].btn-secondary):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px rgb(15 23 42 / 0.1);
+  }
+
+  :where(.rounded-md.border.bg-white, .rounded-lg.border.bg-white, .rounded-xl.border.bg-white):hover {
+    border-color: rgb(249 115 22 / 0.35);
+    box-shadow: 0 12px 26px rgb(15 23 42 / 0.08);
+  }
+}
+
 .btn-primary {
   background: var(--color-primary);
   border-radius: 0.5rem;
   color: #ffffff;
   padding: 0.5rem 1.5rem;
-  transition: background-color 0.2s ease-in-out;
+  box-shadow: 0 8px 18px rgb(249 115 22 / 0.18);
+  transition:
+    background-color 0.2s ease-in-out,
+    box-shadow 0.2s ease-in-out,
+    transform 0.2s ease-in-out;
 }
 
 .btn-primary:hover {
   background: var(--color-primary-dark);
+  box-shadow: 0 12px 24px rgb(249 115 22 / 0.24);
 }
 
 .btn-secondary {
@@ -76,12 +122,17 @@ a {
   border-radius: 0.5rem;
   color: var(--color-primary);
   padding: 0.5rem 1.5rem;
-  transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+  transition:
+    background-color 0.2s ease-in-out,
+    box-shadow 0.2s ease-in-out,
+    color 0.2s ease-in-out,
+    transform 0.2s ease-in-out;
 }
 
 .btn-secondary:hover {
   background: var(--color-primary);
   color: #ffffff;
+  box-shadow: 0 10px 20px rgb(249 115 22 / 0.16);
 }
 
 .input-field {
@@ -92,6 +143,10 @@ a {
   width: 100%;
   color: var(--color-dark);
   background: #ffffff;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
 }
 
 .input-field:focus {
@@ -99,12 +154,22 @@ a {
   box-shadow: 0 0 0 3px rgb(249 115 22 / 0.2);
 }
 
+@media (hover: hover) and (pointer: fine) {
+  :where(input, select, textarea):not(:disabled):hover {
+    border-color: rgb(249 115 22 / 0.55);
+  }
+}
+
 .input-field::placeholder {
   color: #64748b;
 }
 
 .hover-card {
-  transition: transform 220ms ease, box-shadow 220ms ease, filter 220ms ease;
+  transition:
+    border-color 220ms ease,
+    transform 220ms ease,
+    box-shadow 220ms ease,
+    filter 220ms ease;
   will-change: transform;
 }
 
@@ -114,8 +179,20 @@ a {
   filter: saturate(1.03);
 }
 
+.hover-card img {
+  transition: transform 260ms ease, filter 260ms ease;
+}
+
+.hover-card:hover img {
+  transform: scale(1.035);
+  filter: saturate(1.05);
+}
+
 .hover-card-soft {
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease;
   will-change: transform;
 }
 
@@ -159,6 +236,26 @@ a {
   animation: contentFadeIn 320ms ease-out;
 }
 
+.app-page {
+  animation: contentFadeIn 280ms ease-out;
+}
+
+@keyframes dropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+:where(.absolute.shadow-lg, .fixed.shadow-xl, .shadow-2xl) {
+  animation: dropdownIn 160ms ease-out;
+  transform-origin: top center;
+}
+
 @keyframes logoMarquee {
   0% {
     transform: translateX(0);
@@ -194,7 +291,20 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+
   .logo-marquee-track {
     animation: none;
+  }
+
+  :where(button, a[href], [role='button'], .hover-card, .hover-card-soft):hover {
+    transform: none !important;
   }
 }

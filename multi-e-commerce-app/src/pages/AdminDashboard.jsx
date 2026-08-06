@@ -1133,6 +1133,10 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             tone: 'cyan',
           },
         ];
+    const trustOverview = adminOverview.trust || {};
+    const trustTotals = trustOverview.totals || {};
+    const trustRisks = Array.isArray(trustOverview.risks) ? trustOverview.risks : [];
+    const trustRules = Array.isArray(trustOverview.rules) ? trustOverview.rules : [];
     const toneStyles = {
       amber: 'border-amber-200 bg-amber-50 text-amber-800',
       blue: 'border-blue-200 bg-blue-50 text-blue-800',
@@ -1281,6 +1285,77 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
             canManagePayments
             className="mt-4"
           />
+
+          <Panel
+            title="Trust And Proof Control"
+            className="mt-4"
+            action={<button onClick={() => navigate('/admin/logistics')} className="text-xs font-medium text-[#F97316]">Open logistics</button>}
+          >
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-md border border-red-100 bg-red-50 p-3">
+                <p className="text-xs font-semibold uppercase text-red-700">Blocking payout release</p>
+                <p className="mt-1 text-2xl font-bold text-[#111827]">{trustTotals.blocking || 0}</p>
+              </div>
+              <div className="rounded-md border border-amber-100 bg-amber-50 p-3">
+                <p className="text-xs font-semibold uppercase text-amber-700">Proof risks</p>
+                <p className="mt-1 text-2xl font-bold text-[#111827]">{trustTotals.total || 0}</p>
+              </div>
+              <div className="rounded-md border border-green-100 bg-green-50 p-3">
+                <p className="text-xs font-semibold uppercase text-green-700">Trust rule</p>
+                <p className="mt-1 text-sm font-semibold text-[#111827]">QR + GPS before release</p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-3">
+                {trustRisks.length === 0 ? (
+                  <div className="rounded-md border border-green-100 bg-green-50 p-4 text-sm font-medium text-green-800">
+                    No active trust risks. Current logistics proof is clean.
+                  </div>
+                ) : trustRisks.slice(0, 4).map((risk) => (
+                  <button
+                    key={risk.logisticsId || risk.orderId}
+                    type="button"
+                    onClick={() => navigate('/admin/logistics')}
+                    className="w-full rounded-md border border-gray-200 bg-white p-4 text-left transition hover:border-[#F97316] hover:shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#111827]">{risk.orderNumber || risk.logisticsId}</p>
+                        <p className="mt-1 text-xs text-gray-500">{risk.seller} to {risk.buyer} - {formatAdminLabel(risk.status)}</p>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${risk.blockingRiskCount ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {risk.blockingRiskCount ? 'Blocking' : 'Review'}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(risk.failedChecks || []).slice(0, 3).map((check) => (
+                        <span key={check.key} className={`rounded-full px-2 py-1 text-xs font-medium ${check.blocking ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                          {check.label}
+                        </span>
+                      ))}
+                    </div>
+                    {risk.lastGpsUpdate && (
+                      <p className="mt-3 text-xs text-gray-500">Last GPS: {formatDateTime(risk.lastGpsUpdate)}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="rounded-md border border-gray-100 bg-gray-50 p-4">
+                <div className="flex items-center gap-2">
+                  <FaShieldAlt className="text-[#16A34A]" />
+                  <p className="text-sm font-semibold text-[#111827]">Admin safety rules</p>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {trustRules.slice(0, 5).map((rule) => (
+                    <div key={rule} className="flex gap-2 text-sm text-gray-600">
+                      <FaCheckCircle className="mt-0.5 shrink-0 text-[#16A34A]" />
+                      <span>{rule}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Panel>
 
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
             <Panel

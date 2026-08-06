@@ -143,7 +143,7 @@ export const CartProvider = ({ children }) => {
 
   const updateQuantity = async (itemId, quantity) => {
     const targetItem = cartItems.find((item) => item.id === itemId || item._id === itemId);
-    const minimumOrderQty = targetItem?.minOrderQuantity || getMinimumOrderQuantity(targetItem);
+    const minimumOrderQty = getMinimumOrderQuantity(targetItem);
     const safeQuantity = clampToMinimumOrder(quantity, minimumOrderQty);
 
     if (safeQuantity !== quantity) {
