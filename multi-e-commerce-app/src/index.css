@@ -188,6 +188,31 @@ a {
   filter: saturate(1.05);
 }
 
+img[class~="object-cover"] {
+  transform-origin: center;
+  transition:
+    transform 320ms ease,
+    filter 320ms ease,
+    opacity 320ms ease;
+  will-change: transform;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  img[class~="object-cover"]:not(.no-image-hover):hover {
+    transform: scale(1.055);
+    filter: saturate(1.08) contrast(1.03);
+  }
+
+  :where(a, article, .group, .hover-card, .hover-card-soft):hover img[class~="object-cover"]:not(.no-image-hover) {
+    transform: scale(1.055);
+    filter: saturate(1.08) contrast(1.03);
+  }
+
+  :where(a, article, .group, .hover-card, .hover-card-soft):hover img[class~="rounded-full"]:not(.no-image-hover) {
+    transform: scale(1.08);
+  }
+}
+
 .hover-card-soft {
   transition:
     border-color 180ms ease,
@@ -288,6 +313,46 @@ a {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+}
+
+.admin-order-table {
+  border-collapse: separate;
+  border-spacing: 0 0.5rem;
+}
+
+.admin-order-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.admin-order-row td {
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  border-top: 1px solid #e5e7eb;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.admin-order-row td:first-child {
+  border-left: 1px solid #e5e7eb;
+  border-radius: 0.75rem 0 0 0.75rem;
+}
+
+.admin-order-row td:last-child {
+  border-right: 1px solid #e5e7eb;
+  border-radius: 0 0.75rem 0.75rem 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .admin-order-row:hover td {
+    background: #fff7ed;
+    border-color: rgb(249 115 22 / 0.3);
+    box-shadow: 0 10px 24px rgb(15 23 42 / 0.08);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

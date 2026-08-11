@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const Logistics = require('../../models/Logistics.model');
 const QRToken = require('../../models/QRToken.model');
 const User = require('../../models/User.model');
+const LogisticsLocation = require('../../models/LogisticsLocation.model');
 const googleMaps = require('../maps/googleMaps.service');
 const dispatchSvc = require('../notification/dispatch.service');
 const logger = require('../../utils/logger');
@@ -389,6 +390,36 @@ class GPSTrackingService {
       throw new Error('Logistics record not found');
     }
     
+    const locationQuery = { logistics: logisticsId };
+    if (startDate || endDate) {
+      locationQuery.recordedAt = {};
+      if (startDate) locationQuery.recordedAt.$gte = new Date(startDate);
+      if (endDate) locationQuery.recordedAt.$lte = new Date(endDate);
+    }
+
+    const locationPoints = await LogisticsLocation.find(locationQuery)
+      .sort({ recordedAt: -1 })
+      .limit(Number(limit))
+      .lean();
+
+    if (locationPoints.length > 0) {
+      return {
+        logisticsId,
+        status: logistics.status,
+        currentLocation: logistics.gpsTracking?.current || null,
+        history: locationPoints.map((point) => ({
+          location: { lat: point.lat, lng: point.lng },
+          accuracy: point.accuracy,
+          speed: point.speed,
+          heading: point.heading,
+          timestamp: point.recordedAt,
+          recordedBy: point.driver,
+          source: point.source,
+        })),
+        totalPoints: await LogisticsLocation.countDocuments({ logistics: logisticsId }),
+      };
+    }
+
     let history = [...(logistics.gpsTracking?.history || [])];
     
     // Filter by date range

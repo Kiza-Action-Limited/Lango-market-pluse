@@ -3,12 +3,11 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import {
   FaArrowRight,
-  FaBolt,
   FaBrain,
   FaChartLine,
+  FaBell,
   FaCheckCircle,
   FaCrown,
-  FaHandshake,
   FaHeadset,
   FaMoneyBillWave,
   FaShieldAlt,
@@ -17,6 +16,8 @@ import {
   FaUsers,
 } from 'react-icons/fa';
 import { TRADER_PLANS } from '../config/subscriptionPlans';
+import { useFetchData } from '../hooks/useFetchData';
+import { fetchHomePayload, HOME_DATA_KEY } from '../services/homeDataService';
 import aboutHeroImage from '../assets/images/1000_F_1388403127_VLbGx3CB7xsMA56fZaMgN2TdpDTVY556.webp';
 import businessImage from '../assets/images/240_F_736429436_NpVWpeNSbzAx35soBFulMc5N4MUO30NV.jpg';
 import customerImage from '../assets/images/240_F_725819555_bH4Tv8G1KWOdwC60nwFHDZtGAmTHa2V8.jpg';
@@ -52,20 +53,25 @@ const audienceBlocks = [
 ];
 
 const trustPillars = [
-  { icon: FaShieldAlt, title: 'Protected commerce', text: 'Checkout, escrow-ready flows, and clear order records help reduce confusion between buyers and sellers.' },
-  { icon: FaTruck, title: 'Trackable logistics', text: 'Delivery updates and logistics visibility keep both parties aligned after the order is placed.' },
-  { icon: FaMoneyBillWave, title: 'Transparent value', text: 'Local pricing, seller details, minimum order rules, and product context make decisions easier.' },
-  { icon: FaHeadset, title: 'Platform support', text: 'Support workflows give customers, sellers, and administrators a shared path for resolving issues.' },
+  { icon: FaTruck, title: 'Delivery Support', text: 'Flexible delivery options for every order.' },
+  { icon: FaShieldAlt, title: 'Secure Payment', text: '100% secure transactions with clearer checkout and order records.' },
+  { icon: FaMoneyBillWave, title: 'Money Back', text: '30 days guarantee for a more confident buying experience.' },
+  { icon: FaHeadset, title: '24/7 Support', text: 'Dedicated support team for customers, sellers, and logistics partners.' },
 ];
 
 const intelligenceFeatures = [
-  { icon: FaBrain, title: 'Market intelligence', text: 'Signals, alerts, and marketplace data help sellers understand demand and respond faster.' },
-  { icon: FaChartLine, title: 'Growth visibility', text: 'Dashboards turn products, orders, stock movement, and revenue activity into readable decisions.' },
-  { icon: FaBolt, title: 'Operational speed', text: 'QR-linked stock movement, notifications, and seller tools reduce repetitive manual work.' },
-  { icon: FaHandshake, title: 'Trusted relationships', text: 'Profiles, reviews, order history, and clear roles help build stronger marketplace confidence.' },
+  
+  { icon: FaBrain, title: 'AI Market Insights', text: 'Smart predictions and trend analysis for better buying and selling decisions.' },
+  { icon: FaChartLine, title: 'Profit Indicators', text: 'Real-time growth tracking that helps operators understand performance.' },
+  { icon: FaBell, title: 'Smart Alerts', text: 'Instant notifications on opportunities, demand movement, and operational signals.' },
 ];
 
 const About = () => {
+  const { data, loading } = useFetchData(HOME_DATA_KEY, fetchHomePayload, {
+    initialData: { categories: [] },
+  });
+  const categories = data?.categories || [];
+
   return (
     <div className="bg-[#F5F7FA] text-[#111827]">
       <section className="relative min-h-[72vh] overflow-hidden">
@@ -84,6 +90,9 @@ const About = () => {
               Lango MarketPulse
             </h1>
             <p className="mt-5 max-w-3xl text-base leading-7 text-gray-100 sm:text-lg">
+              AI-powered insights meet seamless commerce. Lango Lako la Biashara Smart.
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-gray-300 sm:text-base">
               A professional marketplace built to connect customers, sellers, farmers, retailers,
               wholesalers, manufacturers, and logistics partners through trusted commerce and practical business intelligence.
             </p>
@@ -166,9 +175,9 @@ const About = () => {
 
       <section className="bg-[#0B1220] text-white">
         <div className="mx-auto max-w-screen-2xl px-4 py-14 md:px-6">
-          <div className="mb-8 max-w-3xl">
-            <p className="text-sm font-semibold uppercase tracking-wide text-[#FDBA74]">Trust infrastructure</p>
-            <h2 className="mt-2 text-3xl font-bold">The platform is built around safer, clearer transactions.</h2>
+          <div className="mb-8 text-center">
+            <p className="text-sm font-semibold uppercase tracking-wide text-[#FDBA74]">Why Choose Lango MarketPulse</p>
+            <h2 className="mt-2 text-3xl font-bold">Your trusted gateway to smart business and intelligent commerce.</h2>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {trustPillars.map(({ icon: Icon, title, text }) => (
@@ -184,15 +193,14 @@ const About = () => {
 
       <section className="bg-white">
         <div className="mx-auto max-w-screen-2xl px-4 py-14 md:px-6">
-          <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Intelligence layer</p>
-              <h2 className="mt-2 text-3xl font-bold text-[#111827]">More than a marketplace.</h2>
-              <p className="mt-4 text-sm leading-7 text-[#6B7280]">
-                Lango MarketPulse helps businesses understand activity, react to demand, and operate with better records.
-              </p>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="mx-auto mb-8 max-w-3xl text-center">
+            <p className="inline-flex rounded-full bg-[#FFF7ED] px-4 py-1 text-sm font-semibold text-[#F97316]">Intelligence Layer</p>
+            <h2 className="mt-3 text-3xl font-bold text-[#111827]">AI-Powered Smart Commerce</h2>
+            <p className="mt-3 text-sm leading-7 text-[#6B7280]">
+              Powered by predictive analytics and real-time insights to help you make smarter decisions.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
               {intelligenceFeatures.map(({ icon: Icon, title, text }) => (
                 <article key={title} className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-5">
                   <Icon className="text-2xl text-[#F97316]" />
@@ -200,6 +208,43 @@ const About = () => {
                   <p className="mt-2 text-sm leading-6 text-[#6B7280]">{text}</p>
                 </article>
               ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#F3F4F6]">
+        <div className="mx-auto max-w-screen-2xl px-4 py-14 md:px-6">
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm md:p-8">
+            <div className="flex flex-col justify-between gap-8 lg:flex-row lg:items-center">
+              <div className="max-w-3xl">
+                <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Factory Sourcing Experience</p>
+                <h2 className="mt-2 text-3xl font-bold text-[#111827]">Browse verified businesses on Lango Market Pulse</h2>
+                <p className="mt-3 text-sm leading-7 text-[#6B7280]">
+                  Source by category, compare business capabilities, and request quotations using your existing Lango Market Pulse product and category data.
+                </p>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {loading ? (
+                    Array.from({ length: 5 }).map((_, idx) => (
+                      <span key={idx} className="h-8 w-24 rounded-full bg-gray-200 skeleton-shimmer" />
+                    ))
+                  ) : categories.length > 0 ? (
+                    categories.slice(0, 5).map((category) => (
+                      <span key={category.id} className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-[#374151]">
+                        {category.name}
+                      </span>
+                    ))
+                  ) : (
+                    ['grocery', 'vegetables', 'fashion'].map((category) => (
+                      <span key={category} className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-[#374151]">
+                        {category}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+              <Link to="/business" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#F97316] px-5 text-sm font-semibold text-white transition hover:bg-[#EA580C]">
+                Explore Verified Businesses <FaArrowRight size={12} />
+              </Link>
             </div>
           </div>
         </div>

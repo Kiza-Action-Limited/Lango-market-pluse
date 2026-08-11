@@ -1,6 +1,30 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User.model');
+const Order = require('../models/Order.model');
+const Logistics = require('../models/Logistics.model');
+
+const idMatches = (left, right) => left && right && left.toString() === right.toString();
+
+const canAccessOrderRoom = async (user, orderId) => {
+  if (!mongoose.Types.ObjectId.isValid(orderId)) return false;
+  if (user.role === 'admin') return true;
+
+  const order = await Order.findById(orderId).select('buyer seller').lean();
+  if (!order) return false;
+
+  const userId = user._id || user.id;
+  if (idMatches(order.buyer, userId) || idMatches(order.seller, userId)) return true;
+
+  if (user.role !== 'logistics') return false;
+
+  const logistics = await Logistics.findOne({ order: orderId })
+    .select('driver fleetOwner')
+    .lean();
+
+  return idMatches(logistics?.driver, userId) || idMatches(logistics?.fleetOwner, userId);
+};
 
 /**
  * Initializes Socket.io with HTTP server and sets up authentication middleware.
@@ -46,9 +70,24 @@ const initSocket = (server) => {
     socket.join(`user:${socket.user.id}`);
 
     // Example: Join order tracking room
-    socket.on('join-order-room', (orderId) => {
-      socket.join(`order:${orderId}`);
-      console.log(`User ${socket.user.id} joined order room ${orderId}`);
+    socket.on('join-order-room', async (orderId, ack) => {
+      try {
+        const allowed = await canAccessOrderRoom(socket.user, orderId);
+        if (!allowed) {
+          const response = { success: false, message: 'Not authorized to track this order.' };
+          if (typeof ack === 'function') ack(response);
+          socket.emit('order-room-error', response);
+          return;
+        }
+
+        socket.join(`order:${orderId}`);
+        console.log(`User ${socket.user.id} joined order room ${orderId}`);
+        if (typeof ack === 'function') ack({ success: true, orderId });
+      } catch (error) {
+        const response = { success: false, message: 'Unable to join order tracking room.' };
+        if (typeof ack === 'function') ack(response);
+        socket.emit('order-room-error', response);
+      }
     });
 
     socket.on('leave-order-room', (orderId) => {

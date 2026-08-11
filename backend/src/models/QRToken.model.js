@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const QRTokenSchema = new mongoose.Schema(
   {
-    token: { type: String, required: true, unique: true, index: true },
+    token: { type: String, unique: true, sparse: true, index: true },
+    tokenHash: { type: String, unique: true, sparse: true, index: true },
     type: { type: String, enum: ['PICKUP', 'DELIVERY'], required: true, index: true },
     order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
     logistics: { type: mongoose.Schema.Types.ObjectId, ref: 'Logistics', required: true, index: true },

@@ -30,6 +30,7 @@ import { authService } from '../services/authService';
 import { orderService } from '../services/orderService';
 import { normalizeOrder } from '../utils/orderAdapter';
 import { formatCurrency } from '../utils/formatters';
+import { isBuyerUser } from '../utils/userCategory';
 
 const BUYER_PROFILE_SECTIONS = [
   { id: 'security', label: 'Security', icon: KeyRound },
@@ -116,6 +117,7 @@ const Profile = () => {
     confirmPassword: '',
   });
   const isSellerProfile = isSeller && !isLogistics;
+  const isBuyerProfile = isBuyerUser(user);
   const profileSections = isSellerProfile ? SELLER_PROFILE_SECTIONS : BUYER_PROFILE_SECTIONS;
   const profileTabs = isSellerProfile ? SELLER_TOP_TABS : BUYER_TOP_TABS;
 
@@ -240,9 +242,12 @@ const Profile = () => {
         fullName: formData.fullName,
         phone: formData.phone,
         address: formData.address,
-        businessName: formData.businessName,
-        businessType: formData.businessType,
       };
+
+      if (!isBuyerProfile) {
+        profilePayload.businessName = formData.businessName;
+        profilePayload.businessType = formData.businessType;
+      }
 
       if (isLogistics) {
         profilePayload.locationHub = formData.baseHub;
@@ -409,10 +414,12 @@ const Profile = () => {
                 <dt className="text-[#6B7280]">Role</dt>
                 <dd className="font-semibold text-[#111827]">{prettify(user?.role)}</dd>
               </div>
-              <div className="flex justify-between gap-3">
-                <dt className="text-[#6B7280]">Business Type</dt>
-                <dd className="font-semibold text-[#111827]">{prettify(user?.businessType)}</dd>
-              </div>
+              {!isBuyerProfile && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-[#6B7280]">Business Type</dt>
+                  <dd className="font-semibold text-[#111827]">{prettify(user?.businessType)}</dd>
+                </div>
+              )}
               <div className="flex justify-between gap-3">
                 <dt className="text-[#6B7280]">Plan</dt>
                 <dd className="font-semibold text-[#111827]">{planLabel}</dd>
@@ -706,31 +713,35 @@ const Profile = () => {
                 className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
               />
             </div>
-            <div>
-              <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-business-name">Business Name</label>
-              <input
-                id="profile-business-name"
-                name="businessName"
-                value={formData.businessName}
-                onChange={handleInputChange}
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-business-type">Business Type</label>
-              <select
-                id="profile-business-type"
-                name="businessType"
-                value={formData.businessType}
-                onChange={handleInputChange}
-                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
-              >
-                <option value="">Not set</option>
-                {['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business', 'analytics', 'logistics'].map((type) => (
-                  <option key={type} value={type}>{prettify(type)}</option>
-                ))}
-              </select>
-            </div>
+            {!isBuyerProfile && (
+              <>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-business-name">Business Name</label>
+                  <input
+                    id="profile-business-name"
+                    name="businessName"
+                    value={formData.businessName}
+                    onChange={handleInputChange}
+                    className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827]" htmlFor="profile-business-type">Business Type</label>
+                  <select
+                    id="profile-business-type"
+                    name="businessType"
+                    value={formData.businessType}
+                    onChange={handleInputChange}
+                    className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-[#111827] outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
+                  >
+                    <option value="">Not set</option>
+                    {['brand', 'wholesaler', 'manufacturer', 'retailer', 'farmer', 'small_business', 'analytics', 'logistics'].map((type) => (
+                      <option key={type} value={type}>{prettify(type)}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
             {isLogistics && (
               <>
                 <div>

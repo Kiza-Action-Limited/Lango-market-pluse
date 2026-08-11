@@ -211,80 +211,6 @@ exports.getEscrowSummary = async (req, res, next) => {
   }
 };
 
-/**
- * Create an Escrow.com transaction for an order.
- * POST /api/v1/escrow/external/:orderId/create
- */
-exports.createExternalTransaction = async (req, res, next) => {
-  try {
-    if (sendValidationErrors(req, res)) return;
-
-    const result = await escrowService.createExternalTransaction(
-      req.params.orderId,
-      req.user.id,
-      req.user.role,
-      req.body
-    );
-
-    res.status(result.created ? 201 : 200).json({
-      success: true,
-      message: result.created
-        ? 'Escrow.com transaction created'
-        : 'Escrow.com transaction already exists for this order',
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Fetch the linked Escrow.com transaction for an order.
- * GET /api/v1/escrow/external/:orderId
- */
-exports.getExternalTransaction = async (req, res, next) => {
-  try {
-    if (sendValidationErrors(req, res)) return;
-
-    const result = await escrowService.getExternalTransaction(
-      req.params.orderId,
-      req.user.id,
-      req.user.role
-    );
-
-    res.status(200).json({
-      success: true,
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Fetch Escrow.com transaction details and persist the latest external status.
- * POST /api/v1/escrow/external/:orderId/sync
- */
-exports.syncExternalTransaction = async (req, res, next) => {
-  try {
-    if (sendValidationErrors(req, res)) return;
-
-    const result = await escrowService.syncExternalTransaction(
-      req.params.orderId,
-      req.user.id,
-      req.user.role
-    );
-
-    res.status(200).json({
-      success: true,
-      message: 'Escrow.com transaction synced',
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.resolveDispute = async (req, res, next) => {
   try {
     if (sendValidationErrors(req, res)) return;
@@ -299,3 +225,4 @@ exports.resolveDispute = async (req, res, next) => {
     next(error);
   }
 };
+

@@ -3,6 +3,7 @@ const Order = require('../models/Order.model');
 const Logistics = require('../models/Logistics.model');
 const QRCode = require('qrcode');
 const { validationResult } = require('express-validator');
+const { hashToken } = require('../utils/hash');
 
 /**
  * Generate QR token for order pickup/delivery
@@ -56,7 +57,7 @@ exports.generateQRToken = async (req, res, next) => {
     expiresAt.setHours(expiresAt.getHours() + 24);
 
     const qrToken = await QRToken.create({
-      token,
+      tokenHash: hashToken(token),
       type,
       order: orderId,
       logistics: logisticsId,
@@ -68,7 +69,7 @@ exports.generateQRToken = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: 'QR token generated successfully',
-      data: qrToken,
+      data: { ...qrToken.toObject(), token },
     });
   } catch (error) {
     next(error);
@@ -89,7 +90,12 @@ exports.scanQRToken = async (req, res, next) => {
     const { token, gpsLat, gpsLng } = req.body;
 
     // Find token
-    const qrToken = await QRToken.findOne({ token })
+    const qrToken = await QRToken.findOne({
+      $or: [
+        { tokenHash: hashToken(token) },
+        { token },
+      ],
+    })
       .populate('order')
       .populate('logistics');
 
@@ -235,7 +241,7 @@ exports.resendQRToken = async (req, res, next) => {
     expiresAt.setHours(expiresAt.getHours() + 24);
 
     const qrToken = await QRToken.create({
-      token: newToken,
+      tokenHash: hashToken(newToken),
       type: oldToken.type,
       order: oldToken.order,
       logistics: oldToken.logistics,
@@ -247,7 +253,7 @@ exports.resendQRToken = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: 'New QR token generated',
-      data: qrToken,
+      data: { ...qrToken.toObject(), token: newToken },
     });
   } catch (error) {
     next(error);

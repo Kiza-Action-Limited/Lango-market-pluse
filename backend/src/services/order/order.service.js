@@ -414,8 +414,6 @@ const summarizeEscrow = (escrow) => {
     sinkingFundAmount: escrow.sinkingFundAmount,
     refundAmount: escrow.refundAmount,
     payouts: escrow.payouts || [],
-    externalProvider: escrow.externalProvider,
-    externalStatus: escrow.externalStatus,
   };
 };
 

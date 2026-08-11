@@ -59,14 +59,16 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const login = async (identifier, password) => {
+  const login = async (identifier, password, options = {}) => {
     try {
       const response = await authService.login(identifier, password);
       const { token, user } = response;
       localStorage.setItem('token', token);
       setToken(token);
       setUser(user);
-      toast.success('Login successful! Welcome back!');
+      if (!options.silentSuccess) {
+        toast.success('Login successful! Welcome back!');
+      }
       return { success: true, user, redirectTo: response.redirectTo };
     } catch (error) {
       const errorMessage = handleApiError(error);

@@ -32,9 +32,12 @@ const contactRoutes = require('./routes/v1/contact.routes');
 const businessRoutes = require('./routes/v1/business.routes');
 const sellerRoutes = require('./routes/v1/seller.routes');
 const marketingRoutes = require('./routes/v1/marketing.routes');
+const callbackRoutes = require('./routes/v1/callbacks.routes');
 const mpesaWebhookRoutes = require('./routes/webhooks/mpesa.webhook');
 const errorHandler = require('./middleware/errorHandler');
 const requestLogger = require('./middleware/requestLogger');
+const securityHeaders = require('./middleware/securityHeaders');
+const simpleRateLimit = require('./middleware/simpleRateLimit');
 
 const app = express();
 
@@ -80,6 +83,8 @@ const corsOptions = {
 
 // Middleware
 app.use(requestLogger);
+app.use(securityHeaders);
+app.use(simpleRateLimit({ scope: 'api' }));
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(morgan('dev'));
@@ -167,6 +172,7 @@ app.use('/v1/analytics', analyticsRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/v1/payments', paymentRoutes);
 app.use('/api/v1/wallet', walletRoutes);
+app.use('/api/v1/wallets', walletRoutes);
 app.use('/v1/wallet', walletRoutes);
 app.use('/api/v1/transactions', transactionRoutes);
 app.use('/v1/transactions', transactionRoutes);
@@ -177,6 +183,7 @@ app.use('/v1/rfqs', rfqRoutes);
 app.use('/api/v1/groupbuy', groupBuyRoutes);
 app.use('/v1/groupbuy', groupBuyRoutes);
 app.use('/api/v1/escrow', escrowRoutes);
+app.use('/api/v1/escrows', escrowRoutes);
 app.use('/v1/escrow', escrowRoutes);
 app.use('/api/v1/disputes', disputeRoutes);
 app.use('/api/disputes', disputeRoutes);
@@ -185,6 +192,7 @@ app.use('/api/v1/qr-tokens', qrtokenRoutes);
 app.use('/api/qr-tokens', qrtokenRoutes);
 app.use('/v1/qr-tokens', qrtokenRoutes);
 app.use('/api/v1/sinking-fund', sinkingfundRoutes);
+app.use('/api/v1/sinking-funds', sinkingfundRoutes);
 app.use('/api/sinking-fund', sinkingfundRoutes);
 app.use('/v1/sinking-fund', sinkingfundRoutes);
 app.use('/api/v1/audit', auditRoutes);
@@ -208,6 +216,7 @@ app.use('/v1/seller', sellerRoutes);
 app.use('/api/v1/marketing', marketingRoutes);
 app.use('/api/marketing', marketingRoutes);
 app.use('/v1/marketing', marketingRoutes);
+app.use('/api/v1/callbacks', callbackRoutes);
 app.use('/webhooks/mpesa', mpesaWebhookRoutes);
 app.use('/api/mpesa', mpesaWebhookRoutes);
 

@@ -345,9 +345,6 @@ const serializeEscrowSnapshot = (escrow) => {
     deliveredAt: escrow.deliveredAt,
     autoReleaseAt: escrow.autoReleaseAt,
     releasedAt: escrow.releasedAt,
-    externalProvider: escrow.externalProvider,
-    externalStatus: escrow.externalStatus,
-    externalTransactionId: escrow.externalTransactionId,
     payouts: Array.isArray(escrow.payouts) ? escrow.payouts : [],
   };
 };
@@ -1179,7 +1176,7 @@ exports.updateUser = async (req, res, next) => {
       address,
     } = req.body;
 
-    const existingUser = await User.findById(req.params.userId).select('role');
+    const existingUser = await User.findById(req.params.userId).select('role businessType');
     if (!existingUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -1218,9 +1215,17 @@ exports.updateUser = async (req, res, next) => {
     if (kycVerified !== undefined) updates.kycVerified = kycVerified;
     if (verificationStatus) updates.verificationStatus = verificationStatus;
     if (userType) updates.userType = userType;
-    if (businessName) updates.businessName = businessName;
     if (phone) updates.phone = phone;
     if (address) updates.address = address;
+
+    const finalRole = String(updates.role || existingUser.role || '').toLowerCase();
+    if (['buyer', 'consumer'].includes(finalRole)) {
+      updates.businessName = null;
+      updates.businessType = null;
+      updates.businessLogoUrl = null;
+    } else if (businessName) {
+      updates.businessName = businessName;
+    }
 
     if (verificationStatus === 'verified' || verificationStatus === 'gold') {
       updates.kycVerified = true;

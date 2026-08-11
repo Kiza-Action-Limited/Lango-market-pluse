@@ -1,7 +1,9 @@
 const mongoose = require('mongoose');
 const Wallet = require('../../models/Wallet.model');
 const Transaction = require('../../models/Transaction.model');
+const WalletEntry = require('../../models/WalletEntry.model');
 const { b2cPayment, normalizeMpesaPhone } = require('../../config/mpesa');
+const { toMinorUnits } = require('../../utils/money');
 
 const normalizeAmount = (amount) => {
   const value = Number(amount);
@@ -111,6 +113,25 @@ class WalletService {
       session,
     });
 
+    await WalletEntry.create([{
+      wallet: wallet._id,
+      user: userId,
+      direction: 'credit',
+      type: options.type || 'deposit',
+      amount: value,
+      amountMinor: toMinorUnits(value),
+      balanceBefore,
+      balanceBeforeMinor: toMinorUnits(balanceBefore),
+      balanceAfter: wallet.balance,
+      balanceAfterMinor: toMinorUnits(wallet.balance),
+      reference: transaction.reference,
+      order: options.orderId,
+      relatedTransaction: transaction._id,
+      status: transaction.status,
+      description: transaction.description,
+      metadata: options.metadata || {},
+    }], session ? { session } : {});
+
     return { wallet, transaction, balance: wallet.balance };
   }
 
@@ -143,6 +164,25 @@ class WalletService {
       metadata: options.metadata || {},
       session,
     });
+
+    await WalletEntry.create([{
+      wallet: wallet._id,
+      user: userId,
+      direction: 'debit',
+      type: options.type || 'withdrawal',
+      amount: value,
+      amountMinor: toMinorUnits(value),
+      balanceBefore,
+      balanceBeforeMinor: toMinorUnits(balanceBefore),
+      balanceAfter: wallet.balance,
+      balanceAfterMinor: toMinorUnits(wallet.balance),
+      reference: transaction.reference,
+      order: options.orderId,
+      relatedTransaction: transaction._id,
+      status: transaction.status,
+      description: transaction.description,
+      metadata: options.metadata || {},
+    }], session ? { session } : {});
 
     return { wallet, transaction, balance: wallet.balance };
   }

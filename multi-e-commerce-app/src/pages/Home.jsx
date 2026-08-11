@@ -49,7 +49,6 @@ const Home = () => {
       >
         <Suspense fallback={<div className="h-60 bg-white border-y border-gray-100 skeleton-shimmer" />}>
           <HomeBelowFold
-            categories={data?.categories || []}
             businessPartners={data?.businessPartners || []}
             loading={loading}
           />

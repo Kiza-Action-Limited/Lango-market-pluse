@@ -383,7 +383,7 @@ const getSellerExportRows = async (type, sellerId) => {
           status: order.status,
           paymentStatus: payment?.status || (order.paidAt ? 'completed' : 'pending'),
           paymentIntentId: order.paymentIntentId,
-          paymentReference: payment?.transactionId || escrow?.externalReference || escrow?.externalTransactionId || '',
+          paymentReference: payment?.transactionId || escrow?.mpesaReceiptNumber || '',
           paymentMethod: payment?.paymentMethod || '',
           mpesaReceiptNumber: payment?.mpesaReceiptNumber || escrow?.mpesaReceiptNumber || '',
           paidAt: order.paidAt || payment?.paidAt || escrow?.paidAt,

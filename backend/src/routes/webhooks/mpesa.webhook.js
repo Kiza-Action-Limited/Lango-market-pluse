@@ -4,6 +4,7 @@ const mpesaService = require('../../services/payment/mpesa.service');
 const billingService = require('../../services/subscription/billing.service');
 const darajaIpWhitelist = require('../../middleware/darajaIpWhitelist');
 const { extractStkMetadata } = require('../../config/mpesa');
+const callbackEvents = require('../../services/payment/callbackEvent.service');
 
 const getMetadataValue = (metadata, key) => {
   if (!metadata) return undefined;
@@ -18,9 +19,26 @@ router.use(darajaIpWhitelist);
  * Safaricom will POST here after user completes payment.
  */
 const stkCallbackHandler = async (req, res) => {
+  let callbackEvent;
   try {
+    const recorded = await callbackEvents.recordMpesaCallback({
+      eventType: 'stk',
+      payload: req.body,
+      req,
+    });
+    callbackEvent = recorded.event;
+
+    if (recorded.duplicate && callbackEvent?.processingStatus === 'processed') {
+      return res.status(200).json({ ResultCode: 0, ResultDesc: 'Duplicate accepted' });
+    }
+
+    await callbackEvents.markProcessing(callbackEvent);
+
     const stkCallback = req.body?.Body?.stkCallback;
-    if (!stkCallback) return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
+    if (!stkCallback) {
+      await callbackEvents.markProcessed(callbackEvent);
+      return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
+    }
 
     if (stkCallback.ResultCode === 0) {
       const metadata = extractStkMetadata(stkCallback);
@@ -47,35 +65,73 @@ const stkCallbackHandler = async (req, res) => {
       });
     }
 
+    await callbackEvents.markProcessed(callbackEvent);
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
   } catch (error) {
     console.error('M-Pesa webhook error:', error);
+    await callbackEvents.markFailed(callbackEvent, error).catch(() => {});
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Error logged' });
   }
 };
 
 router.post('/callback', stkCallbackHandler);
 router.post('/stk-callback', stkCallbackHandler);
+router.post('/stk', stkCallbackHandler);
 
-router.post('/b2c-result', async (req, res) => {
+const b2cResultHandler = async (req, res) => {
+  let callbackEvent;
   try {
+    const recorded = await callbackEvents.recordMpesaCallback({
+      eventType: 'b2c_result',
+      payload: req.body,
+      req,
+    });
+    callbackEvent = recorded.event;
+
+    if (recorded.duplicate && callbackEvent?.processingStatus === 'processed') {
+      return res.status(200).json({ ResultCode: 0, ResultDesc: 'Duplicate accepted' });
+    }
+
+    await callbackEvents.markProcessing(callbackEvent);
     await mpesaService.handleB2CResult(req.body);
+    await callbackEvents.markProcessed(callbackEvent);
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
   } catch (error) {
     console.error('M-Pesa B2C result error:', error);
+    await callbackEvents.markFailed(callbackEvent, error).catch(() => {});
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Error logged' });
   }
-});
+};
 
-router.post('/b2c-timeout', async (req, res) => {
+const b2cTimeoutHandler = async (req, res) => {
+  let callbackEvent;
   try {
+    const recorded = await callbackEvents.recordMpesaCallback({
+      eventType: 'b2c_timeout',
+      payload: req.body,
+      req,
+    });
+    callbackEvent = recorded.event;
+
+    if (recorded.duplicate && callbackEvent?.processingStatus === 'processed') {
+      return res.status(200).json({ ResultCode: 0, ResultDesc: 'Duplicate accepted' });
+    }
+
+    await callbackEvents.markProcessing(callbackEvent);
     await mpesaService.handleB2CTimeout(req.body);
+    await callbackEvents.markProcessed(callbackEvent);
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
   } catch (error) {
     console.error('M-Pesa B2C timeout error:', error);
+    await callbackEvents.markFailed(callbackEvent, error).catch(() => {});
     res.status(200).json({ ResultCode: 0, ResultDesc: 'Error logged' });
   }
-});
+};
+
+router.post('/b2c-result', b2cResultHandler);
+router.post('/b2c/result', b2cResultHandler);
+router.post('/b2c-timeout', b2cTimeoutHandler);
+router.post('/b2c/timeout', b2cTimeoutHandler);
 
 /**
  * Validation endpoint (optional, for C2B).

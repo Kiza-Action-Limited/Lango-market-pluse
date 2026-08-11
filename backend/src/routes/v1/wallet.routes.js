@@ -4,6 +4,7 @@ const { body, query } = require('express-validator');
 const walletController = require('../../controllers/wallet.controller');
 const { protect } = require('../../middleware/auth');
 const requireVerified = require('../../middleware/requireVerified');
+const idempotency = require('../../middleware/idempotency');
 
 router.use(protect);
 
@@ -68,6 +69,7 @@ router.post(
     body('amount').isFloat({ min: 10 }).withMessage('Amount must be at least 10'),
     body('description').optional().isString().trim(),
   ],
+  idempotency('wallet:transfer'),
   walletController.transfer
 );
 
@@ -81,6 +83,7 @@ router.post(
     body('amount').isFloat({ min: 50 }).withMessage('Minimum withdrawal is 50'),
     body('phoneNumber').isMobilePhone('en-KE').withMessage('Invalid phone number'),
   ],
+  idempotency('wallet:withdraw'),
   walletController.withdraw
 );
 
@@ -96,6 +99,7 @@ router.post(
       .withMessage('Invalid payment method'),
     body('description').optional().isString().trim(),
   ],
+  idempotency('wallet:add-funds'),
   walletController.addFunds
 );
 

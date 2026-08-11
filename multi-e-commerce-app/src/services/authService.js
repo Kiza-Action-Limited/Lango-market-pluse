@@ -18,6 +18,14 @@ const normalizeAuthResponse = (payload) => {
   };
 };
 
+const stripBuyerBusinessFields = (payload = {}) => {
+  const normalizedRole = String(payload.role || '').trim().toLowerCase();
+  if (normalizedRole !== 'buyer' && normalizedRole !== 'consumer') return payload;
+
+  const { businessName, businessType, businessLogoUrl, ...buyerPayload } = payload;
+  return buyerPayload;
+};
+
 export const authService = {
   login: async (identifier, password) => {
     const trimmedIdentifier = String(identifier || '').trim();
@@ -37,7 +45,7 @@ export const authService = {
   },
 
   register: async (userData) => {
-    const response = await api.post('/v1/auth/register', userData);
+    const response = await api.post('/v1/auth/register', stripBuyerBusinessFields(userData));
     return normalizeAuthResponse(response.data);
   },
 
@@ -61,7 +69,7 @@ export const authService = {
   },
 
   updateCurrentUser: async (profileData) => {
-    const response = await api.put('/v1/auth/me', profileData);
+    const response = await api.put('/v1/auth/me', stripBuyerBusinessFields(profileData));
     return response.data?.data?.user || response.data?.user || null;
   },
 

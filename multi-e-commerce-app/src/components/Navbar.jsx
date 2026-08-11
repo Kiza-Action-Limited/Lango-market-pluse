@@ -15,9 +15,8 @@ const categoryOptions = [
 ];
 
 const currencyOptions = [
-  { code: 'KES', label: 'KSh KES' },
-  { code: 'USD', label: '$ USD' },
-  { code: 'EUR', label: 'EUR' },
+  { label: 'KSH', code: 'KSH' }
+  
 ];
 
 const Navbar = () => {
@@ -85,7 +84,11 @@ const Navbar = () => {
           </Link>
 
           <div className="hidden md:flex items-center gap-2 lg:gap-3 ml-auto flex-wrap lg:flex-nowrap">
-            <div className="relative">
+            <div
+              className="relative"
+              onMouseEnter={() => setOpenDropdown('account')}
+              onMouseLeave={() => setOpenDropdown(null)}
+            >
               <button
                 onClick={() => toggleDropdown('account')}
                 className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2 font-semibold"
@@ -131,7 +134,11 @@ const Navbar = () => {
               </Link>
             )}
 
-            <div className="relative">
+            <div
+              className="relative"
+              onMouseEnter={() => setOpenDropdown('category')}
+              onMouseLeave={() => setOpenDropdown(null)}
+            >
               <button
                 onClick={() => toggleDropdown('category')}
                 className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2"
@@ -150,7 +157,11 @@ const Navbar = () => {
               )}
             </div>
 
-            <div className="relative">
+            <div
+              className="relative"
+              onMouseEnter={() => setOpenDropdown('currency')}
+              onMouseLeave={() => setOpenDropdown(null)}
+            >
               <button
                 onClick={() => toggleDropdown('currency')}
                 className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2"
@@ -176,9 +187,29 @@ const Navbar = () => {
               )}
             </div>
 
-            <Link to="/seller-plans" className="font-semibold hover:opacity-90" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
-              Sell on Lango Market Pulse
-            </Link>
+            <div
+              className="relative"
+              onMouseEnter={() => setOpenDropdown('partner')}
+              onMouseLeave={() => setOpenDropdown(null)}
+            >
+              <button
+                onClick={() => toggleDropdown('partner')}
+                className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2 font-semibold"
+              >
+                <span>Partner With Us</span>
+                <FaChevronDown size={12} />
+              </button>
+              {openDropdown === 'partner' && (
+                <div className="absolute right-0 mt-2 w-64 bg-white text-[#111827] rounded-lg shadow-lg border border-gray-200 py-1">
+                  <Link to="/seller-plans" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
+                    Sell on Lango Market Pulse
+                  </Link>
+                  <Link to="/logistics-partners" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>
+                    Deliver on Lango Market Pulse
+                  </Link>
+                </div>
+              )}
+            </div>
 
             <Link to="/cart" className="relative hover:opacity-90" onClick={closeAllMenus}>
               <FaShoppingCart size={20} />
@@ -304,9 +335,20 @@ const Navbar = () => {
               </div>
             )}
 
-            <Link to="/seller-plans" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
-              Sell on Lango Market Pulse
-            </Link>
+            <button onClick={() => toggleDropdown('partnerMobile')} className="w-full bg-[#E97A12] px-3 py-2 rounded flex items-center justify-between font-semibold">
+              <span>Partner With Us</span>
+              <FaChevronDown size={12} />
+            </button>
+            {openDropdown === 'partnerMobile' && (
+              <div className="bg-white text-[#111827] rounded-lg py-1">
+                <Link to="/seller-plans" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
+                  Sell on Lango Market Pulse
+                </Link>
+                <Link to="/logistics-partners" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>
+                  Deliver on Lango Market Pulse
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const QRToken = require('../../models/QRToken.model');
 const { generateQR } = require('../../utils/qrGenerator');
 const { distanceBetween } = require('../../utils/geofence');
+const { hashToken } = require('../../utils/hash');
 
 const tokenTtlMinutes = () => {
   const configured = Number(process.env.QR_TOKEN_TTL_MINUTES || 360);
@@ -43,7 +44,7 @@ class QRChainService {
     };
 
     return QRToken.create({
-      token,
+      tokenHash: hashToken(token),
       type,
       order: logistics.order,
       logistics: logistics._id,
@@ -55,7 +56,12 @@ class QRChainService {
 
   async consumeToken({ token, type, logisticsId, scannedBy, gpsCoords, buyerFence, skipGpsValidation = false }) {
     const normalizedToken = this.normalizeToken(token);
-    const qrToken = await QRToken.findOne({ token: normalizedToken });
+    const qrToken = await QRToken.findOne({
+      $or: [
+        { tokenHash: hashToken(normalizedToken) },
+        { token: normalizedToken },
+      ],
+    });
 
     if (!qrToken) {
       const error = new Error('QR token was not found. Generate a fresh QR token for this shipment and try again.');

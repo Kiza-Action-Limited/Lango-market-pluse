@@ -17,7 +17,10 @@ import {
   FaCheckCircle,
   FaTruck,
 } from 'react-icons/fa';
-import marketPulseLogo from '../assets/Marketpulse-logo.png';
+import buyerImage from '../assets/images/240_F_725819555_bH4Tv8G1KWOdwC60nwFHDZtGAmTHa2V8.jpg';
+import sellerImage from '../assets/images/240_F_736429436_NpVWpeNSbzAx35soBFulMc5N4MUO30NV.jpg';
+import logisticsImage from '../assets/images/240_F_1774361843_6YgNSKGVwKOPZSrhZ4P326nfhq8atTuG.jpg';
+import platformImage from '../assets/images/1000_F_1388403127_VLbGx3CB7xsMA56fZaMgN2TdpDTVY556.webp';
 import { createPrefetchHandlers } from '../utils/prefetch';
 import {
   mergeRegistrationData,
@@ -65,6 +68,38 @@ const stripInlineBusinessLogo = (data = {}) => {
   return data;
 };
 
+const registrationPortalRoles = ['buyer', 'seller', 'logistics'];
+
+const registrationPortalConfig = {
+  buyer: {
+    title: 'Buyer Account',
+    action: 'Create Buyer Account',
+    subtitle: 'Shop and place orders quickly',
+    helper: 'Create a customer account to browse products, save favorites, place orders, and track delivery updates.',
+    icon: FaUser,
+    image: buyerImage,
+    color: '#16A34A',
+  },
+  seller: {
+    title: 'Seller Account',
+    action: 'Create Seller Account',
+    subtitle: 'Manage products and sales',
+    helper: 'Open a seller workspace for your catalog, inventory, orders, wallet, and subscription tools.',
+    icon: FaStore,
+    image: sellerImage,
+    color: '#F97316',
+  },
+  logistics: {
+    title: 'Logistics Provider',
+    action: 'Create Logistics Account',
+    subtitle: 'Deliver orders and earn',
+    helper: 'Register as a logistics provider, then complete your delivery application and operations profile.',
+    icon: FaTruck,
+    image: logisticsImage,
+    color: '#0B2D55',
+  },
+};
+
 const Register = () => {
   const dispatch = useDispatch();
   const registrationProgress = useSelector((state) => state?.ui?.registrationProgress);
@@ -93,6 +128,7 @@ const Register = () => {
   const verificationChannel = step === 1 ? 'email' : step === 2 ? 'phone' : formData.verificationMethod;
 
   const businessTypes = ['Wholesaler', 'Manufacturer', 'Retailer', 'Farmer', 'Other Business'];
+  const activeRoleConfig = registrationPortalConfig[formData.role] || registrationPortalConfig.buyer;
 
   useEffect(() => {
     dispatch(mergeRegistrationData(formData));
@@ -510,9 +546,14 @@ const Register = () => {
       phone: phoneValue,
       password: formData.password,
       role: formData.role,
-      businessName: formData.role === 'seller' ? normalizedBusinessName : '',
-      businessType: formData.role === 'seller' ? formData.businessType : formData.role === 'logistics' ? 'logistics' : 'consumer',
-      businessLogoUrl: formData.role === 'seller' ? formData.businessLogoUrl : '',
+      ...(formData.role === 'seller'
+        ? {
+            businessName: normalizedBusinessName,
+            businessType: formData.businessType,
+            businessLogoUrl: formData.businessLogoUrl,
+          }
+        : {}),
+      ...(formData.role === 'logistics' ? { businessType: 'logistics' } : {}),
     };
 
     const result = await register(registerData);
@@ -536,80 +577,105 @@ const Register = () => {
     setLoading(false);
   };
 
-  const accountCards = [
-    {
-      key: 'buyer',
-      title: 'Buyer Sign Up',
-      subtitle: 'Shop from trusted suppliers',
-      icon: FaUser,
-      activeClass: 'border-[#16A34A] bg-[#16A34A]/5',
-      iconClass: 'text-[#16A34A]',
-    },
-    {
-      key: 'seller',
-      title: 'Seller Sign Up',
-      subtitle: 'List products and grow sales',
-      icon: FaStore,
-      activeClass: 'border-[#F97316] bg-[#F97316]/5',
-      iconClass: 'text-[#F97316]',
-    },
-    {
-      key: 'logistics',
-      title: 'Logistics Provider',
-      subtitle: 'Deliver orders and earn',
-      icon: FaTruck,
-      activeClass: 'border-[#3B82F6] bg-[#3B82F6]/5',
-      iconClass: 'text-[#3B82F6]',
-    },
-  ];
-
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center bg-linear-to-br from-[#F9FAFB] to-[#E5E7EB] py-8 px-4 sm:px-6 lg:px-8">
-      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
-        <div className="bg-white rounded-2xl shadow-md p-6 sm:p-8 border border-[#F97316]/15">
-          <img src={marketPulseLogo} alt="Lango Market Pulse" className="w-full h-auto max-h-105 object-contain mx-auto" />
-          <p className="mt-4 text-sm text-[#6B7280] text-center">
-            Join the platform built for smart commerce and trusted growth.
-          </p>
+    <div className="relative min-h-[calc(100vh-4rem)] overflow-hidden bg-[#0B1220] px-4 py-8 sm:px-6 lg:px-8">
+      <img src={activeRoleConfig.image || platformImage} alt={activeRoleConfig.title} className="absolute inset-0 h-full w-full object-cover" />
+      <div className="absolute inset-0 bg-[#0B1220]/82" />
+      <div className="relative mx-auto max-w-screen-2xl">
+        <div className="mb-8 grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
+          <div className="text-white">
+            <p className="max-w-2xl text-3xl font-bold leading-tight sm:text-4xl">
+              Create your Lango MarketPulse account.
+            </p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-200">
+              Choose the right portal, verify your email and phone, then continue into a trusted commerce workspace.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2">
+              {registrationPortalRoles.map((role) => {
+                const config = registrationPortalConfig[role];
+                const Icon = config.icon;
+                const selected = formData.role === role;
+                return (
+                  <Link
+                    key={role}
+                    to={`/register?role=${role}`}
+                    onClick={() => selectRole(role)}
+                    className={`inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition ${
+                      selected
+                        ? 'border-[#FDBA74] bg-[#F97316] text-white'
+                        : 'border-white/20 bg-white/10 text-gray-100 hover:bg-white/20'
+                    }`}
+                  >
+                    <Icon size={13} />
+                    {config.title}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-white/10 p-5 text-white shadow-xl backdrop-blur">
+            <div className="flex items-center gap-2">
+              <FaBrain className="text-[#FDBA74]" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-[#FDBA74]">AI Powered Platform</span>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-gray-100">
+              Get personalized recommendations, market insights, smart alerts, and operational tools when you join.
+            </p>
+          </div>
         </div>
 
-        <div className="w-full max-w-xl mx-auto space-y-6">
-          <div className="text-center lg:text-left">
-            <h2 className="text-3xl font-extrabold text-[#F97316]">Create your account</h2>
-            <p className="mt-2 text-sm text-[#6B7280] italic">Lango Lako la Biashara Smart</p>
+        <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+          <aside className="rounded-lg border border-white/10 bg-white/10 p-5 text-white shadow-xl backdrop-blur">
+            <div className="overflow-hidden rounded-md border border-white/10">
+              <img src={activeRoleConfig.image} alt={activeRoleConfig.title} className="h-64 w-full object-cover" />
+            </div>
+            <p className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#FDBA74]">Selected account</p>
+            <h2 className="mt-2 text-3xl font-bold">{activeRoleConfig.action}</h2>
+            <p className="mt-3 text-sm leading-6 text-gray-200">{activeRoleConfig.helper}</p>
+            <div className="mt-5 grid gap-2">
+              {registrationPortalRoles.map((role) => {
+                const config = registrationPortalConfig[role];
+                const Icon = config.icon;
+                const selected = formData.role === role;
+                return (
+                  <Link
+                    key={`side-${role}`}
+                    to={`/register?role=${role}`}
+                    onClick={() => selectRole(role)}
+                    className={`flex min-h-12 items-center justify-between rounded-md border px-3 text-sm font-semibold transition ${
+                      selected
+                        ? 'border-[#FDBA74] bg-white text-[#111827]'
+                        : 'border-white/10 bg-white/5 text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Icon size={14} />
+                      {config.title}
+                    </span>
+                    <FaArrowRight size={12} />
+                  </Link>
+                );
+              })}
+            </div>
+          </aside>
+
+          <div className="mx-auto w-full max-w-xl space-y-6">
+          <div className="rounded-lg border border-white/10 bg-white/10 p-5 text-white shadow-xl backdrop-blur">
+            <h2 className="text-3xl font-extrabold">{activeRoleConfig.action}</h2>
+            <p className="mt-2 text-sm text-gray-200">{activeRoleConfig.subtitle}</p>
           </div>
 
           <div className="flex items-center gap-2">
             {steps.map((item) => (
               <div key={item.id} className="flex-1">
-                <div className={`h-2 rounded-full ${step >= item.id ? 'bg-[#F97316]' : 'bg-gray-200'}`} />
-                <p className="mt-1 text-xs text-[#6B7280]">{item.label}</p>
+                <div className={`h-2 rounded-full ${step >= item.id ? 'bg-[#F97316]' : 'bg-white/20'}`} />
+                <p className="mt-1 text-xs text-gray-200">{item.label}</p>
               </div>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {accountCards.map((card) => {
-              const Icon = card.icon;
-              const isActive = formData.role === card.key;
-              return (
-                <button
-                  key={card.key}
-                  type="button"
-                  onClick={() => selectRole(card.key)}
-                  className={`rounded-xl border p-4 text-left transition ${
-                    isActive ? card.activeClass : 'border-gray-200 bg-white hover:border-[#FB923C]/60'
-                  }`}
-                >
-                  <Icon className={`mb-2 ${isActive ? card.iconClass : 'text-[#6B7280]'}`} />
-                  <p className="text-sm font-semibold text-[#111827]">{card.title}</p>
-                  <p className="text-xs text-[#6B7280]">{card.subtitle}</p>
-                </button>
-              );
-            })}
-          </div>
-
-          <form className="space-y-5 rounded-xl border border-gray-200 bg-white p-5" onSubmit={handleSubmit}>
+          <form className="space-y-5 rounded-lg border border-gray-200 bg-white p-5 shadow-xl" onSubmit={handleSubmit}>
             {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>}
             {notice && <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">{notice}</div>}
 
@@ -908,17 +974,18 @@ const Register = () => {
             </div>
           </form>
 
-          <p className="text-center text-sm text-[#6B7280]">
+          <p className="text-center text-sm text-gray-200">
             Already have an account?{' '}
             <Link
               to={`/login?role=${formData.role || 'buyer'}`}
-              className="font-medium text-[#F97316] hover:text-[#F97316]/80 transition-colors"
+              className="font-semibold text-[#FDBA74] transition hover:text-white"
               {...createPrefetchHandlers('/login')}
             >
               Sign in as {formData.role === 'seller' ? 'Seller' : formData.role === 'logistics' ? 'Logistics' : 'Buyer'}
             </Link>
           </p>
         </div>
+      </div>
       </div>
     </div>
   );

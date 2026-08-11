@@ -4,10 +4,13 @@ const Order = require('../../models/Order.model');
 const Logistics = require('../../models/Logistics.model');
 const Transaction = require('../../models/Transaction.model');
 const User = require('../../models/User.model');
+const MpesaTransaction = require('../../models/MpesaTransaction.model');
 const escrowService = require('../order/escrow.service');
 const qrChainSvc = require('../order/qrChain.service');
 const mongoose = require('mongoose');
 const axios = require('axios');
+const { toMinorUnits } = require('../../utils/money');
+const { normalizeKenyanPhone } = require('../../utils/phone');
 const { PLANS, normalizePlanId } = require('../../config/subscriptionPlans');
 const {
   PLATFORM_ACCOUNT,
@@ -22,6 +25,10 @@ const accessTokenCache = {
   token: null,
   expiresAt: 0,
 };
+
+const MPESA_BASE_URL = process.env.MPESA_ENV === 'production'
+  ? 'https://api.safaricom.co.ke'
+  : 'https://sandbox.safaricom.co.ke';
 
 const PLAN_PRICES = {
   solo: 500,
@@ -230,7 +237,7 @@ class MpesaService {
       };
 
       const response = await axios.post(
-        'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+        `${MPESA_BASE_URL}/mpesa/stkpush/v1/processrequest`,
         payload,
         {
           headers: {
@@ -253,6 +260,35 @@ class MpesaService {
       });
 
       await payment.save();
+
+      await MpesaTransaction.findOneAndUpdate(
+        { checkoutRequestId: response.data.CheckoutRequestID },
+        {
+          $setOnInsert: {
+            type: 'STK',
+            direction: 'inbound',
+            user: userId,
+            order: order._id,
+            payment: payment._id,
+            amount: order.totalAmount,
+            amountMinor: toMinorUnits(order.totalAmount),
+            currency: 'KES',
+            phoneNumber: formattedPhone,
+            status: 'submitted',
+            checkoutRequestId: response.data.CheckoutRequestID,
+            merchantRequestId: response.data.MerchantRequestID,
+            accountReference: payload.AccountReference,
+            transactionDesc: payload.TransactionDesc,
+            rawRequest: {
+              ...payload,
+              Password: undefined,
+            },
+            rawResponse: response.data,
+            idempotencyKey: response.data.CheckoutRequestID,
+          },
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
 
       order.paymentIntentId = response.data.CheckoutRequestID;
       order.status = 'AWAITING_PAYMENT';
@@ -332,7 +368,7 @@ class MpesaService {
       };
 
       const response = await axios.post(
-        'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+        `${MPESA_BASE_URL}/mpesa/stkpush/v1/processrequest`,
         payload,
         {
           headers: {
@@ -342,7 +378,7 @@ class MpesaService {
         }
       );
 
-      await Payment.create({
+      const payment = await Payment.create({
         user: userId,
         amount,
         currency: 'KES',
@@ -363,6 +399,34 @@ class MpesaService {
           agentNationalId: String(options.agentNationalId || '').replace(/\D/g, '') || null,
         }),
       });
+
+      await MpesaTransaction.findOneAndUpdate(
+        { checkoutRequestId: response.data.CheckoutRequestID },
+        {
+          $setOnInsert: {
+            type: 'STK',
+            direction: 'inbound',
+            user: userId,
+            payment: payment._id,
+            amount,
+            amountMinor: toMinorUnits(amount),
+            currency: 'KES',
+            phoneNumber: formattedPhone,
+            status: 'submitted',
+            checkoutRequestId: response.data.CheckoutRequestID,
+            merchantRequestId: response.data.MerchantRequestID,
+            accountReference,
+            transactionDesc: PLATFORM_ACCOUNT.subscriptionTransactionDesc,
+            rawRequest: {
+              ...payload,
+              Password: undefined,
+            },
+            rawResponse: response.data,
+            idempotencyKey: response.data.CheckoutRequestID,
+          },
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
 
       return {
         success: true,
@@ -415,7 +479,7 @@ class MpesaService {
         };
 
         const response = await axios.post(
-          'https://sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query',
+          `${MPESA_BASE_URL}/mpesa/stkpushquery/v1/query`,
           payload,
           {
             headers: {
@@ -437,6 +501,20 @@ class MpesaService {
             payment.failureReason = response.data.ResultDesc;
           }
           await payment.save();
+
+          await MpesaTransaction.findOneAndUpdate(
+            { checkoutRequestId },
+            {
+              $set: {
+                status: response.data.ResultCode === '0' ? 'completed' : 'failed',
+                resultCode: response.data.ResultCode,
+                resultDesc: response.data.ResultDesc,
+                rawResponse: response.data,
+                payment: payment._id,
+                order: payment.order,
+              },
+            }
+          );
 
           if (response.data.ResultCode === '0' && !wasCompleted && !isSubscriptionPayment(payment)) {
             await this.handleSuccessCallback({
@@ -571,6 +649,28 @@ class MpesaService {
     }
     await payment.save();
 
+    await MpesaTransaction.findOneAndUpdate(
+      { checkoutRequestId },
+      {
+        $set: {
+          type: 'STK',
+          direction: 'inbound',
+          user: payment.user,
+          order: payment.order,
+          payment: payment._id,
+          amount: payment.amount,
+          amountMinor: toMinorUnits(payment.amount),
+          currency: payment.currency || 'KES',
+          status: 'completed',
+          checkoutRequestId,
+          mpesaReceiptNumber: transactionId,
+          resultCode: '0',
+          resultDesc: 'Payment completed',
+        },
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
+
     if (isSubscriptionPayment(payment)) {
       return { payment, escrow: null };
     }
@@ -603,6 +703,26 @@ class MpesaService {
       payment.status = 'failed';
       payment.failureReason = errorMessage;
       await payment.save();
+
+      await MpesaTransaction.findOneAndUpdate(
+        { checkoutRequestId },
+        {
+          $set: {
+            type: 'STK',
+            direction: 'inbound',
+            user: payment.user,
+            order: payment.order,
+            payment: payment._id,
+            amount: payment.amount,
+            amountMinor: toMinorUnits(payment.amount),
+            currency: payment.currency || 'KES',
+            status: 'failed',
+            checkoutRequestId,
+            resultDesc: errorMessage,
+          },
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
     }
 
     const escrow = await escrowService.markPaymentFailed({ checkoutRequestId, errorMessage });
@@ -631,7 +751,7 @@ class MpesaService {
       ).toString('base64');
 
       const response = await axios.get(
-        'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
+        `${MPESA_BASE_URL}/oauth/v1/generate?grant_type=client_credentials`,
         {
           headers: {
             Authorization: `Basic ${auth}`,
@@ -712,28 +832,15 @@ class MpesaService {
       );
     }
 
-    let formatted = phoneNumber.toString().trim();
-    // Remove any non-digit characters
-    formatted = formatted.replace(/\D/g, '');
-
-    if (!/^254[71][0-9]{8}$|^0[71][0-9]{8}$|^[71][0-9]{8}$/.test(formatted)) {
+    try {
+      return normalizeKenyanPhone(phoneNumber);
+    } catch (error) {
       throw createMpesaError(
         'Enter a valid Kenya M-Pesa number, for example 0712345678 or 254712345678.',
         'MPESA_PHONE_INVALID',
         400
       );
     }
-
-    if (formatted.startsWith('0')) {
-      formatted = '254' + formatted.substring(1);
-    } else if (formatted.startsWith('254')) {
-      // Already in correct format
-    } else if (formatted.startsWith('+254')) {
-      formatted = formatted.substring(1);
-    } else {
-      formatted = '254' + formatted;
-    }
-    return formatted;
   }
 
   /**
@@ -821,6 +928,33 @@ class MpesaService {
     transaction.status = resultCode === 0 ? 'completed' : 'failed';
     await transaction.save();
 
+    await MpesaTransaction.findOneAndUpdate(
+      {
+        $or: [
+          { conversationId },
+          { originatorConversationId },
+        ].filter((condition) => Object.values(condition)[0]),
+      },
+      {
+        $set: {
+          type: 'B2C',
+          direction: 'outbound',
+          user: transaction.user,
+          amount: transaction.amount,
+          amountMinor: toMinorUnits(transaction.amount),
+          currency: transaction.currency || 'KES',
+          status: resultCode === 0 ? 'completed' : 'failed',
+          conversationId,
+          originatorConversationId,
+          mpesaReceiptNumber: receipt,
+          resultCode: String(resultCode),
+          resultDesc,
+          rawResponse: result,
+        },
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
+
     if (resultCode !== 0) {
       const wallet = await Wallet.findOne({ user: transaction.user });
       if (wallet) {
@@ -858,7 +992,7 @@ class MpesaService {
 
     if (!conversationId && !originatorConversationId) return null;
 
-    return Transaction.findOneAndUpdate(
+    const transaction = await Transaction.findOneAndUpdate(
       {
         type: 'withdrawal',
         status: 'pending',
@@ -875,6 +1009,35 @@ class MpesaService {
       },
       { new: true }
     );
+
+    if (transaction) {
+      await MpesaTransaction.findOneAndUpdate(
+        {
+          $or: [
+            { conversationId },
+            { originatorConversationId },
+          ].filter((condition) => Object.values(condition)[0]),
+        },
+        {
+          $set: {
+            type: 'B2C',
+            direction: 'outbound',
+            user: transaction.user,
+            amount: transaction.amount,
+            amountMinor: toMinorUnits(transaction.amount),
+            currency: transaction.currency || 'KES',
+            status: 'timeout',
+            conversationId,
+            originatorConversationId,
+            resultDesc: 'M-Pesa B2C timeout',
+            rawResponse: result,
+          },
+        },
+        { upsert: true, returnDocument: 'after' }
+      );
+    }
+
+    return transaction;
   }
 
   /**

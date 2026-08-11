@@ -17,6 +17,7 @@ const Payment = require('../models/Payment.model');
 const QRToken = require('../models/QRToken.model');
 const Escrow = require('../models/Escrow.model');
 const Transaction = require('../models/Transaction.model');
+const LogisticsLocation = require('../models/LogisticsLocation.model');
 const SinkingFund = require('../services/logistics/sinkingfund.service');
 const walletService = require('../services/payment/wallet.service');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
@@ -29,6 +30,7 @@ const trustPolicy = require('../services/trustPolicy.service');
 const routeOptimizer = require('../services/logistics/routeOptimizer.service');
 const localGeocoder = require('../services/maps/localGeocoder.service');
 const logger = require('../utils/logger');
+const { hashToken } = require('../utils/hash');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GOOGLE MAPS & GPS HELPERS
@@ -44,6 +46,36 @@ const ACTIVE_TRIP_STATUSES = [
   'in_transit',
   'out_for_delivery',
 ];
+
+const recordLogisticsLocation = async ({ logistics, logisticsId, orderId, driverId, gpsCoords, source, req }) => {
+  if (!gpsCoords?.lat || !gpsCoords?.lng) return null;
+
+  const lat = Number(gpsCoords.lat);
+  const lng = Number(gpsCoords.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  try {
+    return await LogisticsLocation.create({
+      logistics: logistics?._id || logisticsId,
+      order: orderId || logistics?.order?._id || logistics?.order,
+      driver: driverId,
+      lat,
+      lng,
+      point: { type: 'Point', coordinates: [lng, lat] },
+      accuracy: gpsCoords.accuracy,
+      speed: gpsCoords.speed,
+      heading: gpsCoords.heading,
+      source,
+      requestId: req?.id,
+    });
+  } catch (error) {
+    logger.warn('Failed to persist logistics location point', {
+      logisticsId: logistics?._id || logisticsId,
+      error: error.message,
+    });
+    return null;
+  }
+};
 
 const KENYA_ROUTE_POINTS = {
   Nairobi: { lat: -1.2921, lng: 36.8219 },
@@ -1781,6 +1813,15 @@ exports.updateLocation = async (req, res, next) => {
       req.body
     );
 
+    await recordLogisticsLocation({
+      logisticsId: req.params.id,
+      orderId: result?.order,
+      driverId: req.user._id || req.user.id,
+      gpsCoords: req.body,
+      source: 'driver_location',
+      req,
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Location updated',
@@ -3032,7 +3073,12 @@ exports.processQrScan = async (req, res, next) => {
 
     const normalizedToken = qrChainSvc.normalizeToken(token);
     const qrTokenForStep = normalizedToken
-      ? await QRToken.findOne({ token: normalizedToken }).select('type logistics')
+      ? await QRToken.findOne({
+        $or: [
+          { tokenHash: hashToken(normalizedToken) },
+          { token: normalizedToken },
+        ],
+      }).select('type logistics')
       : null;
 
     if (qrTokenForStep?.type) {
@@ -3387,6 +3433,14 @@ exports.processQrScan = async (req, res, next) => {
       accuracy: gpsCoords.accuracy,
       lastUpdate: new Date(),
     };
+
+    await recordLogisticsLocation({
+      logistics,
+      driverId: userId,
+      gpsCoords,
+      source: step === 'pickup' ? 'pickup_scan' : 'delivery_scan',
+      req,
+    });
 
     let escrowRelease = null;
 

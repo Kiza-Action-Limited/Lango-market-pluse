@@ -1,4 +1,12 @@
 import api from '../config/axios';
+import {
+  requireGpsCoords,
+  requireMongoId,
+  requirePositiveAmount,
+  requireQrToken,
+  resolveGpsCoords,
+  withIdempotency,
+} from '../utils/backendRules';
 
 const unwrap = (response) => response?.data?.data || response?.data || null;
 
@@ -39,12 +47,12 @@ export const logisticsService = {
   },
 
   updateDriverLocation: async (payload) => {
-    const response = await api.put('/v1/logistics/location', payload);
+    const response = await api.put('/v1/logistics/location', requireGpsCoords(payload));
     return unwrap(response);
   },
 
   updateTripLocation: async (logisticsId, payload) => {
-    const response = await api.put(`/v1/logistics/${logisticsId}/location`, payload);
+    const response = await api.put(`/v1/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/location`, requireGpsCoords(payload));
     return unwrap(response);
   },
 
@@ -59,7 +67,7 @@ export const logisticsService = {
   },
 
   createShipment: async (payload) => {
-    const response = await api.post('/v1/logistics', payload);
+    const response = await api.post('/v1/logistics', payload, withIdempotency('logistics-create'));
     return unwrap(response);
   },
 
@@ -128,12 +136,12 @@ export const logisticsService = {
   },
 
   acceptTrip: async (logisticsId) => {
-    const response = await api.put(`/v1/logistics/${logisticsId}/accept`);
+    const response = await api.put(`/v1/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/accept`, {}, withIdempotency('logistics-accept'));
     return unwrap(response);
   },
 
   assignDriver: async (logisticsId, payload = {}) => {
-    const response = await api.put(`/v1/logistics/${logisticsId}/assign-driver`, payload);
+    const response = await api.put(`/v1/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/assign-driver`, payload, withIdempotency('logistics-assign-driver'));
     return unwrap(response);
   },
 
@@ -143,21 +151,21 @@ export const logisticsService = {
       throw new Error('This is a DELIVERY QR token. Use the PICKUP token to confirm pickup.');
     }
 
-    const response = await api.post(`/v1/logistics/${logisticsId}/qr-scan`, {
+    const response = await api.post(`/v1/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/qr-scan`, {
       step: 'pickup',
-      token: qrPayload.token,
-      gpsCoords: payload?.gpsCoords,
-    });
+      token: requireQrToken(qrPayload.token),
+      gpsCoords: await resolveGpsCoords(payload?.gpsCoords),
+    }, withIdempotency('logistics-pickup-scan'));
     return unwrap(response);
   },
 
   scanDelivery: async (logisticsId, payload) => {
     const qrPayload = parseQrPayload(payload);
-    const response = await api.post(`/v1/logistics/${logisticsId}/qr-scan`, {
+    const response = await api.post(`/v1/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/qr-scan`, {
       step: 'delivery',
-      token: qrPayload.token,
-      gpsCoords: payload?.gpsCoords,
-    });
+      token: requireQrToken(qrPayload.token),
+      gpsCoords: await resolveGpsCoords(payload?.gpsCoords),
+    }, withIdempotency('logistics-delivery-scan'));
     return unwrap(response);
   },
 
@@ -167,7 +175,7 @@ export const logisticsService = {
   },
 
   reviewApplication: async (userId, payload) => {
-    const response = await api.put(`/v1/admin/logistics/applications/${userId}/review`, payload);
+    const response = await api.put(`/v1/admin/logistics/applications/${requireMongoId(userId, 'User ID')}/review`, payload, withIdempotency('logistics-review-application'));
     return unwrap(response);
   },
 
@@ -182,22 +190,32 @@ export const logisticsService = {
   },
 
   adminScanTripQr: async (logisticsId, payload) => {
-    const response = await api.post(`/v1/admin/logistics/${logisticsId}/qr-scan`, payload);
+    const response = await api.post(`/v1/admin/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/qr-scan`, {
+      ...payload,
+      token: requireQrToken(payload?.token),
+      gpsCoords: await resolveGpsCoords(payload?.gpsCoords),
+    }, withIdempotency('admin-logistics-qr-scan'));
     return unwrap(response);
   },
 
   adminReleaseLogisticsEscrow: async (logisticsId, payload = {}) => {
-    const response = await api.post(`/v1/admin/logistics/${logisticsId}/escrow/release`, payload);
+    const response = await api.post(`/v1/admin/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/escrow/release`, payload, withIdempotency('admin-logistics-escrow-release'));
     return unwrap(response);
   },
 
   updateAdminLogisticsTracking: async (logisticsId, payload = {}) => {
-    const response = await api.put(`/v1/admin/logistics/${logisticsId}/tracking`, payload);
+    const response = await api.put(`/v1/admin/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/tracking`, payload, withIdempotency('admin-logistics-tracking'));
     return unwrap(response);
   },
 
   createGroupTrip: async (payload) => {
-    const response = await api.post('/v1/logistics/group-trip', payload);
+    const response = await api.post('/v1/logistics/group-trip', {
+      ...payload,
+      originLat: requireGpsCoords({ lat: payload?.originLat, lng: payload?.originLng }).lat,
+      originLng: requireGpsCoords({ lat: payload?.originLat, lng: payload?.originLng }).lng,
+      destinationLat: requireGpsCoords({ lat: payload?.destinationLat, lng: payload?.destinationLng }).lat,
+      destinationLng: requireGpsCoords({ lat: payload?.destinationLat, lng: payload?.destinationLng }).lng,
+    }, withIdempotency('group-trip-create'));
     return unwrap(response);
   },
 
@@ -212,7 +230,7 @@ export const logisticsService = {
   },
 
   createGroupTripRoute: async (payload) => {
-    const response = await api.post('/v1/logistics/group-trip/routes', payload);
+    const response = await api.post('/v1/logistics/group-trip/routes', payload, withIdempotency('group-trip-route-create'));
     return unwrap(response);
   },
 
@@ -222,17 +240,20 @@ export const logisticsService = {
   },
 
   joinGroupTrip: async (payload) => {
-    const response = await api.post('/v1/logistics/group-trip/join', payload);
+    const response = await api.post('/v1/logistics/group-trip/join', {
+      ...payload,
+      weightKg: requirePositiveAmount(payload?.weightKg, 1, 'Cargo weight'),
+    }, withIdempotency('group-trip-join'));
     return unwrap(response);
   },
 
   recordGroupTripPayment: async (groupTripId, payload = {}) => {
-    const response = await api.post(`/v1/logistics/group-trip/${encodeURIComponent(groupTripId)}/payment`, payload);
+    const response = await api.post(`/v1/logistics/group-trip/${encodeURIComponent(groupTripId)}/payment`, payload, withIdempotency('group-trip-payment'));
     return unwrap(response);
   },
 
   bulkUpdateStatus: async (payload) => {
-    const response = await api.post('/v1/logistics/bulk/status', payload);
+    const response = await api.post('/v1/logistics/bulk/status', payload, withIdempotency('logistics-bulk-status'));
     return unwrap(response);
   },
 
@@ -242,27 +263,30 @@ export const logisticsService = {
   },
 
   releaseEscrow: async (orderId, payload = {}) => {
-    const response = await api.post(`/v1/escrow/release/${orderId}`, payload);
+    const response = await api.post(`/v1/escrow/release/${orderId}`, payload, withIdempotency('logistics-escrow-release'));
     return unwrap(response);
   },
 
   holdEscrow: async (orderId, payload = {}) => {
-    const response = await api.post(`/v1/escrow/hold/${orderId}`, payload);
+    const response = await api.post(`/v1/escrow/hold/${orderId}`, payload, withIdempotency('logistics-escrow-hold'));
     return unwrap(response);
   },
 
   partialReleaseEscrow: async (orderId, payload = {}) => {
-    const response = await api.post(`/v1/escrow/partial-release/${orderId}`, payload);
+    const response = await api.post(`/v1/escrow/partial-release/${orderId}`, {
+      ...payload,
+      amount: requirePositiveAmount(payload?.amount, 1, 'Partial release amount'),
+    }, withIdempotency('logistics-escrow-partial-release'));
     return unwrap(response);
   },
 
   cancelEscrow: async (orderId, payload = {}) => {
-    const response = await api.post(`/v1/escrow/cancel/${orderId}`, payload);
+    const response = await api.post(`/v1/escrow/cancel/${orderId}`, payload, withIdempotency('logistics-escrow-cancel'));
     return unwrap(response);
   },
 
   generateQrToken: async (payload) => {
-    const response = await api.post('/v1/qr-tokens/generate', payload);
+    const response = await api.post('/v1/qr-tokens/generate', payload, withIdempotency('qr-token-generate'));
     return unwrap(response);
   },
 
@@ -277,7 +301,7 @@ export const logisticsService = {
   },
 
   resendQrToken: async (id) => {
-    const response = await api.post(`/v1/qr-tokens/${id}/resend`);
+    const response = await api.post(`/v1/qr-tokens/${requireMongoId(id, 'QR token ID')}/resend`, {}, withIdempotency('qr-token-resend'));
     return unwrap(response);
   },
 
@@ -287,7 +311,7 @@ export const logisticsService = {
   },
 
   generateTripQrTokens: async (logisticsId) => {
-    const response = await api.post(`/v1/logistics/${logisticsId}/qr-tokens`);
+    const response = await api.post(`/v1/logistics/${requireMongoId(logisticsId, 'Logistics ID')}/qr-tokens`, {}, withIdempotency('logistics-trip-qr-generate'));
     return unwrap(response);
   },
 

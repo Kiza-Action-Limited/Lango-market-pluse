@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { FaTimesCircle, FaUser, FaBox, FaShoppingCart, FaMoneyBillWave, FaStar, FaPhoneAlt, FaIdCard, FaCheckCircle, FaFileAlt, FaExternalLinkAlt, FaUpload } from 'react-icons/fa';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
-import { getUserCategoryLabel } from '../../utils/userCategory';
+import { getUserCategoryLabel, isBuyerUser } from '../../utils/userCategory';
 
 const valueOrDash = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -28,7 +28,9 @@ const MetricCard = ({ icon: Icon, label, value, tone = 'text-[#F97316]' }) => (
 );
 
 const getDisplayName = (user = {}) =>
-  user.fullName || user.name || user.businessName || user.email || 'Unknown User';
+  isBuyerUser(user)
+    ? user.fullName || user.name || user.email || 'Unknown User'
+    : user.fullName || user.name || user.businessName || user.email || 'Unknown User';
 
 const getOrderTotal = (order = {}) => order.totalAmount ?? order.total ?? 0;
 
@@ -66,6 +68,7 @@ const UserDetailsModal = ({ open, loading = false, details, fallbackUser, onClos
   if (!open) return null;
 
   const user = details?.user || fallbackUser || {};
+  const buyerAccount = isBuyerUser(user);
   const analytics = details?.analytics || {};
   const productStats = details?.productStats || {};
   const recentOrders = Array.isArray(details?.recentOrders) ? details.recentOrders : [];
@@ -163,8 +166,8 @@ const UserDetailsModal = ({ open, loading = false, details, fallbackUser, onClos
                 <DetailItem label="Email" value={user.email} />
                 <DetailItem label="Phone" value={user.phone} />
                 <DetailItem label="Role" value={user.role} />
-                <DetailItem label="Business Type" value={user.businessType} />
-                <DetailItem label="Business Name" value={user.businessName} />
+                {!buyerAccount && <DetailItem label="Business Type" value={user.businessType} />}
+                {!buyerAccount && <DetailItem label="Business Name" value={user.businessName} />}
                 <DetailItem label="Account Role" value={user.accountRole} />
                 <DetailItem label="Subscription" value={user.subscriptionTier} />
                 <DetailItem label="KYC Verified" value={user.kycVerified ? 'Yes' : 'No'} />

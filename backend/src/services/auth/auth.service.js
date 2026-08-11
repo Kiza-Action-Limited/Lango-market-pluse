@@ -48,6 +48,11 @@ const getDefaultRedirectForUser = (user = {}) => {
   return '/';
 };
 
+const isBuyerAccount = (user = {}) => {
+  const role = String(user.role || '').trim().toLowerCase();
+  return role === 'buyer' || role === 'consumer' || getEffectiveUserCategory(user) === 'consumer';
+};
+
 const isProduction = process.env.NODE_ENV === 'production';
 const PASSWORD_RESET_TOKEN_TTL_SECONDS = 60 * 60;
 
@@ -147,13 +152,13 @@ class AuthService {
       ? normalizedRole
       : null;
 
-    if (normalizedBusinessType || sellerSubtypeFromRole) {
+    if (!isBuyerAccount(userPayload) && (normalizedBusinessType || sellerSubtypeFromRole)) {
       userPayload.businessType = normalizedBusinessType || sellerSubtypeFromRole;
     }
-    if (normalizedBusinessName) {
+    if (!isBuyerAccount(userPayload) && normalizedBusinessName) {
       userPayload.businessName = normalizedBusinessName;
     }
-    if (normalizedBusinessLogoUrl) {
+    if (!isBuyerAccount(userPayload) && normalizedBusinessLogoUrl) {
       userPayload.businessLogoUrl = normalizedBusinessLogoUrl;
     }
 
@@ -451,11 +456,12 @@ class AuthService {
     }
     const userId = this.resolveUserId(user);
     const role = user.role || 'buyer';
+    const buyerAccount = isBuyerAccount(user);
     const tokenPayload = {
       id: userId,
       role,
-      businessType: user.businessType,
-      businessName: user.businessName,
+      businessType: buyerAccount ? null : user.businessType,
+      businessName: buyerAccount ? null : user.businessName,
     };
     const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '7d' });
     const refreshToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '30d' });
@@ -467,6 +473,11 @@ class AuthService {
     delete obj.password;
     delete obj.passwordHash;
     delete obj.__v;
+    if (isBuyerAccount(obj)) {
+      obj.businessName = null;
+      obj.businessType = null;
+      obj.businessLogoUrl = null;
+    }
     return obj;
   }
 
@@ -528,6 +539,7 @@ class AuthService {
 
     const effectiveCategory = getEffectiveUserCategory(currentUser);
     const isLogisticsProfile = effectiveCategory === 'logistics';
+    const buyerProfile = effectiveCategory === 'consumer';
 
     if (profileData.fullName !== undefined || profileData.name !== undefined) {
       allowedUpdates.fullName = String(profileData.fullName ?? profileData.name ?? '').trim();
@@ -535,14 +547,20 @@ class AuthService {
     if (profileData.phone !== undefined) {
       allowedUpdates.phone = this.normalizePhone(profileData.phone);
     }
-    if (profileData.businessName !== undefined) {
-      allowedUpdates.businessName = String(profileData.businessName || '').trim() || null;
-    }
-    if (profileData.businessType !== undefined) {
-      allowedUpdates.businessType = profileData.businessType || null;
-    }
-    if (profileData.businessLogoUrl !== undefined) {
-      allowedUpdates.businessLogoUrl = profileData.businessLogoUrl || null;
+    if (buyerProfile) {
+      unsetUpdates.businessName = '';
+      unsetUpdates.businessType = '';
+      unsetUpdates.businessLogoUrl = '';
+    } else {
+      if (profileData.businessName !== undefined) {
+        allowedUpdates.businessName = String(profileData.businessName || '').trim() || null;
+      }
+      if (profileData.businessType !== undefined) {
+        allowedUpdates.businessType = profileData.businessType || null;
+      }
+      if (profileData.businessLogoUrl !== undefined) {
+        allowedUpdates.businessLogoUrl = profileData.businessLogoUrl || null;
+      }
     }
     if (profileData.profileImageUrl !== undefined) {
       allowedUpdates.profileImageUrl = profileData.profileImageUrl || null;
@@ -603,6 +621,7 @@ class AuthService {
 
     if (useFallbackStore) {
       const fallbackUpdates = expandDotUpdates(allowedUpdates);
+      Object.keys(unsetUpdates).forEach((key) => applyDotPath(fallbackUpdates, key, null));
       delete fallbackUpdates.location;
       const user = memoryStore.updateUserById(userId, fallbackUpdates);
       if (!user) {

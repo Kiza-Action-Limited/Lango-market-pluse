@@ -497,6 +497,47 @@ const UserSchema = new mongoose.Schema(
   }
 );
 
+const clearBuyerBusinessFields = (target) => {
+  if (!target || !['buyer', 'consumer'].includes(String(target.role || '').trim().toLowerCase())) return;
+  target.businessName = null;
+  target.businessType = null;
+  target.businessLogoUrl = null;
+};
+
+UserSchema.pre('validate', function clearBuyerBusinessProfile(next) {
+  clearBuyerBusinessFields(this);
+  next();
+});
+
+const clearBuyerBusinessUpdate = function clearBuyerBusinessProfileUpdate(next) {
+  const update = this.getUpdate() || {};
+  const directRole = update.role;
+  const setRole = update.$set?.role;
+  const nextRole = String(setRole || directRole || '').trim().toLowerCase();
+
+  if (['buyer', 'consumer'].includes(nextRole)) {
+    if (update.$set || update.$unset) {
+      update.$set = {
+        ...(update.$set || {}),
+        businessName: null,
+        businessType: null,
+        businessLogoUrl: null,
+      };
+    } else {
+      update.businessName = null;
+      update.businessType = null;
+      update.businessLogoUrl = null;
+    }
+    this.setUpdate(update);
+  }
+
+  next();
+};
+
+UserSchema.pre('findOneAndUpdate', clearBuyerBusinessUpdate);
+UserSchema.pre('updateOne', clearBuyerBusinessUpdate);
+UserSchema.pre('updateMany', clearBuyerBusinessUpdate);
+
 // Hash password before saving
 UserSchema.pre('save', async function () {
   if (!this.isModified('password')) return;

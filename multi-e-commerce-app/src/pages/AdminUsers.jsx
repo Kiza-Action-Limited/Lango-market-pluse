@@ -24,7 +24,7 @@ import {
 } from 'react-icons/fa';
 import api from '../config/axios';
 import UserDetailsModal from '../components/admin/UserDetailsModal';
-import { getEffectiveUserCategory, isSellerUser } from '../utils/userCategory';
+import { getEffectiveUserCategory, isBuyerUser, isSellerUser } from '../utils/userCategory';
 
 const verificationStatuses = ['unverified', 'pending', 'verified', 'gold', 'rejected', 'restricted'];
 const roleFilters = [
@@ -68,7 +68,11 @@ const formatLabel = (value) => String(value || '')
   .replace(/_/g, ' ')
   .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
-const getDisplayName = (user = {}) => user.businessName || user.fullName || user.name || user.email || user.phone || 'Unknown user';
+const getDisplayName = (user = {}) => (
+  isBuyerUser(user)
+    ? user.fullName || user.name || user.email || user.phone || 'Unknown user'
+    : user.businessName || user.fullName || user.name || user.email || user.phone || 'Unknown user'
+);
 
 const getUserId = (user = {}) => user._id || user.id || user.userId;
 
@@ -83,6 +87,8 @@ const getUserRoleLabel = (user = {}) => {
   if (category === 'admin') return 'admin';
   return isSellerUser(user) ? 'seller' : user.role || category;
 };
+
+const getBusinessTypeLabel = (user = {}) => (isBuyerUser(user) ? '' : user.businessType || getEffectiveUserCategory(user));
 
 const getUserActivityDate = (user = {}) => user.lastLogin || user.lastActiveAt || user.lastActivityAt || user.updatedAt || user.createdAt;
 
@@ -388,9 +394,9 @@ const AdminUsers = () => {
     rows: rows.map((user) => [
       getUserId(user),
       getDisplayName(user),
-      user.businessName || '',
+      isBuyerUser(user) ? '' : user.businessName || '',
       getUserRoleLabel(user),
-      user.businessType || getEffectiveUserCategory(user),
+      getBusinessTypeLabel(user),
       user.email || '',
       user.phone || '',
       user.locationHub || user.city || '',
@@ -429,7 +435,7 @@ const AdminUsers = () => {
       getUserId(user),
       getDisplayName(user),
       getUserRoleLabel(user),
-      user.businessType || getEffectiveUserCategory(user),
+      getBusinessTypeLabel(user),
       user.isBlocked ? 'blocked' : 'active',
       getUserActivityCount(user),
       user.orderCount ?? user.totalOrders ?? '',
@@ -652,7 +658,7 @@ const AdminUsers = () => {
                             </div>
                             <div className="min-w-0">
                               <p className="truncate font-semibold text-gray-950">{displayName}</p>
-                              <p className="truncate text-xs text-gray-500">{user.locationHub || user.city || user.businessName || 'No location set'}</p>
+                              <p className="truncate text-xs text-gray-500">{user.locationHub || user.city || (isBuyerUser(user) ? '' : user.businessName) || 'No location set'}</p>
                             </div>
                           </div>
                         </td>
@@ -661,7 +667,9 @@ const AdminUsers = () => {
                             <StatusBadge tone={roleLabel === 'admin' ? 'orange' : isSellerUser(user) ? 'green' : roleLabel === 'logistics' ? 'blue' : 'gray'}>
                               {formatLabel(roleLabel)}
                             </StatusBadge>
-                            <span className="text-xs text-gray-500">{formatLabel(user.businessType || category)}</span>
+                            {!isBuyerUser(user) && (
+                              <span className="text-xs text-gray-500">{formatLabel(user.businessType || category)}</span>
+                            )}
                           </div>
                         </td>
                         <td className="px-5 py-4">

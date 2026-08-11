@@ -1,5 +1,6 @@
 const QRToken = require('../../models/QRToken.model');
 const Order = require('../../models/Order.model');
+const { hashToken } = require('../../utils/hash');
 
 class QRTokenService {
   async generateToken(orderId, logisticsId, type, req) {
@@ -21,7 +22,7 @@ class QRTokenService {
     expiresAt.setHours(expiresAt.getHours() + 24);
 
     return QRToken.create({
-      token,
+      tokenHash: hashToken(token),
       type,
       order: orderId,
       logistics: logisticsId,
@@ -31,7 +32,12 @@ class QRTokenService {
   }
 
   async markTokenAsUsed(token, scannedBy, gpsData) {
-    const qrToken = await QRToken.findOne({ token });
+    const qrToken = await QRToken.findOne({
+      $or: [
+        { tokenHash: hashToken(token) },
+        { token },
+      ],
+    });
     
     if (!qrToken) {
       throw new Error('Token not found');

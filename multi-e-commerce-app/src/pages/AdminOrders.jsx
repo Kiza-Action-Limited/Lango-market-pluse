@@ -57,6 +57,22 @@ const getUserName = (user) => (
 
 const getOrderId = (order) => order?._id || order?.id;
 
+const formatCompactDateTime = (date) => {
+  if (!date) return '-';
+  return new Date(date).toLocaleString('en-KE', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const getInitials = (name = '') => {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return parts.slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+};
+
 const readMetadata = (source, key) => {
   const metadata = source?.metadata;
   if (!metadata) return undefined;
@@ -312,10 +328,15 @@ const AdminOrders = () => {
           </form>
         </section>
 
-        <section className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-          <div className="border-b border-gray-100 px-5 py-4">
-            <h2 className="font-semibold text-gray-950">Order Queue</h2>
-            <p className="mt-1 text-sm text-gray-500">Review order participants, payment, escrow status, logistics, and fulfillment state.</p>
+        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-1 border-b border-gray-100 bg-linear-to-r from-white to-orange-50/70 px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-lg font-bold text-gray-950">Order Queue</h2>
+              <p className="mt-1 text-sm text-gray-500">Review participants, payment, escrow, logistics, and fulfillment state.</p>
+            </div>
+            <span className="inline-flex w-fit rounded-full border border-orange-100 bg-white px-3 py-1 text-xs font-semibold uppercase text-[#C2410C]">
+              {pagination.total || 0} orders
+            </span>
           </div>
 
           {loading ? (
@@ -325,104 +346,112 @@ const AdminOrders = () => {
               ))}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1180px] text-left text-sm">
-                <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="px-5 py-3">Order</th>
-                    <th className="px-5 py-3">Buyer</th>
-                    <th className="px-5 py-3">Seller</th>
-                    <th className="px-5 py-3">Product</th>
-                    <th className="px-5 py-3">Payment</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3">Logistics</th>
-                    <th className="px-5 py-3">Total</th>
-                    <th className="px-5 py-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {orders.map((order) => {
-                    const orderId = getOrderId(order);
-                    const logistics = order.logistics || {};
-                    const provider = getLogisticsPreference(order);
+            <div className="overflow-x-auto bg-gray-50/80 p-3">
+              <div className="min-w-[1120px] space-y-2">
+                <div className="grid grid-cols-[150px_190px_200px_180px_120px_155px_190px_120px_84px] gap-3 px-3 text-xs font-bold uppercase text-gray-500">
+                  <span>Order</span>
+                  <span>Buyer</span>
+                  <span>Seller</span>
+                  <span>Product</span>
+                  <span>Payment</span>
+                  <span>Status</span>
+                  <span>Logistics</span>
+                  <span>Total</span>
+                  <span className="text-right">Actions</span>
+                </div>
 
-                    return (
-                      <tr key={orderId} className="bg-white hover:bg-gray-50">
-                        <td className="px-5 py-4">
-                          <p className="font-mono text-sm font-semibold text-gray-950">{order.orderNumber || `#${String(orderId).slice(-8)}`}</p>
-                          <p className="mt-1 text-xs text-gray-500">{order.createdAt ? new Date(order.createdAt).toLocaleString() : '-'}</p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-2">
-                            <FaUser className="text-gray-400" />
-                            <div className="min-w-0">
-                              <p className="truncate font-semibold text-gray-900">{order.buyerName || getUserName(order.buyer)}</p>
-                              <p className="truncate text-xs text-gray-500">{order.buyer?.phone || order.buyer?.email || '-'}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="truncate font-semibold text-gray-900">{order.sellerName || getUserName(order.seller)}</p>
+                {orders.map((order) => {
+                  const orderId = getOrderId(order);
+                  const logistics = order.logistics || {};
+                  const provider = getLogisticsPreference(order);
+                  const buyerName = order.buyerName || getUserName(order.buyer);
+                  const sellerName = order.sellerName || getUserName(order.seller);
+
+                  return (
+                    <article
+                      key={orderId}
+                      className="grid grid-cols-[150px_190px_200px_180px_120px_155px_190px_120px_84px] items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-3 shadow-sm transition hover:border-orange-200 hover:bg-orange-50/40 hover:shadow-md"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-mono text-sm font-bold text-gray-950">{order.orderNumber || `#${String(orderId).slice(-8)}`}</p>
+                        <p className="mt-0.5 text-xs text-gray-500">{formatCompactDateTime(order.createdAt)}</p>
+                      </div>
+
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-bold text-gray-600">
+                          {getInitials(buyerName)}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold leading-5 text-gray-900">{buyerName}</p>
+                          <p className="truncate text-xs text-gray-500">{order.buyer?.phone || order.buyer?.email || '-'}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#FFF7ED] text-xs font-bold text-[#C2410C]">
+                          {getInitials(sellerName)}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold leading-5 text-gray-900">{sellerName}</p>
                           <p className="truncate text-xs text-gray-500">{order.seller?.phone || order.seller?.email || '-'}</p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="max-w-[180px] truncate font-semibold text-gray-900">{order.productName}</p>
-                          <p className="text-xs text-gray-500">Qty {order.quantity || order.items?.[0]?.quantity || 0} | {normalizeStatus(order.productCategory)}</p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(order.paymentStatus)}`}>
-                            {normalizeStatus(order.paymentStatus)}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <select
-                            value={order.status}
-                            onChange={(event) => updateOrderStatus(orderId, event.target.value)}
-                            disabled={updatingOrderId === orderId}
-                            className={`max-w-[170px] rounded-lg border px-2 py-1 text-xs font-semibold outline-none disabled:opacity-60 ${getStatusTone(order.status)}`}
-                          >
-                            {updateStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                          </select>
-                        </td>
-                        <td className="px-5 py-4">
-                          {logistics?._id ? (
-                            <div>
-                              <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(logistics.status)}`}>
-                                {normalizeStatus(logistics.status)}
-                              </span>
-                              <p className="mt-1 text-xs text-gray-500">{logistics.trackingNumber || logistics.tripId || 'Tracking pending'}</p>
-                              <p className="mt-1 max-w-[170px] truncate text-xs font-semibold text-sky-700">
-                                {provider.name || 'Seller preferred'}
-                              </p>
-                            </div>
-                          ) : (
-                            <div>
-                              <span className="text-xs text-gray-500">No logistics record</span>
-                              <p className="mt-1 max-w-[170px] truncate text-xs font-semibold text-sky-700">
-                                {provider.name || 'Seller preferred'}
-                              </p>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="font-semibold text-green-700">{formatCurrency(order.total || order.totalAmount || 0)}</p>
-                          <p className="text-xs text-gray-500">Unit {formatCurrency(order.unitPrice || order.items?.[0]?.price || 0)}</p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedOrder(order)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-[#F97316]/30 bg-white px-3 py-2 text-xs font-semibold text-[#F97316] hover:bg-[#FFF7ED]"
-                          >
-                            <FaEye />
-                            Details
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        </div>
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-gray-900">{order.productName}</p>
+                        <p className="mt-0.5 truncate text-xs text-gray-500">
+                          Qty {order.quantity || order.items?.[0]?.quantity || 0} | {normalizeStatus(order.productCategory)}
+                        </p>
+                      </div>
+
+                      <span className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(order.paymentStatus)}`}>
+                        {normalizeStatus(order.paymentStatus)}
+                      </span>
+
+                      <select
+                        value={order.status}
+                        onChange={(event) => updateOrderStatus(orderId, event.target.value)}
+                        disabled={updatingOrderId === orderId}
+                        className={`h-8 max-w-[150px] rounded-md border px-2 text-xs font-semibold outline-none disabled:opacity-60 ${getStatusTone(order.status)}`}
+                      >
+                        {updateStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+
+                      <div className="min-w-0">
+                        {logistics?._id ? (
+                          <>
+                            <span className={`inline-flex w-fit rounded-full border px-2.5 py-1 text-xs font-semibold ${getStatusTone(logistics.status)}`}>
+                              {normalizeStatus(logistics.status)}
+                            </span>
+                            <p className="mt-1 truncate font-mono text-xs text-gray-500">{logistics.trackingNumber || logistics.tripId || 'Tracking pending'}</p>
+                            <p className="mt-0.5 truncate text-xs font-semibold text-sky-700">{provider.name || 'Seller preferred'}</p>
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-flex w-fit rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600">No logistics</span>
+                            <p className="mt-1 truncate text-xs font-semibold text-sky-700">{provider.name || 'Seller preferred'}</p>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="truncate font-bold text-green-700">{formatCurrency(order.total || order.totalAmount || 0)}</p>
+                        <p className="mt-0.5 truncate text-xs text-gray-500">Unit {formatCurrency(order.unitPrice || order.items?.[0]?.price || 0)}</p>
+                      </div>
+
+                      <div className="text-right">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOrder(order)}
+                          className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-[#F97316]/30 bg-white px-3 text-xs font-semibold text-[#F97316] hover:bg-[#FFF7ED]"
+                        >
+                          <FaEye />
+                          Details
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
 
               {!orders.length && (
                 <div className="p-10 text-center">
@@ -431,6 +460,7 @@ const AdminOrders = () => {
                   <p className="mt-1 text-sm text-gray-500">Try another status, payment filter, date range, or search.</p>
                 </div>
               )}
+              </div>
             </div>
           )}
 

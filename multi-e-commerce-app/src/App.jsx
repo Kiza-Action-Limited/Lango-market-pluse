@@ -46,6 +46,7 @@ const About = lazy(() => import('./pages/About'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const SubscriptionPlans = lazy(() => import('./pages/SubscriptionPlans'));
 const SellerPlansLanding = lazy(() => import('./pages/SellerPlansLanding'));
+const LogisticsLanding = lazy(() => import('./pages/LogisticsLanding'));
 const FAQ = lazy(() => import('./pages/FAQ'));
 const ShippingInfo = lazy(() => import('./pages/ShippingInfo'));
 const Returns = lazy(() => import('./pages/Returns'));
@@ -148,6 +149,8 @@ function App() {
                       <Route path="business" element={<Business />} />
                       <Route path="seller-plans" element={<SellerPlansLanding />} />
                       <Route path="seller-subscription-plans" element={<Navigate to="/seller-plans" replace />} />
+                      <Route path="logistics-partners" element={<LogisticsLanding />} />
+                      <Route path="logistics-providers" element={<Navigate to="/logistics-partners" replace />} />
                       <Route path="manufacturers" element={<Navigate to="/business" replace />} />
                       <Route path="businesses" element={<BusinessDirectory />} />
                       <Route path="businesses/:businessId" element={<BusinessProfile />} />
