@@ -505,8 +505,9 @@ const clearBuyerBusinessFields = (target) => {
 };
 
 UserSchema.pre('validate', function clearBuyerBusinessProfile(next) {
+
   clearBuyerBusinessFields(this);
-  next();
+  if (typeof next === 'function') next();
 });
 
 const clearBuyerBusinessUpdate = function clearBuyerBusinessProfileUpdate(next) {
@@ -516,27 +517,35 @@ const clearBuyerBusinessUpdate = function clearBuyerBusinessProfileUpdate(next) 
   const nextRole = String(setRole || directRole || '').trim().toLowerCase();
 
   if (['buyer', 'consumer'].includes(nextRole)) {
+
     if (update.$set || update.$unset) {
+
       update.$set = {
         ...(update.$set || {}),
         businessName: null,
         businessType: null,
         businessLogoUrl: null,
       };
+
     } else {
+
       update.businessName = null;
+
       update.businessType = null;
+
       update.businessLogoUrl = null;
+
     }
     this.setUpdate(update);
   }
 
-  next();
+  if (typeof next === 'function') next();
 };
 
 UserSchema.pre('findOneAndUpdate', clearBuyerBusinessUpdate);
 UserSchema.pre('updateOne', clearBuyerBusinessUpdate);
 UserSchema.pre('updateMany', clearBuyerBusinessUpdate);
+
 
 // Hash password before saving
 UserSchema.pre('save', async function () {
