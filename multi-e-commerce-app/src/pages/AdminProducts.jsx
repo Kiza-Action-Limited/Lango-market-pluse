@@ -1,7 +1,7 @@
 // src/pages/AdminProducts.jsx
 import React, { useEffect, useState } from 'react';
 import api from '../config/axios';
-import { FaSearch, FaBox, FaStore, FaChartLine, FaFilter, FaEdit, FaTrash, FaSave, FaTimes, FaFileCsv } from 'react-icons/fa';
+import { FaSearch, FaBox, FaStore, FaChartLine, FaFilter, FaEdit, FaTrash, FaSave, FaTimes, FaFileCsv, FaEye } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import BulkProductCsvJournal from '../components/BulkProductCsvJournal';
@@ -13,6 +13,7 @@ const AdminProducts = () => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [editingProduct, setEditingProduct] = useState(null);
+  const [viewingProduct, setViewingProduct] = useState(null);
   const [editForm, setEditForm] = useState({
     name: '',
     category: 'other',
@@ -203,6 +204,7 @@ const AdminProducts = () => {
   };
 
   const openEditProduct = (product) => {
+    setViewingProduct(null);
     setEditingProduct(product);
     setEditForm({
       name: product?.name || '',
@@ -504,53 +506,52 @@ const AdminProducts = () => {
             <p className="text-[#6B7280]">{search ? `No results for "${search}"` : 'No products are currently listed'}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {filteredProducts.map((product) => {
               const active = isProductActive(product);
               const stock = getStock(product);
               const id = getProductId(product);
               const image = getImage(product);
               return (
-                <article key={id || `${product.name}-${Math.random()}`} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                  <div className="flex gap-3">
-                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-gray-100">
+                <article key={id || `${product.name}-${Math.random()}`} className="group overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-[#F97316]/30 hover:shadow-md">
+                  <div className="flex gap-3 p-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setViewingProduct(product)}
+                      className="h-16 w-16 shrink-0 overflow-hidden rounded-md bg-gray-100 ring-1 ring-gray-100 transition duration-200 group-hover:scale-[1.03]"
+                      title="View product details"
+                    >
                       {image ? (
-                        <img src={image} alt={product.name} className="h-full w-full object-cover" />
+                        <img src={image} alt={product.name} className="h-full w-full object-cover transition duration-300 group-hover:scale-110" />
                       ) : (
                         <div className="grid h-full place-items-center text-gray-400">
-                          <FaBox className="text-2xl" />
+                          <FaBox className="text-xl" />
                         </div>
                       )}
-                    </div>
+                    </button>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h3 className="truncate text-sm font-bold text-[#111827]" title={product.name}>{product.name}</h3>
-                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                              {active ? 'Active' : 'Inactive'}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex min-w-0 items-center gap-1 text-xs text-gray-500">
-                            <FaStore className="shrink-0" />
-                            <span className="truncate" title={getSellerName(product)}>{getSellerName(product)}</span>
-                          </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="truncate text-sm font-bold text-[#111827]" title={product.name}>{product.name}</h3>
+                          <p className="mt-0.5 truncate text-xs text-gray-500" title={getSellerName(product)}>{getSellerName(product)}</p>
                         </div>
-                        <p className="shrink-0 text-sm font-bold text-[#F97316]">{formatCurrency(Number(product.price) || 0)}</p>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                          {active ? 'On' : 'Off'}
+                        </span>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-[minmax(0,1.3fr)_auto_auto] items-center gap-2">
-                        <div className="min-w-0 rounded-md bg-gray-50 px-2 py-1.5">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">SKU</p>
-                          <p className="truncate font-mono text-[11px] font-semibold text-[#111827]" title={getSku(product)}>{getSku(product)}</p>
+                      <div className="mt-2 flex items-end justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-[#F97316]">{formatCurrency(Number(product.price) || 0)}</p>
+                          <p className="mt-0.5 truncate font-mono text-[10px] font-semibold text-gray-500" title={getSku(product)}>{getSku(product)}</p>
                         </div>
-                        <div className="rounded-md bg-gray-50 px-2 py-1.5 text-right">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">On hand</p>
-                          <p className={`text-xs font-bold ${getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? 'text-[#F97316]' : 'text-[#111827]'}`}>
-                            {stock}{getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? ' Low' : ''}
-                          </p>
-                        </div>
+                        <p className={`shrink-0 text-xs font-bold ${getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? 'text-[#F97316]' : 'text-[#111827]'}`}>
+                          {stock} {product?.unit || 'units'}{getThreshold(product) > 0 && stock <= getThreshold(product) && stock > 0 ? ' Low' : ''}
+                        </p>
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
                         <button
                           type="button"
                           onClick={() => toggleProductStatus(id, active)}
@@ -559,11 +560,15 @@ const AdminProducts = () => {
                         >
                           <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${active ? 'translate-x-6' : 'translate-x-1'}`} />
                         </button>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-[1fr_auto] items-end gap-3">
-                        <InventoryQuantityGraph product={product} compact />
                         <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setViewingProduct(product)}
+                            className="grid h-8 w-8 place-items-center rounded-md border border-gray-200 text-[#111827] hover:bg-gray-50"
+                            title="View product details"
+                          >
+                            <FaEye size={12} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => openEditProduct(product)}
@@ -597,6 +602,103 @@ const AdminProducts = () => {
           </div>
         )}
       </div>
+      {viewingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 p-5">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Product details</p>
+                <h2 className="mt-1 truncate text-xl font-bold text-[#111827]">{viewingProduct.name}</h2>
+                <p className="mt-1 text-sm text-[#6B7280]">{getSellerName(viewingProduct)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingProduct(null)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+                aria-label="Close product details modal"
+              >
+                <FaTimes />
+              </button>
+            </div>
+
+            <div className="grid gap-5 p-5 md:grid-cols-[220px_1fr]">
+              <div className="overflow-hidden rounded-lg bg-gray-100">
+                {getImage(viewingProduct) ? (
+                  <img src={getImage(viewingProduct)} alt={viewingProduct.name} className="h-56 w-full object-cover" />
+                ) : (
+                  <div className="grid h-56 place-items-center text-gray-400">
+                    <FaBox className="text-5xl" />
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Price</p>
+                    <p className="mt-1 font-bold text-[#F97316]">{formatCurrency(Number(viewingProduct.price) || 0)}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Status</p>
+                    <p className="mt-1 font-bold text-[#111827]">{isProductActive(viewingProduct) ? 'Active' : 'Inactive'}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">On hand</p>
+                    <p className="mt-1 font-bold text-[#111827]">{getStock(viewingProduct)} {viewingProduct?.unit || 'units'}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Low threshold</p>
+                    <p className="mt-1 font-bold text-[#111827]">{getThreshold(viewingProduct)}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-gray-50 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">SKU</p>
+                  <p className="mt-1 break-all font-mono text-sm font-semibold text-[#111827]">{getSku(viewingProduct)}</p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Category</p>
+                    <p className="mt-1 font-semibold text-[#111827]">{formatOption(viewingProduct.category || 'other')}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Location hub</p>
+                    <p className="mt-1 font-semibold text-[#111827]">{viewingProduct.locationHub || 'Not set'}</p>
+                  </div>
+                </div>
+
+                {viewingProduct.description && (
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Description</p>
+                    <p className="mt-1 text-sm text-[#374151]">{viewingProduct.description}</p>
+                  </div>
+                )}
+
+                <InventoryQuantityGraph product={viewingProduct} />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-gray-200 p-5">
+              <button
+                type="button"
+                onClick={() => setViewingProduct(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => openEditProduct(viewingProduct)}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
+              >
+                <FaEdit />
+                Edit Product
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-xl">

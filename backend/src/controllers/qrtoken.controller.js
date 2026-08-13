@@ -57,6 +57,7 @@ exports.generateQRToken = async (req, res, next) => {
     expiresAt.setHours(expiresAt.getHours() + 24);
 
     const qrToken = await QRToken.create({
+      token,
       tokenHash: hashToken(token),
       type,
       order: orderId,
@@ -241,6 +242,7 @@ exports.resendQRToken = async (req, res, next) => {
     expiresAt.setHours(expiresAt.getHours() + 24);
 
     const qrToken = await QRToken.create({
+      token: newToken,
       tokenHash: hashToken(newToken),
       type: oldToken.type,
       order: oldToken.order,

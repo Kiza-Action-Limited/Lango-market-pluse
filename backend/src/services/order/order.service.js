@@ -13,6 +13,14 @@ const qrChainSvc = require('./qrChain.service');
 const { smsQueue } = require('../../config/redis');
 const { v4: uuidv4 } = require('uuid');
 
+const enqueueSms = async (payload, context = 'sms') => {
+  try {
+    await smsQueue.add('send', payload);
+  } catch (error) {
+    console.warn(`Skipping ${context}: ${error.message}`);
+  }
+};
+
 const MOQ_BUSINESS_TYPES = new Set(['wholesaler', 'manufacturer']);
 const MOQ_EXEMPT_TYPES = new Set(['farmer', 'retailer']);
 
@@ -751,10 +759,10 @@ class OrderService {
 
     // Notify seller via SMS
     if (seller?.phone) {
-      await smsQueue.add('send', {
+      await enqueueSms({
         to: seller.phone,
         message: `New order #${order._id} for ${orderQuantity} ${productDoc.name}. Awaiting payment. Total KES ${Math.ceil(order.totalAmount).toLocaleString()} includes logistics${selectedProvider ? ` via ${savedLogisticsPreference.providerName}` : ''}.`,
-      });
+      }, 'new order seller SMS');
     }
 
     await notifyOrderParties(order, {
@@ -1009,10 +1017,10 @@ class OrderService {
 
     // Notify both parties
     if (order.buyer?.phone) {
-      await smsQueue.add('send', {
+      await enqueueSms({
         to: order.buyer.phone,
         message: `Order #${orderId} has been cancelled. Reason: ${reason || 'Not provided'}`,
-      });
+      }, 'order cancellation buyer SMS');
     }
 
     await notifyOrderParties(order, {

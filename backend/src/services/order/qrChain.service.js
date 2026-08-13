@@ -44,6 +44,7 @@ class QRChainService {
     };
 
     return QRToken.create({
+      token,
       tokenHash: hashToken(token),
       type,
       order: logistics.order,

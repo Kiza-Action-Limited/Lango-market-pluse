@@ -15,6 +15,10 @@ const ERROR_DETAILS = [
 ];
 
 const defaultUserMessage = (statusCode) => {
+  if (statusCode === 503) {
+    return 'Database temporarily unavailable. Please try again shortly.';
+  }
+
   if (statusCode >= 500) {
     return 'Something went wrong. Please try again later.';
   }
@@ -25,6 +29,21 @@ const defaultUserMessage = (statusCode) => {
   if (statusCode === 400) return 'Please check your request and try again.';
 
   return 'Request failed. Please try again.';
+};
+
+const isMongoAvailabilityError = (err = {}) => {
+  const name = String(err.name || '');
+  const code = String(err.code || err.cause?.code || '');
+  const message = String(err.message || '');
+
+  return (
+    name === 'MongoServerSelectionError' ||
+    name === 'MongoNetworkError' ||
+    code === 'ENOTFOUND' ||
+    code === 'ETIMEOUT' ||
+    code === 'ECONNREFUSED' ||
+    /getaddrinfo|server selection|connection timed out|ECONNREFUSED/i.test(message)
+  );
 };
 
 const normalizeStatusCode = (err) => {
@@ -54,6 +73,10 @@ const normalizeStatusCode = (err) => {
     return 400;
   }
 
+  if (isMongoAvailabilityError(err)) {
+    return 503;
+  }
+
   if (err.message?.toLowerCase().includes('cors blocked')) {
     return 403;
   }
@@ -75,6 +98,10 @@ const getLogMessage = (err, statusCode) => {
 };
 
 const getUserMessage = (err, statusCode) => {
+  if (statusCode === 503 && isMongoAvailabilityError(err)) {
+    return 'Database temporarily unavailable. Please try again shortly.';
+  }
+
   if (statusCode >= 500) {
     return defaultUserMessage(statusCode);
   }
@@ -91,6 +118,8 @@ const buildErrorPayload = (err, statusCode, message, requestId) => {
   };
 
   if (err.code) payload.code = err.code;
+  else if (err.serviceCode) payload.code = err.serviceCode;
+  else if (statusCode === 503 && isMongoAvailabilityError(err)) payload.code = 'DB_UNAVAILABLE';
   if (err.code === 11000 && err.keyValue) payload.keyValue = err.keyValue;
 
   ERROR_DETAILS.forEach((key) => {

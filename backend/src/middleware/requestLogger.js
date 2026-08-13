@@ -24,6 +24,10 @@ const pickResponseMessage = (body) => {
 };
 
 const defaultUserMessage = (statusCode) => {
+  if (statusCode === 503) {
+    return 'Database temporarily unavailable. Please try again shortly.';
+  }
+
   if (statusCode >= 500) {
     return 'Something went wrong. Please try again later.';
   }

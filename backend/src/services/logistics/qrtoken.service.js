@@ -22,6 +22,7 @@ class QRTokenService {
     expiresAt.setHours(expiresAt.getHours() + 24);
 
     return QRToken.create({
+      token,
       tokenHash: hashToken(token),
       type,
       order: orderId,

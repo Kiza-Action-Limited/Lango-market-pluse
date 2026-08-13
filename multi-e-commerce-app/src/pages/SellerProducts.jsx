@@ -1,7 +1,7 @@
 // src/pages/SellerProducts.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FaBox, FaChartLine, FaEdit, FaFilter, FaPlus, FaSearch, FaTrash, FaWarehouse } from 'react-icons/fa';
+import { FaBox, FaChartLine, FaEdit, FaEye, FaFilter, FaPlus, FaSearch, FaTrash, FaWarehouse } from 'react-icons/fa';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { FEATURE_TOOLTIPS, SUBSCRIPTION_FEATURES } from '../config/subscriptionPlans';
@@ -107,6 +107,7 @@ const SellerProducts = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+  const [viewingProduct, setViewingProduct] = useState(null);
 
   const fetchProducts = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -338,38 +339,60 @@ const SellerProducts = () => {
                 <p className="text-sm text-gray-500">{categoryProducts.length} product{categoryProducts.length === 1 ? '' : 's'}</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {categoryProducts.map((product) => {
                 const id = getProductId(product);
                 const stock = getStock(product);
                 const active = isActiveProduct(product);
                 const image = getImage(product);
-                const tiers = getTierPricing(product);
-                const moq = product.minimumOrderQuantity ?? product.wholesale?.minimumOrderQuantity ?? 1;
-                const rfqEnabled = product.rfqEnabled ?? product.wholesale?.rfqEnabled ?? true;
                 return (
-                  <article key={id || product.name} className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                    <div className="flex gap-3">
-                      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-gray-100">
+                  <article key={id || product.name} className="group overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-[#F97316]/30 hover:shadow-md">
+                    <div className="flex gap-3 p-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setViewingProduct(product)}
+                        className="h-16 w-16 shrink-0 overflow-hidden rounded-md bg-gray-100 ring-1 ring-gray-100 transition duration-200 group-hover:scale-[1.03]"
+                        title="View product details"
+                      >
                         {image ? (
-                          <img src={image} alt={product.name} className="h-full w-full object-cover" />
+                          <img src={image} alt={product.name} className="h-full w-full object-cover transition duration-300 group-hover:scale-110" />
                         ) : (
                           <div className="grid h-full place-items-center text-gray-400">
-                            <FaBox className="text-2xl" />
+                            <FaBox className="text-xl" />
                           </div>
                         )}
-                      </div>
+                      </button>
 
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <h3 className="truncate text-sm font-bold text-[#111827]" title={product.name}>{product.name}</h3>
-                              <StatusPill tone={active ? 'green' : 'gray'}>{active ? 'active' : 'inactive'}</StatusPill>
-                            </div>
-                            <p className="mt-1 text-sm font-bold text-[#F97316]">{formatCurrency(product.price || 0)}</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <h3 className="truncate text-sm font-bold text-[#111827]" title={product.name}>{product.name}</h3>
+                            <p className="mt-0.5 truncate text-xs text-gray-500">{categoryLabel(product)}</p>
                           </div>
+                          <StatusPill tone={active ? 'green' : 'gray'}>{active ? 'on' : 'off'}</StatusPill>
+                        </div>
+
+                        <div className="mt-2 flex items-end justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-[#F97316]">{formatCurrency(product.price || 0)}</p>
+                            <p className="mt-0.5 truncate font-mono text-[10px] font-semibold text-gray-500" title={getSku(product)}>{getSku(product)}</p>
+                          </div>
+                          <p className={`shrink-0 text-xs font-bold ${stock > 0 && stock <= getEffectiveLowStockThreshold(product) ? 'text-[#F97316]' : 'text-[#111827]'}`}>
+                            {stock} {product?.unit || 'units'}{stock > 0 && stock <= getEffectiveLowStockThreshold(product) ? ' Low' : ''}
+                          </p>
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
+                          <p className="truncate text-[11px] font-medium text-gray-500" title={getWarehouseStatus(product)}>{getWarehouseStatus(product)}</p>
                           <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setViewingProduct(product)}
+                              className="grid h-8 w-8 place-items-center rounded-md border border-gray-200 text-[#111827] hover:bg-gray-50"
+                              title="View product details"
+                            >
+                              <FaEye size={12} />
+                            </button>
                             <Link to={`/seller/edit-product/${id}`} className="grid h-8 w-8 place-items-center rounded-md border border-gray-200 text-[#F97316] hover:bg-[#FFF7ED]" title="Edit product">
                               <FaEdit size={12} />
                             </Link>
@@ -381,41 +404,6 @@ const SellerProducts = () => {
                             >
                               <FaTrash size={12} />
                             </button>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                          <div className="min-w-0 rounded-md bg-gray-50 px-2 py-1.5 sm:col-span-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">SKU</p>
-                            <p className="truncate font-mono font-semibold text-[#111827]" title={getSku(product)}>{getSku(product)}</p>
-                          </div>
-                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Stock</p>
-                            <p className="font-bold text-[#111827]">{stock}</p>
-                          </div>
-                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Reserved</p>
-                            <p className="font-bold text-[#111827]">{Number(product.reservedQuantity || 0)}</p>
-                          </div>
-                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">MOQ</p>
-                            <p className="font-bold text-[#111827]">{moq}</p>
-                          </div>
-                          <div className="rounded-md bg-gray-50 px-2 py-1.5">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">RFQ</p>
-                            <p className="font-bold text-[#111827]">{rfqEnabled ? 'Open' : 'Closed'}</p>
-                          </div>
-                          <div className="min-w-0 rounded-md bg-gray-50 px-2 py-1.5 sm:col-span-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Warehouse</p>
-                            <p className="truncate font-bold text-[#111827]" title={getWarehouseStatus(product)}>{getWarehouseStatus(product)}</p>
-                          </div>
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-[1fr_auto] items-end gap-3">
-                          <InventoryQuantityGraph product={product} compact />
-                          <div className="text-right text-[11px] text-gray-500">
-                            <p>{Number(product.rating || 0).toFixed(1)} rating</p>
-                            {tiers.length > 0 && <p>{tiers.length} tier{tiers.length === 1 ? '' : 's'}</p>}
                           </div>
                         </div>
                       </div>
@@ -434,6 +422,119 @@ const SellerProducts = () => {
           </div>
         )}
       </div>
+      {viewingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 p-5">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Product details</p>
+                <h2 className="mt-1 truncate text-xl font-bold text-[#111827]">{viewingProduct.name}</h2>
+                <p className="mt-1 text-sm text-[#6B7280]">{categoryLabel(viewingProduct)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingProduct(null)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+                aria-label="Close product details modal"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="grid gap-5 p-5 md:grid-cols-[220px_1fr]">
+              <div className="overflow-hidden rounded-lg bg-gray-100">
+                {getImage(viewingProduct) ? (
+                  <img src={getImage(viewingProduct)} alt={viewingProduct.name} className="h-56 w-full object-cover" />
+                ) : (
+                  <div className="grid h-56 place-items-center text-gray-400">
+                    <FaBox className="text-5xl" />
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Price</p>
+                    <p className="mt-1 font-bold text-[#F97316]">{formatCurrency(viewingProduct.price || 0)}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Status</p>
+                    <p className="mt-1 font-bold text-[#111827]">{isActiveProduct(viewingProduct) ? 'Active' : 'Inactive'}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">On hand</p>
+                    <p className="mt-1 font-bold text-[#111827]">{getStock(viewingProduct)} {viewingProduct?.unit || 'units'}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Reserved</p>
+                    <p className="mt-1 font-bold text-[#111827]">{Number(viewingProduct.reservedQuantity || 0)}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-gray-50 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">SKU</p>
+                  <p className="mt-1 break-all font-mono text-sm font-semibold text-[#111827]">{getSku(viewingProduct)}</p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Warehouse</p>
+                    <p className="mt-1 font-semibold text-[#111827]">{getWarehouseStatus(viewingProduct)}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">MOQ</p>
+                    <p className="mt-1 font-semibold text-[#111827]">{viewingProduct.minimumOrderQuantity ?? viewingProduct.wholesale?.minimumOrderQuantity ?? 1}</p>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">RFQ</p>
+                    <p className="mt-1 font-semibold text-[#111827]">{(viewingProduct.rfqEnabled ?? viewingProduct.wholesale?.rfqEnabled ?? true) ? 'Open' : 'Closed'}</p>
+                  </div>
+                </div>
+
+                {viewingProduct.description && (
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Description</p>
+                    <p className="mt-1 text-sm text-[#374151]">{viewingProduct.description}</p>
+                  </div>
+                )}
+
+                {getTierPricing(viewingProduct).length > 0 && (
+                  <div className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Price tiers</p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {getTierPricing(viewingProduct).map((tier, index) => (
+                        <div key={`${tier.minQuantity || index}-${tier.price || index}`} className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-[#111827]">
+                          {tier.minQuantity || tier.min || 1}+ at {formatCurrency(tier.price || tier.unitPrice || 0)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <InventoryQuantityGraph product={viewingProduct} />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-gray-200 p-5">
+              <button
+                type="button"
+                onClick={() => setViewingProduct(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+              <Link
+                to={`/seller/edit-product/${getProductId(viewingProduct)}`}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-[#EA580C]"
+              >
+                <FaEdit />
+                Edit Product
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

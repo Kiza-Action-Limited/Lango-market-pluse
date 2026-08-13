@@ -65,7 +65,8 @@ async function setupIndexes() {
 
     // QRToken indexes
     const QRToken = require('../models/QRToken.model');
-    await QRToken.collection.createIndex({ token: 1 }, { unique: true });
+    await QRToken.collection.createIndex({ token: 1 }, { unique: true, sparse: true });
+    await QRToken.collection.createIndex({ tokenHash: 1 }, { unique: true, sparse: true });
     await QRToken.collection.createIndex({ order: 1, type: 1 });
     await QRToken.collection.createIndex({ isUsed: 1, expiresAt: 1 });
     console.log('✓ QRToken indexes created');

@@ -152,6 +152,49 @@ router.put('/orders/:orderId/status', param('orderId').isMongoId(), [
 
 // Product Management
 router.get('/products', adminController.getAllProducts);
+router.post('/products',
+  upload.array('images', 10),
+  handleUploadError,
+  [
+    body('sellerId').optional({ nullable: true, checkFalsy: true }).isMongoId(),
+    body('seller').optional({ nullable: true, checkFalsy: true }).isMongoId(),
+    body('createdForSellerId').optional({ nullable: true, checkFalsy: true }).isMongoId(),
+    body('name').notEmpty().withMessage('Name is required'),
+    body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
+    body('quantityAvailable').isInt({ min: 0 }).withMessage('Quantity must be a non-negative integer'),
+    body('minThreshold').optional().isInt({ min: 0 }).withMessage('Alert threshold must be a non-negative integer'),
+    body('minimumOrderQuantity').optional().isInt({ min: 1 }).withMessage('MOQ must be at least 1'),
+    body('rfqEnabled').optional().isBoolean().withMessage('RFQ status must be true or false'),
+    body('warehouseStatus')
+      .optional()
+      .isIn(['seller_storage', 'warehouse_pending', 'warehouse_received', 'dispatch_ready', 'restricted'])
+      .withMessage('Choose a valid warehouse status'),
+    body('category')
+      .isIn([
+        'electronics',
+        'fashion',
+        'home-garden',
+        'beauty-health',
+        'sports-outdoor',
+        'grocery',
+        'vegetables',
+        'grains-cereals',
+        'food-staples',
+        'sugar-baking',
+        'cooking-oil',
+        'dairy-eggs',
+        'meat-fish',
+        'beverages',
+        'household',
+        'farm-inputs',
+        'other',
+      ])
+      .withMessage('Choose a valid category'),
+    body('unit').isIn(['kg', 'g', 'ton', 'piece', 'bunch', 'litre']).withMessage('Valid unit required'),
+    body('description').optional().isString(),
+  ],
+  adminController.createProductForSeller
+);
 router.put('/products/:productId/toggle', param('productId').isMongoId(), adminController.toggleProductStatus);
 router.put('/products/:productId', param('productId').isMongoId(), adminController.updateProduct);
 router.delete('/products/:productId', param('productId').isMongoId(), adminController.deleteProduct);

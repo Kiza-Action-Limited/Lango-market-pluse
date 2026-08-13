@@ -1,6 +1,6 @@
 // models/Subscription.js
 const mongoose = require('mongoose');
-const { PLAN_IDS, PRODUCT_LIMITS } = require('../config/subscriptionPlans');
+const { PLAN_IDS, PRODUCT_LIMITS, normalizePlanId } = require('../config/subscriptionPlans');
 
 const SMS_ENABLED_PLANS = ['solo', 'smart', 'growth'];
 
@@ -220,6 +220,11 @@ const subscriptionSchema = new mongoose.Schema(
 );
 
 const setPlanName = (subscription) => {
+  const normalizedPlan = normalizePlanId(subscription.plan);
+  if (normalizedPlan && normalizedPlan !== subscription.plan) {
+    subscription.plan = normalizedPlan;
+  }
+
   const planNames = {
     'solo': 'Solo',
     'smart': 'Smart',

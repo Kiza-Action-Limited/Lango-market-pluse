@@ -38,6 +38,7 @@ const errorHandler = require('./middleware/errorHandler');
 const requestLogger = require('./middleware/requestLogger');
 const securityHeaders = require('./middleware/securityHeaders');
 const simpleRateLimit = require('./middleware/simpleRateLimit');
+const databaseReady = require('./middleware/databaseReady');
 
 const app = express();
 
@@ -95,7 +96,7 @@ app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get(['/health', '/api/health'], (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
@@ -138,6 +139,7 @@ app.get(['/api/v1/mobile/config', '/api/mobile/config'], (req, res) => {
 
 // Route mounts
 console.log(' Mounting routes...');
+app.use(databaseReady());
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/v1/auth', authRoutes);

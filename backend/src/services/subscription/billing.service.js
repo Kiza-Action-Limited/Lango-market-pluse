@@ -17,6 +17,14 @@ const httpError = (message, statusCode, details = {}) => {
   return error;
 };
 
+const enqueueSms = async (payload, context = 'subscription SMS') => {
+  try {
+    await smsQueue.add('send', payload);
+  } catch (error) {
+    logger.warn(`Skipping ${context}: ${error.message}`);
+  }
+};
+
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
 const normalizeValue = (value) => String(value || '').trim().toLowerCase();
@@ -472,10 +480,10 @@ class BillingService {
         message += `${SMS_CREDITS[normalizedPlanId]} SMS credits included. Next billing: ${subscriptionData.nextBillingDate.toLocaleDateString()}`;
       }
       
-      await smsQueue.add('send', {
+      await enqueueSms({
         to: user.phone,
         message
-      });
+      }, 'subscription confirmation SMS');
     }
 
     return subscription;
@@ -590,10 +598,10 @@ class BillingService {
     }
 
     if (user?.phone) {
-      await smsQueue.add('send', {
+      await enqueueSms({
         to: user.phone,
         message: `Your Lango ${cancelledPlan.planName} subscription has been cancelled. Reactivate a plan to regain seller subscription access.`
-      });
+      }, 'subscription cancellation SMS');
     }
 
     return {
@@ -799,10 +807,10 @@ class BillingService {
     
     // Send confirmation
     if (user?.phone) {
-      await smsQueue.add('send', {
+      await enqueueSms({
         to: user.phone,
         message: `You've added ${creditsToAdd} SMS credits. New balance: ${newBalance} credits.`
-      });
+      }, 'SMS credit top-up confirmation');
     }
     
     return {
@@ -989,10 +997,10 @@ class BillingService {
       
       // Send renewal confirmation
       if (user.phone) {
-        await smsQueue.add('send', {
+        await enqueueSms({
           to: user.phone,
           message: `Your Lango ${subscription.planName} plan has been renewed for ${subscription.price} KES. Next billing: ${newEndDate.toLocaleDateString()}`
-        });
+        }, 'subscription renewal SMS');
       }
       
       return { renewed: true, newEndDate };

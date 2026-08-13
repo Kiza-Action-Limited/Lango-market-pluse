@@ -21,12 +21,200 @@ const notificationService = require('../services/notification/notification.servi
 const emailService = require('../services/notification/email.service');
 const smsService = require('../services/notification/sms.service');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
-const { PLANS } = require('../config/subscriptionPlans');
+const { PLAN_IDS, PLANS, PRODUCT_LIMITS, normalizePlanId } = require('../config/subscriptionPlans');
+const planService = require('../services/subscription/plan.service');
 const { dateStamp, displayName, docId, sendCsv } = require('../utils/csvExport');
+const { getEffectiveUserCategory, isSellerUser } = require('../utils/userCategory');
 const { validationResult } = require('express-validator');
 const marketingController = require('./marketing.controller');
 
 const getDocId = (value) => value?._id || value?.id || value;
+
+const ADMIN_PRODUCT_LIMITS = {
+  none: PRODUCT_LIMITS.FREE,
+  free: PRODUCT_LIMITS.FREE,
+  v3: PRODUCT_LIMITS[PLAN_IDS.SMART],
+  v4: PRODUCT_LIMITS[PLAN_IDS.GROWTH],
+  [PLAN_IDS.SOLO]: PRODUCT_LIMITS[PLAN_IDS.SOLO],
+  [PLAN_IDS.SMART]: PRODUCT_LIMITS[PLAN_IDS.SMART],
+  [PLAN_IDS.GROWTH]: PRODUCT_LIMITS[PLAN_IDS.GROWTH],
+  [PLAN_IDS.MIZIGO]: PRODUCT_LIMITS[PLAN_IDS.MIZIGO],
+};
+
+const PRODUCT_CATEGORIES = new Set([
+  'electronics',
+  'fashion',
+  'home-garden',
+  'beauty-health',
+  'sports-outdoor',
+  'grocery',
+  'vegetables',
+  'grains-cereals',
+  'food-staples',
+  'sugar-baking',
+  'cooking-oil',
+  'dairy-eggs',
+  'meat-fish',
+  'beverages',
+  'household',
+  'farm-inputs',
+  'other',
+]);
+
+const PRODUCT_UNITS = new Set(['kg', 'g', 'ton', 'piece', 'bunch', 'litre']);
+const PRODUCT_WAREHOUSE_STATUSES = new Set(['seller_storage', 'warehouse_pending', 'warehouse_received', 'dispatch_ready', 'restricted']);
+
+const parsePositiveInt = (value, fallback) => {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const parseNonNegativeInt = (value, fallback = 0) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const parseBoolean = (value, fallback = false) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  return ['true', '1', 'yes', 'on', 'active', 'published'].includes(String(value).trim().toLowerCase());
+};
+
+const parseJsonField = (value, fallback) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const normalizePriceTiers = (value) => {
+  const parsed = parseJsonField(value, []);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((tier) => ({
+      minQuantity: parsePositiveInt(tier?.minQuantity, 0),
+      unitPrice: Number(tier?.unitPrice),
+      label: String(tier?.label || '').trim(),
+    }))
+    .filter((tier) => tier.minQuantity > 0 && Number.isFinite(tier.unitPrice) && tier.unitPrice >= 0)
+    .sort((a, b) => a.minQuantity - b.minQuantity);
+};
+
+const normalizeWarehouseStatus = (value, fallback = 'seller_storage') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  return PRODUCT_WAREHOUSE_STATUSES.has(normalized) ? normalized : fallback;
+};
+
+const normalizeWholesalePayload = (body = {}, existing = {}) => {
+  const nested = parseJsonField(body.wholesale, {});
+  const source = nested && typeof nested === 'object' ? nested : {};
+  const existingWholesale = existing && typeof existing === 'object' ? existing : {};
+
+  return {
+    minimumOrderQuantity: parsePositiveInt(
+      body.minimumOrderQuantity ?? body.moq ?? source.minimumOrderQuantity ?? source.moq,
+      existingWholesale.minimumOrderQuantity || 1
+    ),
+    rfqEnabled: parseBoolean(
+      body.rfqEnabled ?? source.rfqEnabled,
+      existingWholesale.rfqEnabled !== undefined ? existingWholesale.rfqEnabled : true
+    ),
+    terms: String(body.wholesaleTerms ?? source.terms ?? existingWholesale.terms ?? '').trim(),
+    priceTiers: normalizePriceTiers(body.priceTiers ?? source.priceTiers ?? existingWholesale.priceTiers ?? []),
+  };
+};
+
+const LOW_STOCK_SENSITIVITY_RULES = [
+  { threshold: 50, terms: ['maize', 'corn', 'unga', 'posho', 'grains-cereals', 'food-staples'] },
+  { threshold: 45, terms: ['sugar', 'jaggery', 'sugar-baking'] },
+  { threshold: 40, terms: ['rice', 'beans', 'wheat', 'flour', 'millet', 'sorghum'] },
+  { threshold: 25, terms: ['cooking oil', 'oil', 'cooking-oil'] },
+  { threshold: 20, terms: ['milk', 'dairy', 'eggs', 'dairy-eggs'] },
+  { threshold: 18, terms: ['vegetables', 'tomato', 'onion', 'potato', 'cabbage', 'fresh'] },
+  { threshold: 15, terms: ['beverage', 'water', 'juice', 'soda', 'beverages'] },
+  { threshold: 12, terms: ['household', 'soap', 'detergent', 'tissue'] },
+  { threshold: 10, terms: ['farm-inputs', 'seed', 'fertilizer', 'feed'] },
+];
+
+const getAutoLowStockThreshold = (product = {}) => {
+  const haystack = `${product.name || ''} ${product.category || ''}`.toLowerCase();
+  const matchedRule = LOW_STOCK_SENSITIVITY_RULES.find((rule) => (
+    rule.terms.some((term) => haystack.includes(term))
+  ));
+
+  return matchedRule?.threshold || 10;
+};
+
+const normalizeProductImageUrls = (value, existingCount = 0) => {
+  const parsed = parseJsonField(value, value);
+  const rawUrls = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'string'
+      ? parsed.split(/[|,\n\r]+/)
+      : [];
+  const availableSlots = Math.max(0, 10 - existingCount);
+  const seen = new Set();
+
+  return rawUrls
+    .map((image) => (typeof image === 'string' ? image : image?.url))
+    .map((url) => String(url || '').trim())
+    .filter((url) => {
+      if (!url || url.startsWith('blob:') || seen.has(url)) return false;
+      try {
+        const parsedUrl = new URL(url);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) return false;
+      } catch {
+        return false;
+      }
+      seen.add(url);
+      return true;
+    })
+    .slice(0, availableSlots)
+    .map((url) => ({ url }));
+};
+
+const uploadAdminProductImages = async (files = [], sellerId) => {
+  if (!Array.isArray(files) || files.length === 0) return [];
+
+  const folder = `products/${sellerId}`;
+  return Promise.all(files.map(async (file) => {
+    const result = await uploadToCloudinary(file.buffer, folder, file.mimetype);
+    return {
+      url: result.secure_url,
+      publicId: result.public_id,
+    };
+  }));
+};
+
+const getAdminEffectivePlan = async (sellerId) => {
+  try {
+    const subscription = await planService.getUserSubscription(sellerId);
+    if (planService.isSubscriptionActive(subscription)) {
+      if (subscription.plan === 'free') return 'free';
+      return normalizePlanId(subscription.plan);
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting seller plan for admin product creation:', error);
+    return null;
+  }
+};
+
+const getAdminProductLimitForPlan = (plan) => ADMIN_PRODUCT_LIMITS[plan || 'none'] ?? 0;
+
+const buildAdminProductLimitMessage = (plan, productLimit, sellerName = 'Seller') => {
+  if (!plan || plan === 'free') {
+    return `${sellerName} has reached the free ${productLimit} product limit. Upgrade their subscription to add more products.`;
+  }
+
+  const readableLimit = Number.isFinite(productLimit) ? productLimit.toLocaleString() : 'unlimited';
+  return `${sellerName} has reached the ${String(plan).toUpperCase()} product limit (${readableLimit}).`;
+};
 
 const getOrderLabel = (order) => order?.orderNumber || `ORD-${String(order?._id || '').slice(-8).toUpperCase()}`;
 
@@ -2258,6 +2446,159 @@ exports.getAllProducts = async (req, res, next) => {
       success: true,
       products: enhancedProducts,
       pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Create product on behalf of a seller as admin
+ * POST /api/v1/admin/products
+ */
+exports.createProductForSeller = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array(),
+      });
+    }
+
+    const sellerId = req.body.sellerId || req.body.seller || req.body.createdForSellerId;
+    const seller = await User.findById(sellerId).select('role businessType businessName fullName name email phone');
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found',
+      });
+    }
+
+    const effectiveCategory = getEffectiveUserCategory(seller);
+    if (!isSellerUser(seller)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected account is not a seller, farmer, wholesaler, manufacturer, retailer, brand, or small business.',
+        data: {
+          sellerId: String(seller._id),
+          role: seller.role,
+          businessType: seller.businessType,
+          effectiveCategory,
+        },
+      });
+    }
+
+    if (!String(seller.businessName || '').trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected seller needs a business name before products can be created for them.',
+      });
+    }
+
+    const [plan, currentProductCount] = await Promise.all([
+      getAdminEffectivePlan(seller._id),
+      Product.countDocuments({ seller: seller._id }),
+    ]);
+    const productLimit = getAdminProductLimitForPlan(plan);
+
+    if (currentProductCount >= productLimit) {
+      return res.status(403).json({
+        success: false,
+        message: buildAdminProductLimitMessage(plan, productLimit, seller.businessName || seller.fullName || 'Seller'),
+        data: {
+          currentPlan: plan || null,
+          productLimit,
+          currentProductCount,
+          remainingSlots: Number.isFinite(productLimit) ? Math.max(0, productLimit - currentProductCount) : null,
+          upgradeRequired: true,
+        },
+      });
+    }
+
+    const name = String(req.body.name || '').trim();
+    const category = String(req.body.category || (effectiveCategory === 'farmer' ? 'grocery' : 'other')).trim().toLowerCase();
+    const unit = String(req.body.unit || '').trim().toLowerCase();
+    const price = Number(req.body.price);
+    const quantityAvailable = parseNonNegativeInt(req.body.quantityAvailable, NaN);
+
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Product name is required' });
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      return res.status(400).json({ success: false, message: 'Price must be a positive number' });
+    }
+    if (!Number.isFinite(quantityAvailable) || quantityAvailable < 0) {
+      return res.status(400).json({ success: false, message: 'Quantity must be a non-negative integer' });
+    }
+    if (!PRODUCT_CATEGORIES.has(category)) {
+      return res.status(400).json({ success: false, message: 'Choose a valid category' });
+    }
+    if (!PRODUCT_UNITS.has(unit)) {
+      return res.status(400).json({ success: false, message: 'Valid unit required' });
+    }
+
+    let uploadedImages = [];
+    try {
+      uploadedImages = await uploadAdminProductImages(req.files, seller._id);
+    } catch (error) {
+      console.error('Admin product image upload failed:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload images. Please try again.',
+        error: error.message,
+      });
+    }
+
+    const remoteImages = normalizeProductImageUrls(req.body.imageUrls, uploadedImages.length);
+    const customAttributes = parseJsonField(req.body.customAttributes, {});
+
+    const product = new Product({
+      seller: seller._id,
+      name,
+      description: String(req.body.description || '').trim(),
+      price,
+      quantityAvailable,
+      minThreshold: parseNonNegativeInt(req.body.minThreshold, getAutoLowStockThreshold({ name, category })),
+      category,
+      unit,
+      locationHub: String(req.body.locationHub || '').trim(),
+      warehouseStatus: normalizeWarehouseStatus(req.body.warehouseStatus),
+      wholesale: normalizeWholesalePayload(req.body),
+      images: [...uploadedImages, ...remoteImages],
+      customAttributes: customAttributes && typeof customAttributes === 'object' && !Array.isArray(customAttributes)
+        ? customAttributes
+        : {},
+      isPublished: parseBoolean(req.body.isPublished, true),
+    });
+
+    if (req.body.sku) {
+      product.sku = String(req.body.sku).trim().toUpperCase();
+    }
+
+    await product.save();
+
+    await createOrderNotification(seller._id, {
+      event: 'admin_product_created',
+      title: 'Product added by admin',
+      body: `${product.name} was added to your seller catalog by an administrator.`,
+      order: {},
+      data: {
+        productId: String(product._id),
+        href: '/seller/products',
+      },
+    });
+
+    const responseProduct = appendInventoryFields(product);
+    responseProduct.isActive = product.isPublished;
+    responseProduct.active = product.isPublished;
+
+    res.status(201).json({
+      success: true,
+      message: 'Product created for seller successfully',
+      product: responseProduct,
+      data: responseProduct,
     });
   } catch (error) {
     next(error);
