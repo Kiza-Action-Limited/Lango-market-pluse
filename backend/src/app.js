@@ -45,14 +45,17 @@ const app = express();
 app.set('etag', false);
 
 const PRODUCTION_FRONTEND_URLS = [
-  'https://langomarketpulse.com/',
- 
+  'https://langomarketpulse.com',
+  'https://www.langomarketpulse.com',
+  'https://lango-market-pluse-five.vercel.app',
 ];
+
+const normalizeOrigin = (origin = '') => String(origin).trim().replace(/\/+$/, '');
 
 const normalizeOrigins = (value = '') =>
   value
     .split(',')
-    .map((item) => item.trim())
+    .map(normalizeOrigin)
     .filter(Boolean);
 
 const isAllowedVercelOrigin = (origin) => /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/i.test(origin);
@@ -61,6 +64,7 @@ const isAllowedVercelOrigin = (origin) => /^https:\/\/([a-z0-9-]+\.)*vercel\.app
 const corsOptions = {
   origin: (origin, callback) => {
     const envOrigins = normalizeOrigins(process.env.FRONTEND_URL || '');
+    const requestOrigin = normalizeOrigin(origin);
 
     const allowedOrigins = new Set([
       'http://localhost:5173',
@@ -71,9 +75,9 @@ const corsOptions = {
       'http://127.0.0.1:3000',
       ...PRODUCTION_FRONTEND_URLS,
       ...envOrigins,
-    ]);
+    ].map(normalizeOrigin));
 
-    if (!origin || allowedOrigins.has(origin) || isAllowedVercelOrigin(origin)) {
+    if (!origin || allowedOrigins.has(requestOrigin) || isAllowedVercelOrigin(requestOrigin)) {
       return callback(null, true);
     }
 
