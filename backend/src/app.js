@@ -45,7 +45,7 @@ const app = express();
 app.set('etag', false);
 
 const PRODUCTION_FRONTEND_URLS = [
-  'https://lango-market-pluse-five.vercel.app',
+  'https://langomarketpulse.com/',
  
 ];
 
