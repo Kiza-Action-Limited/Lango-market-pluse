@@ -97,13 +97,17 @@ const MAX_ATTEMPTS = 3;
 const MAX_RESENDS = 3;
 const RESEND_COOLDOWN = 60;
 const isProduction = process.env.NODE_ENV === 'production';
-const shouldExposeDevOtp = !isProduction && process.env.OTP_EXPOSE_DEV_CODE === 'true';
+const allowProductionDevTestOtp = process.env.OTP_ALLOW_DEV_TEST_CODE_IN_PRODUCTION === 'true';
+const forceDevTestOtp = process.env.OTP_FORCE_DEV_TEST_CODE === 'true';
+const shouldExposeDevOtp = (!isProduction || allowProductionDevTestOtp)
+  && process.env.OTP_EXPOSE_DEV_CODE === 'true';
 const configuredDevTestOtp = String(
   process.env.OTP_DEV_TEST_CODE || process.env.DEV_TEST_OTP_CODE || '123456'
 ).trim();
-const allowDevTestOtp = !isProduction
+const allowDevTestOtp = (!isProduction || allowProductionDevTestOtp)
   && /^\d{6}$/.test(configuredDevTestOtp)
   && process.env.OTP_ENABLE_DEV_TEST_CODE !== 'false';
+const shouldUseDevTestOtpOnly = allowDevTestOtp && forceDevTestOtp;
 
 // Helper functions
 const generateCode = () => crypto.randomInt(100000, 999999).toString();
@@ -210,6 +214,17 @@ const sendPhoneOtp = async (phone) => {
   }, 10 * 60);
 
   // Send SMS
+  if (shouldUseDevTestOtpOnly) {
+    return {
+      success: true,
+      message: 'Verification code generated. SMS delivery is temporarily disabled.',
+      delivered: false,
+      deliveryError: 'SMS delivery is temporarily disabled.',
+      cooldownSeconds: RESEND_COOLDOWN,
+      ...devOtpFields(code),
+    };
+  }
+
   try {
     const result = await africaTalkingService.sendOtpSMS(formattedPhone, code);
     return {
