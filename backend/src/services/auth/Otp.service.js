@@ -113,7 +113,7 @@ const shouldUseDevTestOtpOnly = allowDevTestOtp && forceDevTestOtp;
 const generateCode = () => crypto.randomInt(100000, 999999).toString();
 
 const devOtpFields = (actualCode) => ({
-  ...(allowDevTestOtp ? { devTestCode: configuredDevTestOtp } : {}),
+  ...(shouldExposeDevOtp && allowDevTestOtp ? { devTestCode: configuredDevTestOtp } : {}),
   ...(shouldExposeDevOtp ? { devCode: actualCode } : {}),
 });
 
