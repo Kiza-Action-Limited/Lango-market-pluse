@@ -31,6 +31,11 @@ const defaultUserMessage = (statusCode) => {
   return 'Request failed. Please try again.';
 };
 
+const PHONE_VERIFICATION_SERVICE_MESSAGE =
+  'Phone verification service is temporarily unavailable. Please try again shortly.';
+
+const isSmsProviderError = (err = {}) => String(err.code || '').startsWith('SMS_PROVIDER_');
+
 const isMongoAvailabilityError = (err = {}) => {
   const name = String(err.name || '');
   const code = String(err.code || err.cause?.code || '');
@@ -98,6 +103,10 @@ const getLogMessage = (err, statusCode) => {
 };
 
 const getUserMessage = (err, statusCode) => {
+  if (isSmsProviderError(err)) {
+    return PHONE_VERIFICATION_SERVICE_MESSAGE;
+  }
+
   if (statusCode === 503 && isMongoAvailabilityError(err)) {
     return 'Database temporarily unavailable. Please try again shortly.';
   }

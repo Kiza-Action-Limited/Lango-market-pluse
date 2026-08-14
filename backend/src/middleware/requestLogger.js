@@ -23,6 +23,11 @@ const pickResponseMessage = (body) => {
   return undefined;
 };
 
+const PHONE_VERIFICATION_SERVICE_MESSAGE =
+  'Phone verification service is temporarily unavailable. Please try again shortly.';
+
+const isSmsProviderCode = (code) => String(code || '').startsWith('SMS_PROVIDER_');
+
 const defaultUserMessage = (statusCode) => {
   if (statusCode === 503) {
     return 'Database temporarily unavailable. Please try again shortly.';
@@ -54,7 +59,9 @@ const addErrorMetadata = (body, statusCode, requestId) => {
   if (statusCode >= 500) {
     return {
       success: false,
-      message: defaultUserMessage(statusCode),
+      message: isSmsProviderCode(body.code)
+        ? PHONE_VERIFICATION_SERVICE_MESSAGE
+        : defaultUserMessage(statusCode),
       statusCode,
       requestId,
       ...(body.code ? { code: body.code } : {}),
