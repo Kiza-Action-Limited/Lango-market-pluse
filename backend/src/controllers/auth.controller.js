@@ -137,9 +137,42 @@ const mapBusinessType = (role, businessType) => {
   return 'small_business';
 };
 
+const trimTrailingSlash = (value = '') => String(value || '').trim().replace(/\/+$/, '');
+
+const isLocalHost = (host = '') => /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(:\d+)?$/i.test(String(host).trim());
+
+const getConfiguredPublicBaseUrl = () => {
+  const configuredBaseUrl = trimTrailingSlash(
+    process.env.PUBLIC_API_URL ||
+      process.env.API_PUBLIC_URL ||
+      process.env.BACKEND_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      ''
+  ).replace(/\/api(?:\/v\d+)?$/i, '');
+
+  if (!configuredBaseUrl) return '';
+
+  try {
+    const url = new URL(configuredBaseUrl);
+    return isLocalHost(url.host) ? '' : trimTrailingSlash(url.toString());
+  } catch {
+    return '';
+  }
+};
+
 const buildPublicUploadUrl = (req, relativePath) => {
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-  return `${protocol}://${req.get('host')}${relativePath}`;
+  const configuredBaseUrl = getConfiguredPublicBaseUrl();
+  if (configuredBaseUrl) {
+    return `${configuredBaseUrl}${relativePath}`;
+  }
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const host = forwardedHost || req.get('host');
+  const protocol = forwardedProto || req.protocol || 'http';
+  const publicProtocol = process.env.NODE_ENV === 'production' && !isLocalHost(host) ? 'https' : protocol;
+
+  return `${publicProtocol}://${host}${relativePath}`;
 };
 
 const saveImageLocally = async (req, file, folderName) => {

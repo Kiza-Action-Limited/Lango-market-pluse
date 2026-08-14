@@ -1,6 +1,7 @@
 // src/config/axios.js
 import axios from 'axios';
 import { API_BASE_URL } from '../config/apiBase';
+import { normalizeApiAssetUrls } from '../utils/assetUrl';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -37,7 +38,10 @@ api.interceptors.request.use(
 
 // Response interceptor for error handling
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    response.data = normalizeApiAssetUrls(response.data);
+    return response;
+  },
   (error) => {
     const requestUrl = String(error?.config?.url || '');
     const isAuthAttempt =
