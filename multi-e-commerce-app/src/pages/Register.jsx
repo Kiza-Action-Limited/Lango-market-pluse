@@ -58,7 +58,18 @@ const normalizeRegistrationPhone = (value) => {
 };
 
 const PHONE_VERIFICATION_UNAVAILABLE_MESSAGE =
-  'Phone verification is temporarily unavailable. Please try again shortly.';
+  'Phone verification service is temporarily unavailable. Please try again shortly.';
+
+const getDevOtpCode = (payload) => payload?.devTestCode || payload?.devCode || '';
+
+const getCooldownSecondsAfterSend = async ({ channel, value, fallbackSeconds = 0 }) => {
+  try {
+    const cooldown = await authService.getOtpCooldown({ channel, value });
+    return Number(cooldown?.cooldownSeconds) || Number(fallbackSeconds) || 0;
+  } catch {
+    return Number(fallbackSeconds) || 0;
+  }
+};
 
 const getOtpRequestErrorMessage = (error, channel, fallback) => {
   if (channel === 'phone' && error?.response?.status === 503) {
@@ -239,14 +250,30 @@ const Register = () => {
     setVerificationLoading(true);
     try {
       const sendResult = await authService.sendOtp({ channel: method, value: normalizedValue });
-      const cooldown = await authService.getOtpCooldown({ channel: method, value: normalizedValue });
-      setCooldownSeconds(Number(cooldown?.cooldownSeconds) || 0);
+      const cooldown = await getCooldownSecondsAfterSend({
+        channel: method,
+        value: normalizedValue,
+        fallbackSeconds: sendResult?.cooldownSeconds,
+      });
+      setCooldownSeconds(cooldown);
       setOtpSent(true);
-      setDevOtpCode(sendResult?.devTestCode || sendResult?.devCode || '');
+      setDevOtpCode(getDevOtpCode(sendResult));
       setFormData((prev) => ({ ...prev, verificationCode: '', isVerified: false }));
       setNotice(sendResult?.message || 'Verification code sent successfully');
       setError('');
     } catch (sendError) {
+      const responseData = sendError?.response?.data;
+      const fallbackDevCode = getDevOtpCode(responseData);
+      if (fallbackDevCode) {
+        setOtpSent(true);
+        setCooldownSeconds(Number(responseData?.cooldownSeconds) || 0);
+        setDevOtpCode(fallbackDevCode);
+        setFormData((prev) => ({ ...prev, verificationCode: '', isVerified: false }));
+        setNotice(responseData?.message || 'Using the dev OTP for phone verification.');
+        setError('');
+        setVerificationLoading(false);
+        return;
+      }
       const message = getOtpRequestErrorMessage(sendError, method, 'Failed to send verification code');
       setNotice('');
       setDevOtpCode('');
@@ -324,12 +351,26 @@ const Register = () => {
     setVerificationLoading(true);
     try {
       const resendResult = await authService.resendOtp({ channel, value });
-      const cooldown = await authService.getOtpCooldown({ channel, value });
-      setCooldownSeconds(Number(cooldown?.cooldownSeconds) || 0);
-      setDevOtpCode(resendResult?.devTestCode || resendResult?.devCode || '');
+      const cooldown = await getCooldownSecondsAfterSend({
+        channel,
+        value,
+        fallbackSeconds: resendResult?.cooldownSeconds,
+      });
+      setCooldownSeconds(cooldown);
+      setDevOtpCode(getDevOtpCode(resendResult));
       setNotice(resendResult?.message || 'Verification code resent successfully');
       setError('');
     } catch (resendError) {
+      const responseData = resendError?.response?.data;
+      const fallbackDevCode = getDevOtpCode(responseData);
+      if (fallbackDevCode) {
+        setCooldownSeconds(Number(responseData?.cooldownSeconds) || 0);
+        setDevOtpCode(fallbackDevCode);
+        setNotice(responseData?.message || 'Using the dev OTP for phone verification.');
+        setError('');
+        setVerificationLoading(false);
+        return;
+      }
       const message = getOtpRequestErrorMessage(resendError, channel, 'Failed to resend verification code');
       setNotice('');
       setDevOtpCode('');

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { FaBars, FaChevronDown, FaSearch, FaShoppingCart, FaTimes, FaUser } from 'react-icons/fa';
+import { FaBars, FaChevronDown, FaSearch, FaShoppingCart, FaSignInAlt, FaTimes, FaUser, FaUserPlus } from 'react-icons/fa';
 import { createPrefetchHandlers } from '../utils/prefetch';
 
 const categoryOptions = [
@@ -33,6 +33,7 @@ const Navbar = () => {
   const userRole = String(user?.role || '').toLowerCase();
   const isLogisticsUser = userRole === 'logistics';
   const isBuyerAccount = ['buyer', 'consumer'].includes(userRole) && !isSeller && !isAdmin && !isLogisticsUser;
+  const accountLabel = user?.fullName || user?.name || 'My Account';
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -84,48 +85,64 @@ const Navbar = () => {
           </Link>
 
           <div className="hidden md:flex items-center gap-2 lg:gap-3 ml-auto flex-wrap lg:flex-nowrap">
-            <div
-              className="relative"
-              onMouseEnter={() => setOpenDropdown('account')}
-              onMouseLeave={() => setOpenDropdown(null)}
-            >
-              <button
-                onClick={() => toggleDropdown('account')}
-                className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2 font-semibold"
+            {isAuthenticated ? (
+              <div
+                className="relative"
+                onMouseEnter={() => setOpenDropdown('account')}
+                onMouseLeave={() => setOpenDropdown(null)}
               >
-                <FaUser />
-                <span className="max-w-28 truncate">{isAuthenticated ? user?.name || 'My Account' : 'My Account'}</span>
-                <FaChevronDown size={12} />
-              </button>
+                <button
+                  onClick={() => toggleDropdown('account')}
+                  className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2 font-semibold"
+                  aria-expanded={openDropdown === 'account'}
+                  aria-haspopup="menu"
+                >
+                  <FaUser />
+                  <span className="max-w-32 truncate">{accountLabel}</span>
+                  <FaChevronDown size={12} />
+                </button>
 
-              {openDropdown === 'account' && (
-                <div className="absolute right-0 mt-2 w-48 bg-white text-[#111827] rounded-lg shadow-lg border border-gray-200 py-1">
-                  {isAuthenticated ? (
-                    <>
-                      <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Profile</Link>
-                      {isLogisticsUser && (
-                        <Link to="/logistics/status" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Logistics Status</Link>
-                      )}
-                      {isSeller && (
-                        <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
-                      )}
-                      {isAdmin && (
-                        <Link to="/admin/dashboard" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin/dashboard')}>Admin Dashboard</Link>
-                      )}
-                      <Link to="/buyer/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
-                      <Link to="/notifications/preferences" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Notification Preferences</Link>
-                      <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
-                      <button onClick={handleAuthAction} className="w-full text-left px-4 py-2 hover:bg-gray-100">Sign out</button>
-                    </>
-                  ) : (
-                    <>
-                      <Link to="/login" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/login')}>Sign in</Link>
-                      <Link to="/register" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/register')}>Create account</Link>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+                {openDropdown === 'account' && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white text-[#111827] rounded-lg shadow-lg border border-gray-200 py-1">
+                    <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Profile</Link>
+                    {isLogisticsUser && (
+                      <Link to="/logistics/status" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Logistics Status</Link>
+                    )}
+                    {isSeller && (
+                      <Link to="/seller" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller')}>Seller Dashboard</Link>
+                    )}
+                    {isAdmin && (
+                      <Link to="/admin/dashboard" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/admin/dashboard')}>Admin Dashboard</Link>
+                    )}
+                    <Link to="/buyer/orders" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Orders</Link>
+                    <Link to="/notifications/preferences" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Notification Preferences</Link>
+                    <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
+                    <button onClick={handleAuthAction} className="w-full text-left px-4 py-2 hover:bg-gray-100">Sign out</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Link
+                  to="/login"
+                  className="flex items-center gap-2 rounded px-3 py-2 font-semibold hover:bg-[#E97A12]"
+                  onClick={closeAllMenus}
+                  {...createPrefetchHandlers('/login')}
+                >
+                  <FaSignInAlt size={14} />
+                  <span>Sign in</span>
+                </Link>
+                <Link
+                  to="/register"
+                  className="flex items-center gap-2 rounded bg-[#0B2D55] px-3 py-2 font-semibold text-white hover:bg-[#123E72]"
+                  onClick={closeAllMenus}
+                  {...createPrefetchHandlers('/register')}
+                >
+                  <FaUserPlus size={14} />
+                  <span>Create account</span>
+                </Link>
+              </div>
+            )}
 
             <Link to="/products" className="font-semibold hover:opacity-90" {...createPrefetchHandlers('/products')}>Shop</Link>
             {isAuthenticated && !isBuyerAccount && (
@@ -261,14 +278,14 @@ const Navbar = () => {
       {isMobileMenuOpen && (
         <div className="max-h-[calc(100dvh-112px)] overflow-y-auto border-t border-[#E97A12] bg-[#F2871A] text-white md:hidden">
           <div className="space-y-3 px-4 py-3">
-            <button onClick={() => toggleDropdown('accountMobile')} className="flex w-full items-center justify-between rounded bg-[#E97A12] px-3 py-2 font-semibold">
-              <span className="truncate">{isAuthenticated ? user?.name || 'My Account' : 'My Account'}</span>
-              <FaChevronDown size={12} />
-            </button>
-            {openDropdown === 'accountMobile' && (
-              <div className="bg-white text-[#111827] rounded-lg py-1">
-                {isAuthenticated ? (
-                  <>
+            {isAuthenticated ? (
+              <>
+                <button onClick={() => toggleDropdown('accountMobile')} className="flex w-full items-center justify-between rounded bg-[#E97A12] px-3 py-2 font-semibold">
+                  <span className="truncate">{accountLabel}</span>
+                  <FaChevronDown size={12} />
+                </button>
+                {openDropdown === 'accountMobile' && (
+                  <div className="bg-white text-[#111827] rounded-lg py-1">
                     <Link to="/profile" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Profile</Link>
                     {isLogisticsUser && (
                       <Link to="/logistics/status" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Logistics Status</Link>
@@ -283,13 +300,29 @@ const Navbar = () => {
                     <Link to="/notifications/preferences" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Notification Preferences</Link>
                     <Link to="/wishlist" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>Wishlist</Link>
                     <button onClick={handleAuthAction} className="w-full text-left px-4 py-2 hover:bg-gray-100">Sign out</button>
-                  </>
-                ) : (
-                  <>
-                    <Link to="/login" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/login')}>Sign in</Link>
-                    <Link to="/register" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/register')}>Create account</Link>
-                  </>
+                  </div>
                 )}
+              </>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <Link
+                  to="/login"
+                  className="flex items-center justify-center gap-2 rounded bg-[#E97A12] px-3 py-2 font-semibold"
+                  onClick={closeAllMenus}
+                  {...createPrefetchHandlers('/login')}
+                >
+                  <FaSignInAlt size={14} />
+                  <span>Sign in</span>
+                </Link>
+                <Link
+                  to="/register"
+                  className="flex items-center justify-center gap-2 rounded bg-[#0B2D55] px-3 py-2 font-semibold text-white"
+                  onClick={closeAllMenus}
+                  {...createPrefetchHandlers('/register')}
+                >
+                  <FaUserPlus size={14} />
+                  <span>Create account</span>
+                </Link>
               </div>
             )}
 

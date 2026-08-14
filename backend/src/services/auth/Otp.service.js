@@ -97,8 +97,12 @@ const MAX_ATTEMPTS = 3;
 const MAX_RESENDS = 3;
 const RESEND_COOLDOWN = 60;
 const isProduction = process.env.NODE_ENV === 'production';
-const allowProductionDevTestOtp = process.env.OTP_ALLOW_DEV_TEST_CODE_IN_PRODUCTION === 'true';
-const forceDevTestOtp = process.env.OTP_FORCE_DEV_TEST_CODE === 'true';
+const temporaryDevOtpMode = process.env.OTP_ENABLE_DEV_TEST_CODE !== 'false'
+  && process.env.OTP_DISABLE_TEMP_DEV_OTP !== 'true';
+const allowProductionDevTestOtp = process.env.OTP_ALLOW_DEV_TEST_CODE_IN_PRODUCTION === 'true'
+  || temporaryDevOtpMode;
+const forceDevTestOtp = process.env.OTP_FORCE_DEV_TEST_CODE === 'true'
+  || temporaryDevOtpMode;
 const shouldExposeDevOtp = (!isProduction || allowProductionDevTestOtp)
   && (process.env.OTP_EXPOSE_DEV_CODE === 'true' || forceDevTestOtp);
 const configuredDevTestOtp = String(
@@ -217,7 +221,7 @@ const sendPhoneOtp = async (phone) => {
   if (shouldUseDevTestOtpOnly) {
     return {
       success: true,
-      message: 'Verification code generated. SMS delivery is temporarily disabled.',
+      message: 'Using the dev OTP for phone verification while SMS delivery is temporarily disabled.',
       delivered: false,
       deliveryError: 'SMS delivery is temporarily disabled.',
       cooldownSeconds: RESEND_COOLDOWN,
