@@ -140,6 +140,7 @@ const mapBusinessType = (role, businessType) => {
 const trimTrailingSlash = (value = '') => String(value || '').trim().replace(/\/+$/, '');
 
 const isLocalHost = (host = '') => /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(:\d+)?$/i.test(String(host).trim());
+const PRODUCTION_PUBLIC_API_URL = 'https://lango-market-pluse-4fje.onrender.com';
 
 const getConfiguredPublicBaseUrl = () => {
   const configuredBaseUrl = trimTrailingSlash(
@@ -147,6 +148,7 @@ const getConfiguredPublicBaseUrl = () => {
       process.env.API_PUBLIC_URL ||
       process.env.BACKEND_URL ||
       process.env.RENDER_EXTERNAL_URL ||
+      (process.env.NODE_ENV === 'production' ? PRODUCTION_PUBLIC_API_URL : '') ||
       ''
   ).replace(/\/api(?:\/v\d+)?$/i, '');
 
