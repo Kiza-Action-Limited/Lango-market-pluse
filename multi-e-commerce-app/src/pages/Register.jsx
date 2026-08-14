@@ -57,6 +57,17 @@ const normalizeRegistrationPhone = (value) => {
   return cleaned;
 };
 
+const PHONE_VERIFICATION_UNAVAILABLE_MESSAGE =
+  'Phone verification is temporarily unavailable. Please try again shortly.';
+
+const getOtpRequestErrorMessage = (error, channel, fallback) => {
+  if (channel === 'phone' && error?.response?.status === 503) {
+    return PHONE_VERIFICATION_UNAVAILABLE_MESSAGE;
+  }
+
+  return error?.response?.data?.message || fallback;
+};
+
 const stripInlineBusinessLogo = (data = {}) => {
   if (typeof data.businessLogoUrl === 'string' && data.businessLogoUrl.startsWith('data:')) {
     return {
@@ -236,7 +247,7 @@ const Register = () => {
       setNotice(sendResult?.message || 'Verification code sent successfully');
       setError('');
     } catch (sendError) {
-      const message = sendError?.response?.data?.message || 'Failed to send verification code';
+      const message = getOtpRequestErrorMessage(sendError, method, 'Failed to send verification code');
       setNotice('');
       setDevOtpCode('');
       setError(message);
@@ -319,7 +330,7 @@ const Register = () => {
       setNotice(resendResult?.message || 'Verification code resent successfully');
       setError('');
     } catch (resendError) {
-      const message = resendError?.response?.data?.message || 'Failed to resend verification code';
+      const message = getOtpRequestErrorMessage(resendError, channel, 'Failed to resend verification code');
       setNotice('');
       setDevOtpCode('');
       setError(message);
