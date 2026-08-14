@@ -46,8 +46,7 @@ app.set('etag', false);
 
 const PRODUCTION_FRONTEND_URLS = [
   'https://langomarketpulse.com',
-  'https://www.langomarketpulse.com',
-  'https://lango-market-pluse-five.vercel.app',
+
 ];
 
 const normalizeOrigin = (origin = '') => String(origin).trim().replace(/\/+$/, '');
