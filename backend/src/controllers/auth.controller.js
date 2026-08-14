@@ -166,9 +166,26 @@ const phoneLookupValues = (phone) => {
   return Array.from(values).filter(Boolean);
 };
 
-const findUserByPhoneInput = async (phone) => User
-  .findOne({ phone: { $in: phoneLookupValues(phone) } })
-  .lean();
+const findUserByPhoneInput = async (phone) => {
+  if (authService.useFallback()) {
+    return authService.findUserByPhone(phone);
+  }
+
+  return User
+    .findOne({ phone: { $in: phoneLookupValues(phone) } })
+    .lean();
+};
+
+const findUserByEmailInput = async (email) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  if (authService.useFallback()) {
+    return authService.findUserByEmail(normalizedEmail);
+  }
+
+  return User.findOne({ email: normalizedEmail }).lean();
+};
 
 exports.uploadBusinessLogo = async (req, res) => {
   try {
@@ -362,7 +379,7 @@ exports.sendEmailVerificationOtp = async (req, res) => {
 
     const { email } = req.body;
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+    const existingUser = await findUserByEmailInput(normalizedEmail);
     if (existingUser) {
       return res.status(409).json({
         success: false,
@@ -484,7 +501,7 @@ exports.resendOtpCode = async (req, res) => {
       result = await sendPhoneOtp(normalizedPhone);
     } else if (channel === 'email') {
       const normalizedEmail = String(identifier || '').trim().toLowerCase();
-      const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+      const existingUser = await findUserByEmailInput(normalizedEmail);
       if (existingUser) {
         return res.status(409).json({
           success: false,
@@ -668,7 +685,7 @@ exports.sendEmailOtp = async (req, res) => {
 
     const { email } = req.body;
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+    const existingUser = await findUserByEmailInput(normalizedEmail);
     if (existingUser) {
       return res.status(409).json({
         success: false,
@@ -750,7 +767,7 @@ exports.resendEmailOtp = async (req, res) => {
 
     const { email } = req.body;
     const normalizedEmail = String(email || '').trim().toLowerCase();
-    const existingUser = await User.findOne({ email: normalizedEmail }).lean();
+    const existingUser = await findUserByEmailInput(normalizedEmail);
     if (existingUser) {
       return res.status(409).json({
         success: false,

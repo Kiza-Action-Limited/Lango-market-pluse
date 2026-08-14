@@ -9,9 +9,17 @@ const { emailService } = require('../../config/email');
 let redis = null;
 try {
   const { createClient } = require('redis');
-  redis = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
-  redis.on('error', () => { redis = null; });
-  redis.connect().catch(() => { redis = null; });
+  if (process.env.REDIS_ENABLED === 'true' && process.env.REDIS_URL) {
+    redis = createClient({
+      url: process.env.REDIS_URL,
+      socket: {
+        connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 1000),
+        reconnectStrategy: false,
+      },
+    });
+    redis.on('error', () => { redis = null; });
+    redis.connect().catch(() => { redis = null; });
+  }
 } catch {
   // Redis not available
 }
@@ -32,28 +40,52 @@ const memGet = (key) => {
 };
 const memDel = (key) => memStore.delete(key);
 
+const hasReadyRedis = () => redis?.isReady === true;
+
+const disableRedis = () => {
+  const client = redis;
+  redis = null;
+  try {
+    if (client?.isOpen) client.disconnect();
+  } catch {
+    // Ignore cleanup failures and continue with the in-memory fallback.
+  }
+};
+
 // Storage helper
 const store = {
   async set(key, value, ttlSeconds) {
-    if (redis?.isOpen) {
-      await redis.setEx(key, ttlSeconds, JSON.stringify(value));
-    } else {
-      memSet(key, value, ttlSeconds);
+    if (hasReadyRedis()) {
+      try {
+        await redis.setEx(key, ttlSeconds, JSON.stringify(value));
+        return;
+      } catch {
+        disableRedis();
+      }
     }
+    memSet(key, value, ttlSeconds);
   },
   async get(key) {
-    if (redis?.isOpen) {
-      const raw = await redis.get(key);
-      return raw ? JSON.parse(raw) : null;
+    if (hasReadyRedis()) {
+      try {
+        const raw = await redis.get(key);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        disableRedis();
+      }
     }
     return memGet(key);
   },
   async del(key) {
-    if (redis?.isOpen) {
-      await redis.del(key);
-    } else {
-      memDel(key);
+    if (hasReadyRedis()) {
+      try {
+        await redis.del(key);
+        return;
+      } catch {
+        disableRedis();
+      }
     }
+    memDel(key);
   },
 };
 
