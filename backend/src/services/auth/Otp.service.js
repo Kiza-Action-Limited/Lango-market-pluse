@@ -100,7 +100,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 const allowProductionDevTestOtp = process.env.OTP_ALLOW_DEV_TEST_CODE_IN_PRODUCTION === 'true';
 const forceDevTestOtp = process.env.OTP_FORCE_DEV_TEST_CODE === 'true';
 const shouldExposeDevOtp = (!isProduction || allowProductionDevTestOtp)
-  && process.env.OTP_EXPOSE_DEV_CODE === 'true';
+  && (process.env.OTP_EXPOSE_DEV_CODE === 'true' || forceDevTestOtp);
 const configuredDevTestOtp = String(
   process.env.OTP_DEV_TEST_CODE || process.env.DEV_TEST_OTP_CODE || '123456'
 ).trim();
