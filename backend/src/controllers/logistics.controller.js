@@ -23,6 +23,7 @@ const walletService = require('../services/payment/wallet.service');
 const { uploadToCloudinary } = require('../config/cloudinary.config');
 const { validationResult } = require('express-validator');
 const dispatchSvc = require('../services/notification/dispatch.service');
+const notificationService = require('../services/notification/notification.service');
 const qrChainSvc = require('../services/order/qrChain.service');
 const escrowService = require('../services/order/escrow.service');
 const auditService = require('../services/audit.service');
@@ -46,6 +47,51 @@ const ACTIVE_TRIP_STATUSES = [
   'in_transit',
   'out_for_delivery',
 ];
+
+const getEntityId = (value) => value?._id || value?.id || value;
+
+const sendDeliveryReceiptDashboardNotifications = async ({ logistics, scannedBy }) => {
+  const sellerId = getEntityId(logistics?.seller);
+  if (!sellerId) return [];
+
+  try {
+    const admins = await User.find({ role: 'admin', isActive: { $ne: false } }).select('_id');
+    const adminIds = admins.map((admin) => admin._id);
+    const recipientIds = [...new Set([sellerId, ...adminIds].map((id) => String(id)).filter(Boolean))];
+    const buyerName = logistics?.buyer?.fullName || logistics?.buyer?.name || 'Buyer';
+    const scannerName = scannedBy?.fullName || scannedBy?.name || buyerName;
+    const orderNumber = logistics?.orderNumber || logistics?.order?.orderNumber || `ORD-${String(getEntityId(logistics?.order) || '').slice(-8).toUpperCase()}`;
+    const deliveredAt = logistics?.actualDelivery || logistics?.deliveryQrScannedAt || new Date();
+
+    if (recipientIds.length === 0) return [];
+
+    return await notificationService.sendBulkNotifications(recipientIds, {
+      type: 'in_app',
+      channel: 'logistics',
+      title: 'Buyer received delivery',
+      body: `${buyerName} received ${logistics?.cargoType || 'the product'} for ${orderNumber}. Delivery QR was scanned by ${scannerName}.`,
+      status: 'sent',
+      data: {
+        event: 'buyer_delivery_qr_received',
+        logisticsId: String(logistics._id),
+        orderId: String(getEntityId(logistics.order) || ''),
+        orderNumber,
+        sellerId: String(sellerId),
+        buyerId: String(getEntityId(logistics.buyer) || ''),
+        scannedBy: String(getEntityId(scannedBy) || ''),
+        deliveredAt,
+        href: '/admin/logistics',
+        sellerHref: '/seller/orders',
+      },
+    });
+  } catch (error) {
+    logger.warn('Delivery receipt dashboard notification failed:', {
+      logisticsId: logistics?._id,
+      error: error.message,
+    });
+    return [];
+  }
+};
 
 const recordLogisticsLocation = async ({ logistics, logisticsId, orderId, driverId, gpsCoords, source, req }) => {
   if (!gpsCoords?.lat || !gpsCoords?.lng) return null;
@@ -3443,6 +3489,7 @@ exports.processQrScan = async (req, res, next) => {
     });
 
     let escrowRelease = null;
+    let dashboardNotifications = [];
 
     if (step === 'pickup') {
       logistics.status = 'in_transit';
@@ -3543,6 +3590,11 @@ exports.processQrScan = async (req, res, next) => {
           },
         });
       }
+
+      dashboardNotifications = await sendDeliveryReceiptDashboardNotifications({
+        logistics,
+        scannedBy: req.user,
+      });
     }
 
     const trust = trustPolicy.buildTrustChecks({ order: logistics.order, logistics });
@@ -3584,6 +3636,9 @@ exports.processQrScan = async (req, res, next) => {
           split: escrowRelease.split,
           payouts: escrowRelease.payouts,
         } : null,
+        dashboardNotifications: {
+          sent: dashboardNotifications.length,
+        },
       }
     });
   } catch (err) {

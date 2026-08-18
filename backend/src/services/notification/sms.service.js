@@ -3,8 +3,8 @@ const logger = require('../../utils/logger');
 const { africaTalkingService } = require('../../config/africastalking');
 
 class SMSService {
-  constructor() {
-    this.isConfigured = !!(
+  isConfigured() {
+    return !!(
       (process.env.AFRICASTALKING_API_KEY || process.env.AT_API_KEY) &&
       (process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME)
     );
@@ -16,7 +16,7 @@ class SMSService {
 
   async sendToPhone(phoneNumber, message) {
     try {
-      if (!this.isConfigured) {
+      if (!this.isConfigured()) {
         logger.warn('Africa\'s Talking not configured. SMS queued in mock mode.', {
           messageLength: String(message || '').length,
         });
@@ -49,6 +49,39 @@ class SMSService {
       logger.error('Error sending SMS to user:', error);
       throw error;
     }
+  }
+
+  async sendPaidSmsFromUser(senderId, recipientUserId, message) {
+    const [sender, recipient] = await Promise.all([
+      User.findById(senderId).select('_id role accountRole name'),
+      User.findById(recipientUserId).select('_id phone name'),
+    ]);
+
+    if (!sender) {
+      const error = new Error('Sender not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!recipient || !recipient.phone) {
+      const error = new Error('Recipient phone number not found');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    logger.info('Sending paid SMS notification through Africa\'s Talking', {
+      senderId: sender._id,
+      recipientId: recipient._id,
+      messageLength: String(message || '').length,
+    });
+
+    const result = await this.sendToPhone(recipient.phone, message);
+    return {
+      ...result,
+      provider: 'africastalking',
+      recipientId: recipient._id,
+      recipientPhone: this.formatPhoneNumber(recipient.phone),
+    };
   }
 
   async sendBatch(userIds, message) {

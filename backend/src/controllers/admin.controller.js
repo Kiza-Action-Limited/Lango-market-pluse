@@ -252,6 +252,18 @@ const createOrderNotification = async (userId, { title, body, order, event, data
   }
 };
 
+const sendAdminSmsToUser = async (user, message, context = 'admin SMS') => {
+  const phone = user?.phone;
+  if (!phone || !message) return null;
+
+  try {
+    return await smsService.sendToPhone(phone, message);
+  } catch (error) {
+    console.warn(`${context} failed:`, error.message);
+    return null;
+  }
+};
+
 const notifyAdminOrderStatusUpdate = async (order, previousStatus, notes) => {
   const populatedOrder = await Order.findById(order._id)
     .populate('buyer', 'fullName phone')
@@ -2589,6 +2601,11 @@ exports.createProductForSeller = async (req, res, next) => {
         href: '/seller/products',
       },
     });
+    sendAdminSmsToUser(
+      seller,
+      `Lango Market Pulse: Admin added ${product.name} to your catalog. Stock: ${product.quantityAvailable} ${product.unit}.`,
+      'admin product create SMS'
+    );
 
     const responseProduct = appendInventoryFields(product);
     responseProduct.isActive = product.isPublished;
@@ -2616,7 +2633,7 @@ exports.updateProduct = async (req, res, next) => {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const product = await Product.findById(req.params.productId);
+    const product = await Product.findById(req.params.productId).populate('seller', 'fullName name businessName email phone');
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
@@ -2648,6 +2665,11 @@ exports.updateProduct = async (req, res, next) => {
     }
 
     await product.save();
+    sendAdminSmsToUser(
+      product.seller,
+      `Lango Market Pulse: Admin updated ${product.name}. Stock: ${product.quantityAvailable} ${product.unit}, price: ${formatCurrencyLocal(product.price)}.`,
+      'admin product update SMS'
+    );
 
     const responseProduct = appendInventoryFields(product);
     responseProduct.isActive = product.isPublished;
@@ -2700,6 +2722,11 @@ exports.deleteProduct = async (req, res, next) => {
           href: '/seller/products',
         },
       });
+      sendAdminSmsToUser(
+        deletedProduct.seller,
+        `Lango Market Pulse: Admin removed ${deletedProduct.name} from your seller catalog.`,
+        'admin product delete SMS'
+      );
     }
 
     res.status(200).json({
@@ -2723,13 +2750,18 @@ exports.toggleProductStatus = async (req, res, next) => {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const product = await Product.findById(req.params.productId);
+    const product = await Product.findById(req.params.productId).populate('seller', 'fullName name businessName email phone');
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
     product.isPublished = !product.isPublished;
     await product.save();
+    sendAdminSmsToUser(
+      product.seller,
+      `Lango Market Pulse: ${product.name} was ${product.isPublished ? 'activated' : 'deactivated'} by admin.`,
+      'admin product status SMS'
+    );
 
     const responseProduct = appendInventoryFields(product);
     responseProduct.isActive = product.isPublished;

@@ -5,12 +5,27 @@ const billingService = require('../services/subscription/billing.service');
 const Payment = require('../models/Payment.model');
 const { getPlatformAccountPublicPayload } = require('../config/platformAccount');
 const { validationResult } = require('express-validator');
+const smsService = require('../services/notification/sms.service');
 
 const getMetadataValue = (metadata, key) => {
   if (!metadata) return undefined;
   if (typeof metadata.get === 'function') return metadata.get(key);
   return metadata[key];
 };
+
+const sendPaymentSms = async (user, message, context = 'payment SMS') => {
+  const phone = user?.phone;
+  if (!phone || !message) return null;
+
+  try {
+    return await smsService.sendToPhone(phone, message);
+  } catch (error) {
+    console.warn(`${context} failed:`, error.message);
+    return null;
+  }
+};
+
+const formatKes = (amount) => `KES ${Number(amount || 0).toLocaleString('en-KE')}`;
 
 /**
  * Initiate M-Pesa STK Push for order payment
@@ -31,6 +46,11 @@ exports.initiateMpesaPayment = async (req, res, next) => {
     const orderId = req.body.orderId || req.params.id;
     const phoneNumber = req.body.phoneNumber;
     const result = await mpesaService.initiatePayment(orderId, phoneNumber, req.user.id);
+    sendPaymentSms(
+      req.user,
+      `Lango Market Pulse: M-Pesa payment request sent. Complete the prompt on ${phoneNumber}.`,
+      'order payment STK SMS'
+    );
     res.status(200).json({
       success: true,
       message: 'STK Push sent to your phone',
@@ -74,6 +94,11 @@ exports.initiateSubscriptionMpesaPayment = async (req, res, next) => {
     const result = await mpesaService.initiateSubscriptionPayment(req.body.planId, phoneNumber, req.user.id, {
       agentNationalId: req.body.agentNationalId,
     });
+    sendPaymentSms(
+      req.user,
+      `Lango Market Pulse: Subscription payment request sent for ${req.body.planId}. Complete the M-Pesa prompt on ${phoneNumber}.`,
+      'subscription STK SMS'
+    );
 
     res.status(200).json({
       success: true,
@@ -138,10 +163,24 @@ exports.checkSubscriptionMpesaStatus = async (req, res, next) => {
 
     if (payment.status === 'completed') {
       const paymentReference = payment.mpesaReceiptNumber || payment.transactionId || checkoutRequestId;
+      const subscriptionSmsAlreadySent = getMetadataValue(payment.metadata, 'subscriptionSmsSent') === true;
       const subscription = await billingService.activatePaidSubscription(req.user.id, planId, {
         paymentReference,
         payment,
       });
+      if (!subscriptionSmsAlreadySent) {
+        await sendPaymentSms(
+          req.user,
+          `Lango Market Pulse: Payment confirmed. Your ${planId} subscription is active. Ref: ${paymentReference}.`,
+          'subscription confirmation SMS'
+        );
+        if (typeof payment.metadata?.set === 'function') {
+          payment.metadata.set('subscriptionSmsSent', true);
+        } else {
+          payment.metadata = { ...(payment.metadata || {}), subscriptionSmsSent: true };
+        }
+        await payment.save();
+      }
 
       return res.status(200).json({
         success: true,
@@ -232,6 +271,11 @@ exports.withdrawToMpesa = async (req, res, next) => {
   try {
     const { amount, phoneNumber } = req.body;
     const result = await walletService.withdraw(req.user.id, amount, phoneNumber);
+    sendPaymentSms(
+      req.user,
+      `Lango Market Pulse: Withdrawal of ${formatKes(amount)} initiated to ${phoneNumber}.`,
+      'wallet withdrawal SMS'
+    );
     res.status(200).json({
       success: true,
       message: 'Withdrawal initiated',
@@ -260,6 +304,11 @@ exports.topUpSmsCredits = async (req, res, next) => {
       paymentReference,
       paymentCompleted,
     });
+    sendPaymentSms(
+      req.user,
+      `Lango Market Pulse: SMS credits topped up. Added ${result.creditsAdded || credits || amount} credits. Balance: ${result.newBalance ?? result.balance ?? 'updated'}.`,
+      'SMS credit top-up SMS'
+    );
 
     res.status(200).json({
       success: true,

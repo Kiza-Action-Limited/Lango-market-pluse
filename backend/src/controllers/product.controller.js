@@ -3,6 +3,7 @@ const User = require('../models/User.model');
 const Order = require('../models/Order.model');
 const { validationResult } = require('express-validator');
 const notificationService = require('../services/notification/notification.service');
+const smsService = require('../services/notification/sms.service');
 const planService = require('../services/subscription/plan.service');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary.config');
 const { PLAN_IDS, PRODUCT_LIMITS } = require('../config/subscriptionPlans');
@@ -36,6 +37,89 @@ const PAID_REVIEW_STATUSES = [
 const isLogisticsUser = (user = {}) => getEffectiveUserCategory(user) === 'logistics';
 
 const canManageProducts = (user = {}) => isSellerUser(user) || isLogisticsUser(user);
+
+const sendProductSmsToUser = async (user, message, context = 'product SMS') => {
+  const phone = user?.phone;
+  if (!phone || !message) return null;
+
+  try {
+    return await smsService.sendToPhone(phone, message);
+  } catch (error) {
+    console.warn(`${context} failed:`, error.message);
+    return null;
+  }
+};
+
+const getProductText = (product = {}) => `${product.name || ''} ${product.category || ''}`.toLowerCase();
+
+const getLowStockAdvice = (product = {}, stock = 0) => {
+  const haystack = getProductText(product);
+  const unit = product.unit || 'units';
+  if (['maize', 'corn', 'unga', 'posho'].some((term) => haystack.includes(term))) {
+    return `Maize demand can move fast. Add more stock now; only ${stock} ${unit} remain.`;
+  }
+  if (isEssentialCommodity(product)) {
+    return `This is an essential product. Add more stock soon; only ${stock} ${unit} remain.`;
+  }
+  return `Add more product stock soon; only ${stock} ${unit} remain.`;
+};
+
+const notifySellerLowStock = async (product, seller, context = 'seller low stock alert') => {
+  const sellerId = seller?._id || seller?.id || product?.seller;
+  const stock = Number(product?.quantityAvailable || 0);
+  const threshold = getEffectiveLowStockThreshold(product);
+
+  if (!sellerId || threshold <= 0) return null;
+  if (!product.metadata) product.metadata = new Map();
+
+  if (stock > threshold) {
+    if (product?.metadata?.get?.('lastLowStockAlertKey')) {
+      product.metadata.delete('lastLowStockAlertKey');
+      product.metadata.delete('lastLowStockAlertAt');
+      await product.save();
+    }
+    return null;
+  }
+
+  const alertKey = `${stock}:${threshold}`;
+  if (product?.metadata?.get?.('lastLowStockAlertKey') === alertKey) return null;
+
+  const advice = getLowStockAdvice(product, stock);
+  const title = `Low stock: ${product.name}`;
+  const body = `${product.name} has ${stock} ${product.unit || 'units'} left. Threshold is ${threshold}. ${advice}`;
+
+  try {
+    const notification = await notificationService.create(sellerId, {
+      type: 'in_app',
+      channel: 'scarcity_alert',
+      title,
+      body,
+      status: 'sent',
+      data: {
+        event: 'seller_low_stock_africastalking_alert',
+        productId: String(product._id),
+        productName: product.name,
+        stock,
+        threshold,
+        href: '/seller/products?filter=low-stock',
+      },
+    });
+
+    await sendProductSmsToUser(
+      seller,
+      `Lango Market Pulse: ${body}`,
+      `${context} SMS`
+    );
+
+    product.metadata.set('lastLowStockAlertKey', alertKey);
+    product.metadata.set('lastLowStockAlertAt', new Date().toISOString());
+    await product.save();
+    return notification;
+  } catch (error) {
+    console.warn(`${context} failed:`, error.message);
+    return null;
+  }
+};
 
 const getEffectivePlan = async (userId) => {
   try {
@@ -438,6 +522,12 @@ exports.createProduct = async (req, res, next) => {
 
     const product = new Product(productData);
     await product.save();
+    sendProductSmsToUser(
+      req.user,
+      `Lango Market Pulse: ${product.name} is now in your catalog. Stock: ${product.quantityAvailable} ${product.unit}, price: KES ${Number(product.price || 0).toLocaleString('en-KE')}.`,
+      'product create SMS'
+    );
+    await notifySellerLowStock(product, req.user, 'product create low stock alert');
 
     // send in-app notifications to buyers about new product (non-blocking)
     (async () => {
@@ -879,6 +969,7 @@ exports.updateProduct = async (req, res, next) => {
     }
 
     await product.save();
+    await notifySellerLowStock(product, req.user, 'product update low stock alert');
     res.status(200).json({
       success: true,
       message: 'Product updated successfully',

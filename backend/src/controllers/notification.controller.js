@@ -405,6 +405,7 @@ exports.sendSMS = async (req, res, next) => {
       success: true,
       message: 'SMS sent successfully',
       data: result,
+      smsCreditUsage: req.smsCreditUsage || null,
     });
   } catch (error) {
     if (error.statusCode) {
