@@ -120,6 +120,7 @@ const SellerDashboard = () => {
   const [sellerRfqs, setSellerRfqs] = useState([]);
   const [journalEntries, setJournalEntries] = useState([]);
   const [journalSummary, setJournalSummary] = useState(null);
+  const [cfoDashboard, setCfoDashboard] = useState(null);
   const [journalForm, setJournalForm] = useState(initialSellerJournalForm);
   const [activeJournalTab, setActiveJournalTab] = useState('offline_sale');
   const [journalSaving, setJournalSaving] = useState(false);
@@ -149,6 +150,7 @@ const SellerDashboard = () => {
       let logisticsRequestRows = [];
       let journalRows = [];
       let nextJournalSummary = null;
+      let nextCfoDashboard = null;
       try {
         logisticsRequestRows = await logisticsService.getSellerBuyerRequests({ limit: 8 });
       } catch (error) {
@@ -173,6 +175,14 @@ const SellerDashboard = () => {
           console.error('Error fetching seller journal:', error);
         }
       }
+      try {
+        const cfoRes = await sellerJournalService.cfoDashboard({ range: dashboardRange });
+        nextCfoDashboard = cfoRes?.data || null;
+      } catch (error) {
+        if (error.response?.status !== 404 && error.response?.status !== 403) {
+          console.error('Error fetching CFO dashboard:', error);
+        }
+      }
       const visibleRevenue = sellerOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
       const visiblePendingOrders = sellerOrders.filter((o) =>
         ['pending_payment', 'payment_escrowed', 'processing', 'dispatched'].includes(o.status)
@@ -191,6 +201,7 @@ const SellerDashboard = () => {
       setSellerRfqs(rfqRows);
       setJournalEntries(journalRows);
       setJournalSummary(nextJournalSummary);
+      setCfoDashboard(nextCfoDashboard);
     } catch (error) {
       console.error('Error fetching seller data:', error);
     } finally {
@@ -411,10 +422,40 @@ const SellerDashboard = () => {
     const days = daysToExpiry(expiry);
     return typeof days === 'number' && days >= 0 && days <= 14;
   });
-  const cfoEstimatedExpenses = stats.totalRevenue * 0.28;
-  const cfoNetProfit = stats.totalRevenue - cfoEstimatedExpenses;
-  const cfoMargin = stats.totalRevenue > 0 ? (cfoNetProfit / stats.totalRevenue) * 100 : 0;
-  const healthState = cfoMargin > 20 ? 'Green' : cfoMargin >= 0 ? 'Yellow' : 'Red';
+  const cfoMetrics = cfoDashboard?.cfo || {};
+  const cfoCashFlow = cfoDashboard?.cashFlow || {};
+  const businessHealth = cfoDashboard?.businessHealth || {};
+  const fallbackCosts = Number(journalSummary?.month?.purchases || 0) + Number(journalSummary?.month?.expenses || 0);
+  const cfoRevenue = Number(cfoMetrics.revenue ?? stats.totalRevenue ?? 0);
+  const cfoCosts = Number(cfoMetrics.costs ?? fallbackCosts);
+  const cfoNetProfit = Number(cfoMetrics.netProfit ?? (cfoRevenue - cfoCosts));
+  const cfoMargin = Number(cfoMetrics.profitMargin ?? (cfoRevenue > 0 ? (cfoNetProfit / cfoRevenue) * 100 : 0));
+  const cfoHealthScore = Number(businessHealth.score ?? (cfoMargin > 20 ? 80 : cfoMargin >= 0 ? 58 : 35));
+  const healthState = businessHealth.status || (cfoHealthScore >= 75 ? 'Healthy' : cfoHealthScore >= 50 ? 'Watch' : 'Critical');
+  const cfoHealthTone = healthState === 'Healthy' ? 'green' : healthState === 'Watch' ? 'amber' : 'red';
+  const fallbackGuardianItems = lowStockItems.map((item) => {
+    const stock = Number(item.quantityAvailable ?? item.stock ?? 0);
+    const threshold = getEffectiveLowStockThreshold(item);
+    return {
+      id: item.id || item._id,
+      name: item.name,
+      sku: item.sku,
+      unit: item.unit,
+      stock,
+      threshold,
+      status: stock <= 0 ? 'out' : stock <= Math.max(1, Math.floor(threshold * 0.5)) ? 'critical' : 'low',
+      advice: 'Add stock before the next selling cycle.',
+    };
+  });
+  const scarcityGuardian = cfoDashboard?.scarcityGuardian || {};
+  const scarcityGuardianItems = Array.isArray(scarcityGuardian.items) && scarcityGuardian.items.length
+    ? scarcityGuardian.items
+    : fallbackGuardianItems;
+  const scarcityGuardianCounts = scarcityGuardian.counts || scarcityGuardianItems.reduce((acc, item) => {
+    const status = item.status || 'low';
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
   const filteredOrders = recentOrders.filter((order) => {
     if (!dateRange.start || !dateRange.end || !order.createdAt) return true;
     const created = new Date(order.createdAt);
@@ -622,10 +663,10 @@ const SellerDashboard = () => {
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard icon={FaDollarSign} label="Total Revenue" value={isSectionLoading ? '-' : formatCurrency(stats.totalRevenue)} trend={revenueTrendLabel} detail="seller earnings" color="#16A34A" points={revenueSeries} />
+        <KpiCard icon={FaDollarSign} label="Total Revenue" value={isSectionLoading ? '-' : formatCurrency(cfoRevenue)} trend={revenueTrendLabel} detail="seller earnings" color="#16A34A" points={revenueSeries} />
         <KpiCard icon={FaShoppingCart} label="Orders" value={isSectionLoading ? '-' : stats.totalOrders} trend={orderTrendLabel} detail={`${stats.pendingOrders} pending`} color="#3B82F6" points={orderSeries} />
         <KpiCard icon={FaBox} label="Products" value={isSectionLoading ? '-' : stats.totalProducts} detail={`${totalStock} units in stock`} color="#F97316" points={productSeries} />
-        <KpiCard icon={FaWarehouse} label="Inventory Health" value={isSectionLoading ? '-' : `${inventoryHealth}%`} detail={`${lowStockItems.length} low stock alerts`} color="#8B5CF6" points={inventorySeries} />
+        <KpiCard icon={FaWarehouse} label="Inventory Health" value={isSectionLoading ? '-' : `${inventoryHealth}%`} detail={`${scarcityGuardianItems.length} stock risk alerts`} color="#8B5CF6" points={inventorySeries} />
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1114,13 +1155,52 @@ const SellerDashboard = () => {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-        <Panel title="Revenue Overview" className="xl:col-span-7">
+        <Panel
+          title="CFO Dashboard"
+          action={<StatusPill tone={cfoHealthTone}>{healthState}</StatusPill>}
+          className="xl:col-span-7"
+        >
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-3xl font-bold text-[#111827]">{isSectionLoading ? '-' : formatCurrency(cfoNetProfit)}</p>
-              <p className="mt-1 text-sm text-gray-500">Estimated net after operating costs</p>
+              <p className="mt-1 text-sm text-gray-500">Net profit after stock costs, expenses, and platform fees</p>
             </div>
-            <StatusPill tone={healthState === 'Green' ? 'green' : healthState === 'Yellow' ? 'amber' : 'red'}>{healthState} margin</StatusPill>
+            <div className="text-right">
+              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Business health</p>
+              <p className="mt-1 text-xl font-bold text-[#111827]">{Math.round(cfoHealthScore)}%</p>
+            </div>
+          </div>
+          <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="rounded-md border border-green-100 bg-green-50 p-3">
+              <p className="text-xs font-medium text-green-700">Revenue</p>
+              <p className="mt-1 truncate text-lg font-bold text-[#111827]" title={formatCurrency(cfoRevenue)}>{formatCurrency(cfoRevenue)}</p>
+            </div>
+            <div className="rounded-md border border-red-100 bg-red-50 p-3">
+              <p className="text-xs font-medium text-red-700">Costs</p>
+              <p className="mt-1 truncate text-lg font-bold text-[#111827]" title={formatCurrency(cfoCosts)}>{formatCurrency(cfoCosts)}</p>
+            </div>
+            <div className="rounded-md border border-sky-100 bg-sky-50 p-3">
+              <p className="text-xs font-medium text-sky-700">Cash Flow</p>
+              <p className="mt-1 truncate text-lg font-bold text-[#111827]" title={formatCurrency(cfoCashFlow.net || 0)}>{formatCurrency(cfoCashFlow.net || 0)}</p>
+            </div>
+            <div className="rounded-md border border-amber-100 bg-amber-50 p-3">
+              <p className="text-xs font-medium text-amber-700">Pending Cash</p>
+              <p className="mt-1 truncate text-lg font-bold text-[#111827]" title={formatCurrency(cfoMetrics.pendingCash || 0)}>{formatCurrency(cfoMetrics.pendingCash || 0)}</p>
+            </div>
+          </div>
+          <div className="mb-4 grid grid-cols-1 gap-3 text-xs text-gray-600 sm:grid-cols-3">
+            <div className="flex justify-between gap-3 rounded-md bg-gray-50 px-3 py-2">
+              <span>Profit margin</span>
+              <strong className="text-[#111827]">{cfoMargin.toFixed(1)}%</strong>
+            </div>
+            <div className="flex justify-between gap-3 rounded-md bg-gray-50 px-3 py-2">
+              <span>Inventory value</span>
+              <strong className="text-[#111827]">{formatCurrency(cfoMetrics.inventoryValue || 0)}</strong>
+            </div>
+            <div className="flex justify-between gap-3 rounded-md bg-gray-50 px-3 py-2">
+              <span>Withdrawable</span>
+              <strong className="text-[#111827]">{formatCurrency(cfoMetrics.withdrawableBalance || 0)}</strong>
+            </div>
           </div>
           <div className="grid h-56 items-end gap-2 border-b border-l border-gray-100 px-2 pb-2" style={{ gridTemplateColumns: `repeat(${Math.max(revenueBars.length, 1)}, minmax(0, 1fr))` }}>
             {revenueBars.map((height, index) => (
@@ -1238,16 +1318,52 @@ const SellerDashboard = () => {
           </div>
         </Panel>
 
-        <Panel title="Alerts" className="xl:col-span-4">
+        <Panel
+          title="Scarcity Guardian"
+          action={<Link to="/seller/products" className="text-xs font-medium text-[#F97316]">Restock</Link>}
+          className="xl:col-span-4"
+        >
           <div className="space-y-3">
-            {lowStockItems.slice(0, 3).map((item) => (
-              <div key={`low-${item.id || item._id}`} className="rounded-md border border-red-100 bg-red-50 p-3">
-                <p className="text-sm font-semibold text-red-700">{item.name}</p>
-                <p className="text-xs text-red-600">
-                  Stock {Number(item.quantityAvailable ?? item.stock ?? 0)} is at or below threshold {getEffectiveLowStockThreshold(item)}.
-                </p>
+            <div className="grid grid-cols-4 gap-2 text-center text-xs">
+              {[
+                ['Out', scarcityGuardianCounts.out || 0, 'bg-red-50 text-red-700'],
+                ['Critical', scarcityGuardianCounts.critical || 0, 'bg-orange-50 text-orange-700'],
+                ['Low', scarcityGuardianCounts.low || 0, 'bg-amber-50 text-amber-700'],
+                ['Near', scarcityGuardianCounts.approaching || 0, 'bg-sky-50 text-sky-700'],
+              ].map(([label, value, className]) => (
+                <div key={label} className={`rounded-md px-2 py-2 ${className}`}>
+                  <p className="font-bold">{value}</p>
+                  <p>{label}</p>
+                </div>
+              ))}
+            </div>
+            {scarcityGuardianItems.slice(0, 4).map((item) => {
+              const tone = item.status === 'out' || item.status === 'critical' ? 'red' : item.status === 'low' ? 'amber' : 'blue';
+              return (
+                <div key={`scarcity-${item.id || item._id || item.name}`} className="rounded-md border border-amber-100 bg-amber-50 p-3">
+                  <div className="mb-1 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#111827]" title={item.name}>{item.name}</p>
+                      <p className="truncate text-xs text-amber-700">{item.sku || formatProductCategory(item.category || 'Stock item')}</p>
+                    </div>
+                    <StatusPill tone={tone}>{String(item.status || 'low').replace(/_/g, ' ')}</StatusPill>
+                  </div>
+                  <p className="text-xs text-amber-800">
+                    Stock {Number(item.stock || 0)} {item.unit || ''} / threshold {Number(item.threshold || 0)}.
+                  </p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    {item.advice || 'Prepare a refill before sales are blocked.'}
+                    {Number(item.reorderTarget || 0) > 0 ? ` Target ${Number(item.reorderTarget || 0)} ${item.unit || ''}.` : ''}
+                  </p>
+                </div>
+              );
+            })}
+            {!scarcityGuardianItems.length && (
+              <div className="rounded-md border border-green-100 bg-green-50 p-3">
+                <p className="text-sm font-semibold text-green-700">Stock coverage is healthy</p>
+                <p className="text-xs text-green-700">No products are approaching their low-stock threshold.</p>
               </div>
-            ))}
+            )}
             {expiringSoonItems.slice(0, 3).map((item) => (
               <div key={`exp-${item.id || item._id}`} className="rounded-md border border-amber-100 bg-amber-50 p-3">
                 <p className="text-sm font-semibold text-amber-800">{item.name}</p>
@@ -1272,7 +1388,6 @@ const SellerDashboard = () => {
                 </div>
               </div>
             ))}
-            {!lowStockItems.length && !expiringSoonItems.length && !visibleBuyerLogisticsRequests.length && <p className="text-sm text-gray-500">No active inventory or logistics alerts.</p>}
             {planUsage && <ProgressRow label="Product slots" value={productSlotPct} max={100} detail={`${planUsage.visibleProducts}/${planUsage.productLimit}`} color="#F97316" />}
           </div>
         </Panel>

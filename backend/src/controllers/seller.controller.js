@@ -278,6 +278,120 @@ const journalAccountPipeline = (match) => ([
   },
 ]);
 
+const clampNumber = (value, min = 0, max = 100) => Math.max(min, Math.min(max, Number(value) || 0));
+
+const getDashboardDateRange = (range = '1m') => {
+  const end = new Date();
+  const start = new Date(end);
+  const normalized = String(range || '1m').toLowerCase();
+
+  if (normalized === 'today') {
+    start.setHours(0, 0, 0, 0);
+  } else {
+    const match = normalized.match(/^(\d+)([dwmy])$/);
+    const amount = Number(match?.[1] || 1);
+    const unit = match?.[2] || 'm';
+
+    if (unit === 'd') start.setDate(end.getDate() - amount);
+    else if (unit === 'w') start.setDate(end.getDate() - (amount * 7));
+    else if (unit === 'm') start.setMonth(end.getMonth() - amount);
+    else if (unit === 'y') start.setFullYear(end.getFullYear() - amount);
+  }
+
+  return { start, end };
+};
+
+const getProductStock = (product = {}) => Math.max(0, Number(product.quantityAvailable ?? product.stock ?? 0));
+
+const getAutoLowStockThreshold = (product = {}) => {
+  const haystack = [
+    product.name,
+    product.category,
+    product.unit,
+    product.locationHub,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (/(maize|corn|unga|posho|grain|cereal|food-staple)/.test(haystack)) return 50;
+  if (/(sugar|baking)/.test(haystack)) return 45;
+  if (/(rice|beans|wheat|flour|millet|sorghum)/.test(haystack)) return 40;
+  if (/(oil|cooking-oil)/.test(haystack)) return 25;
+  if (/(milk|dairy|egg)/.test(haystack)) return 20;
+  if (/(vegetable|tomato|onion|kale|sukuma)/.test(haystack)) return 18;
+  if (/(beverage|water|juice)/.test(haystack)) return 15;
+  if (/(household|soap|detergent)/.test(haystack)) return 12;
+  if (/(farm-input|seed|fertilizer|feed)/.test(haystack)) return 10;
+
+  return 10;
+};
+
+const getEffectiveStockThreshold = (product = {}) => {
+  const configured = Number(product.minThreshold ?? product.lowStockThreshold);
+  if (Number.isFinite(configured) && configured === 0) return 0;
+  const auto = getAutoLowStockThreshold(product);
+  return Math.max(Number.isFinite(configured) ? configured : 10, auto);
+};
+
+const buildScarcityGuardianItems = (products = []) => products
+  .map((product) => {
+    const stock = getProductStock(product);
+    const threshold = getEffectiveStockThreshold(product);
+    const approachingThreshold = Math.ceil(threshold * 1.25);
+    const status = threshold <= 0
+      ? 'disabled'
+      : stock <= 0
+        ? 'out'
+        : stock <= Math.max(1, Math.floor(threshold * 0.5))
+          ? 'critical'
+          : stock <= threshold
+            ? 'low'
+            : stock <= approachingThreshold
+              ? 'approaching'
+              : 'healthy';
+    const severity = { out: 4, critical: 3, low: 2, approaching: 1, healthy: 0, disabled: 0 }[status] || 0;
+
+    return {
+      id: docId(product),
+      name: product.name,
+      category: product.category,
+      sku: product.sku,
+      unit: product.unit,
+      stock,
+      reserved: Number(product.reservedQuantity || 0),
+      threshold,
+      reorderTarget: threshold > 0 ? Math.max(threshold * 2, stock + threshold) : 0,
+      status,
+      severity,
+      advice: status === 'out'
+        ? 'Restock immediately before more buyers arrive.'
+        : status === 'critical'
+          ? 'Priority restock needed now.'
+          : status === 'low'
+            ? 'Add stock before the next selling cycle.'
+            : status === 'approaching'
+              ? 'Watch demand and prepare a refill.'
+              : 'Stock is healthy.',
+      updatedAt: product.updatedAt,
+    };
+  })
+  .filter((item) => item.severity > 0)
+  .sort((left, right) => right.severity - left.severity || left.stock - right.stock);
+
+const summarizeJournalForCfo = (rows = []) => {
+  const byType = Object.fromEntries(rows.map((row) => [row._id, row]));
+  const offlineSales = byType.offline_sale || {};
+  const purchases = byType.offline_purchase || {};
+  const expenses = byType.expense || {};
+  const returns = byType.return || {};
+
+  return {
+    offlineSales: money(offlineSales.amount || 0),
+    offlineSalesCost: money(offlineSales.cost || 0),
+    purchases: money(purchases.amount || purchases.cost || 0),
+    expenses: money(expenses.amount || 0),
+    returns: money(returns.amount || 0),
+  };
+};
+
 const getReturnSettlement = (entryType, inventoryAction, value) => {
   if (entryType !== 'return') return 'no_cash';
   if (['customer_refund', 'supplier_refund', 'no_cash'].includes(value)) return value;
@@ -663,6 +777,187 @@ exports.getJournalEntries = async (req, res, next) => {
         limit,
         total,
         pages: Math.ceil(total / limit) || 1,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getCfoDashboard = async (req, res, next) => {
+  try {
+    const sellerId = req.user?.id || req.user?._id;
+    if (!isExportingSeller(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only seller accounts can access the CFO dashboard.',
+      });
+    }
+
+    const range = String(req.query.range || '1m').toLowerCase();
+    const dateRange = getDashboardDateRange(range);
+    const sellerObjectId = toMongoId(sellerId);
+    const orderMatch = {
+      seller: sellerObjectId,
+      createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+    };
+    const journalMatch = {
+      seller: sellerObjectId,
+      purchasedAt: { $gte: dateRange.start, $lte: dateRange.end },
+    };
+    const escrowMatch = {
+      seller: sellerObjectId,
+      createdAt: { $gte: dateRange.start, $lte: dateRange.end },
+    };
+
+    const [
+      products,
+      orderRows,
+      escrowRows,
+      journalRows,
+      accountRows,
+      walletBalance,
+    ] = await Promise.all([
+      Product.find({ seller: sellerId })
+        .select('name category sku unit quantityAvailable reservedQuantity minThreshold price status isPublished locationHub updatedAt')
+        .lean(),
+      Order.aggregate([
+        { $match: orderMatch },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            productRevenue: { $sum: '$productSubtotal' },
+            logisticsFees: { $sum: '$logisticsFee' },
+            totalAmount: { $sum: '$totalAmount' },
+          },
+        },
+      ]).catch(() => []),
+      Escrow.aggregate([
+        { $match: escrowMatch },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            amount: { $sum: '$amount' },
+            sellerPayout: { $sum: '$sellerPayout' },
+            platformFee: { $sum: '$platformFee' },
+            driverPayout: { $sum: '$driverPayout' },
+            refundAmount: { $sum: '$refundAmount' },
+          },
+        },
+      ]).catch(() => []),
+      SellerJournal.aggregate(journalSummaryPipeline(journalMatch)).catch(() => []),
+      SellerJournal.aggregate(journalAccountPipeline(journalMatch)).catch(() => []),
+      walletService.getBalance(sellerId).catch(() => null),
+    ]);
+
+    const paidOrderStatuses = new Set(['payment_escrowed', 'processing', 'dispatched', 'delivered', 'completed', 'FUNDS_HELD', 'IN_TRANSIT', 'DELIVERED', 'RELEASED']);
+    const orderSummary = orderRows.reduce((acc, row) => {
+      const status = String(row._id || '');
+      const productRevenue = Number(row.productRevenue || 0);
+      const totalAmount = Number(row.totalAmount || 0);
+      acc.totalOrders += Number(row.count || 0);
+      acc.totalSales += productRevenue;
+      acc.totalAmount += totalAmount;
+      if (paidOrderStatuses.has(status)) {
+        acc.paidOrders += Number(row.count || 0);
+        acc.onlineSales += productRevenue;
+      }
+      return acc;
+    }, { totalOrders: 0, paidOrders: 0, onlineSales: 0, totalSales: 0, totalAmount: 0 });
+
+    const escrowSummary = escrowRows.reduce((acc, row) => {
+      const status = String(row._id || '').toUpperCase();
+      const sellerPayout = Number(row.sellerPayout || 0);
+      const amount = Number(row.amount || 0);
+      const platformFee = Number(row.platformFee || 0);
+      acc.platformFees += platformFee;
+      acc.escrowAmount += amount;
+      acc.driverPayout += Number(row.driverPayout || 0);
+      acc.refunds += Number(row.refundAmount || 0);
+      if (['RELEASED', 'PARTIAL_REFUND'].includes(status)) {
+        acc.released += sellerPayout;
+      } else if (['HELD', 'IN_TRANSIT', 'DELIVERED', 'DISPUTED', 'AWAITING_PAYMENT'].includes(status)) {
+        acc.pending += sellerPayout || Math.max(0, amount - platformFee);
+      }
+      return acc;
+    }, { released: 0, pending: 0, platformFees: 0, escrowAmount: 0, driverPayout: 0, refunds: 0 });
+
+    const journal = summarizeJournalForCfo(journalRows);
+    const account = summarizeAccountRows(accountRows);
+    const inventoryValue = products.reduce((sum, product) => (
+      sum + (getProductStock(product) * Number(product.price || 0))
+    ), 0);
+    const scarcityItems = buildScarcityGuardianItems(products);
+    const scarcityCounts = scarcityItems.reduce((acc, item) => {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    }, { out: 0, critical: 0, low: 0, approaching: 0 });
+
+    const revenue = money(orderSummary.onlineSales + journal.offlineSales);
+    const costs = money(journal.purchases + journal.expenses + journal.offlineSalesCost + escrowSummary.platformFees);
+    const cashIn = money(escrowSummary.released + account.credits);
+    const cashOut = money(account.debits + escrowSummary.platformFees);
+    const netProfit = money(revenue - costs);
+    const margin = revenue > 0 ? money((netProfit / revenue) * 100) : 0;
+    const stockPenalty = (scarcityCounts.out * 18) + (scarcityCounts.critical * 12) + (scarcityCounts.low * 7) + (scarcityCounts.approaching * 3);
+    const marginScore = revenue <= 0 ? 12 : clampNumber(margin + 35, 0, 45);
+    const cashScore = cashIn >= cashOut ? 25 : clampNumber(25 - (((cashOut - cashIn) / Math.max(cashOut, 1)) * 25), 0, 25);
+    const inventoryScore = clampNumber(30 - stockPenalty, 0, 30);
+    const healthScore = Math.round(clampNumber(marginScore + cashScore + inventoryScore));
+    const healthStatus = healthScore >= 75 ? 'Healthy' : healthScore >= 50 ? 'Watch' : 'Critical';
+
+    res.status(200).json({
+      success: true,
+      data: {
+        range,
+        period: {
+          start: dateRange.start,
+          end: dateRange.end,
+        },
+        cfo: {
+          revenue,
+          onlineSales: money(orderSummary.onlineSales),
+          offlineSales: journal.offlineSales,
+          costs,
+          inventoryPurchases: journal.purchases,
+          operatingExpenses: journal.expenses,
+          platformFees: money(escrowSummary.platformFees),
+          netProfit,
+          profitMargin: margin,
+          pendingCash: money(escrowSummary.pending),
+          releasedCash: money(escrowSummary.released),
+          inventoryValue: money(inventoryValue),
+          withdrawableBalance: Number(walletBalance?.availableBalance || 0),
+          lockedBalance: Number(walletBalance?.lockedBalance || 0),
+        },
+        cashFlow: {
+          inflow: cashIn,
+          outflow: cashOut,
+          net: money(cashIn - cashOut),
+          journalCredits: account.credits,
+          journalDebits: account.debits,
+        },
+        businessHealth: {
+          score: healthScore,
+          status: healthStatus,
+          signals: [
+            `${scarcityItems.length} stock risk item${scarcityItems.length === 1 ? '' : 's'}`,
+            `${margin}% profit margin`,
+            `${money(escrowSummary.pending)} pending seller cash`,
+          ],
+        },
+        scarcityGuardian: {
+          counts: scarcityCounts,
+          total: scarcityItems.length,
+          items: scarcityItems.slice(0, 12),
+        },
+        orders: {
+          total: orderSummary.totalOrders,
+          paid: orderSummary.paidOrders,
+          salesValue: money(orderSummary.totalSales),
+        },
       },
     });
   } catch (error) {

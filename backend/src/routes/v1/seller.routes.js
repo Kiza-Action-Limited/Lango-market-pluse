@@ -7,6 +7,15 @@ const { uploadDocuments, handleUploadError } = require('../../middleware/upload'
 const router = express.Router();
 
 router.get(
+  '/cfo-dashboard',
+  protect,
+  [
+    query('range').optional().isString().trim().isLength({ max: 12 }),
+  ],
+  sellerController.getCfoDashboard
+);
+
+router.get(
   '/journal',
   protect,
   [
