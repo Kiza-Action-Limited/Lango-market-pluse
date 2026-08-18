@@ -97,7 +97,7 @@ const MAX_ATTEMPTS = 3;
 const MAX_RESENDS = 3;
 const RESEND_COOLDOWN = 60;
 const isProduction = process.env.NODE_ENV === 'production';
-const temporaryDevOtpMode = process.env.OTP_ENABLE_DEV_TEST_CODE !== 'false'
+const temporaryDevOtpMode = process.env.OTP_TEMP_DEV_OTP_MODE === 'true'
   && process.env.OTP_DISABLE_TEMP_DEV_OTP !== 'true';
 const allowProductionDevTestOtp = process.env.OTP_ALLOW_DEV_TEST_CODE_IN_PRODUCTION === 'true'
   || temporaryDevOtpMode;

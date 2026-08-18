@@ -11,6 +11,14 @@ const normalizeEnvironment = (value) => {
   return normalized === 'production' || normalized === 'live' ? 'production' : 'sandbox';
 };
 
+const resolveEnvironment = () => {
+  const explicitEnvironment = envValue(process.env.AFRICASTALKING_ENV || process.env.AT_ENV);
+  if (explicitEnvironment) return normalizeEnvironment(explicitEnvironment);
+
+  const username = envValue(process.env.AFRICASTALKING_USERNAME || process.env.AT_USERNAME).toLowerCase();
+  return username && username !== 'sandbox' ? 'production' : 'sandbox';
+};
+
 const maskSecret = (value) => {
   const secret = envValue(value);
   if (!secret) return '';
@@ -27,7 +35,7 @@ const buildSmsError = (message, statusCode, code) => {
 
 class AfricaTalkingService {
   constructor() {
-    this.environment = normalizeEnvironment(process.env.AFRICASTALKING_ENV || process.env.AT_ENV);
+    this.environment = resolveEnvironment();
     this.baseURL = this.environment === 'production'
       ? 'https://api.africastalking.com/version1'
       : 'https://api.sandbox.africastalking.com/version1';
