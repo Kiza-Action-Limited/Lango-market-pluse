@@ -67,6 +67,28 @@ const portalConfig = {
 
 const authPortalRoles = ['buyer', 'seller', 'logistics'];
 const getForgotPasswordPath = (role) => `/forgot-password?role=${role}`;
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const getIdentifierMessage = (identifier) => {
+  const value = String(identifier || '').trim();
+  if (!value) return 'Enter your email address or phone number.';
+  if (value.includes('@') && !emailPattern.test(value.toLowerCase())) {
+    return 'Enter a valid email address, for example name@gmail.com.';
+  }
+  if (!value.includes('@') && value.replace(/\D/g, '').length < 9) {
+    return 'Enter a phone number like 2547XXXXXXXX or use your email address.';
+  }
+  return '';
+};
+
+const getPortalLabel = (user) => {
+  const role = String(user?.role || '').toLowerCase();
+  if (role === 'admin') return 'Admin';
+  if (isLogisticsUser(user)) return 'Logistics';
+  if (isSellerUser(user)) return 'Seller';
+  if (isBuyerUser(user)) return 'Buyer';
+  return 'the correct';
+};
 
 const Login = () => {
   const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
@@ -160,10 +182,18 @@ const Login = () => {
 
     const cleanIdentifier = credentials[role].identifier.trim();
     const cleanPassword = credentials[role].password;
-    if (!cleanIdentifier || !cleanPassword) return;
+    const identifierMessage = getIdentifierMessage(cleanIdentifier);
+    if (identifierMessage) {
+      toast.error(identifierMessage);
+      return;
+    }
+    if (!cleanPassword) {
+      toast.error('Enter your password.');
+      return;
+    }
 
     if (cleanIdentifier.toLowerCase() === ADMIN_LOGIN_EMAIL && role !== 'admin') {
-      toast.error('Invalid credential!');
+      toast.error('This email is for the Admin portal. Choose Admin Sign In to continue.');
       return;
     }
 
@@ -185,7 +215,7 @@ const Login = () => {
 
       if (!portalAllowed) {
         logout({ silent: true });
-        toast.error('Invalid credential!');
+        toast.error(`This account belongs to the ${getPortalLabel(result.user)} portal. Please use the correct sign-in page.`);
         setLoadingRole(null);
         return;
       }

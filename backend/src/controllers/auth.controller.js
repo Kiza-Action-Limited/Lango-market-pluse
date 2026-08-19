@@ -1070,13 +1070,25 @@ exports.login = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      const firstMessage = errors.array().find((item) => item?.msg)?.msg;
       return res.status(400).json({ 
         success: false, 
-        errors: errors.array() 
+        message: firstMessage || 'Check your login details and try again.',
+        errors: errors.array(),
+        code: 'LOGIN_VALIDATION_FAILED',
       });
     }
 
-    const { phone, email, password } = req.body;
+    const { password } = req.body;
+    let { phone, email } = req.body;
+    const identifier = String(req.body.identifier || '').trim();
+    if (!phone && !email && identifier) {
+      if (identifier.includes('@')) {
+        email = identifier;
+      } else {
+        phone = identifier;
+      }
+    }
     const result = await authService.login({ phone, email, password });
     
     res.status(200).json({

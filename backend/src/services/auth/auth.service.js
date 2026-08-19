@@ -63,6 +63,13 @@ const hashResetToken = (token) => crypto
 
 const passwordResetKey = (tokenHash) => `reset:token:${tokenHash}`;
 
+const createAuthError = (message, statusCode = 401, code = 'LOGIN_FAILED') => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
 class AuthService {
   useFallback() {
     return process.env.AUTH_FALLBACK_MODE === 'true' || mongoose.connection.readyState !== 1;
@@ -180,22 +187,41 @@ class AuthService {
     const { phone, email, password } = credentials;
     const normalizedPhone = phone ? this.normalizePhone(phone) : null;
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : null;
+    const loginUsesEmail = Boolean(normalizedEmail);
+
+    if (!normalizedPhone && !normalizedEmail) {
+      throw createAuthError('Enter the email address or phone number used on your account.', 400, 'LOGIN_IDENTIFIER_REQUIRED');
+    }
+
+    if (normalizedEmail && !this.normalizeEmail(normalizedEmail)) {
+      throw createAuthError('Enter a valid email address, for example name@gmail.com.', 400, 'INVALID_EMAIL_FORMAT');
+    }
+
+    if (!password) {
+      throw createAuthError('Enter your password.', 400, 'PASSWORD_REQUIRED');
+    }
 
     if (this.useFallback()) {
-      const fallbackUser = await memoryStore.validateLogin({
+      const fallbackUserRecord = memoryStore.findByPhoneOrEmail({
         phone: normalizedPhone,
         email: normalizedEmail,
-        password,
       });
-      if (!fallbackUser) {
-        const error = new Error('Invalid credentials');
-        error.statusCode = 401;
-        throw error;
+      if (!fallbackUserRecord) {
+        throw createAuthError(
+          loginUsesEmail
+            ? 'No account found with this email address. Check the email or create a new account.'
+            : 'No account found with this phone number. Check the number or create a new account.',
+          404,
+          loginUsesEmail ? 'EMAIL_NOT_FOUND' : 'PHONE_NOT_FOUND'
+        );
       }
+      const fallbackPasswordMatches = await bcrypt.compare(password, fallbackUserRecord.passwordHash);
+      if (!fallbackPasswordMatches) {
+        throw createAuthError('Password is incorrect for this account. Try again or use Forgot password.', 401, 'INVALID_PASSWORD');
+      }
+      const fallbackUser = await memoryStore.validateLogin({ phone: normalizedPhone, email: normalizedEmail, password });
       if (!fallbackUser.isActive) {
-        const error = new Error('Account deactivated');
-        error.statusCode = 403;
-        throw error;
+        throw createAuthError('This account is deactivated. Contact support to restore access.', 403, 'ACCOUNT_DEACTIVATED');
       }
       const tokens = this.generateTokens(fallbackUser);
       const sanitizedUser = this.sanitizeUser(fallbackUser);
@@ -210,21 +236,21 @@ class AuthService {
       user = await User.findOne({ email: normalizedEmail }).select('+password');
     }
     if (!user) {
-      const error = new Error('Invalid credentials');
-      error.statusCode = 401;
-      throw error;
+      throw createAuthError(
+        loginUsesEmail
+          ? 'No account found with this email address. Check the email or create a new account.'
+          : 'No account found with this phone number. Check the number or create a new account.',
+        404,
+        loginUsesEmail ? 'EMAIL_NOT_FOUND' : 'PHONE_NOT_FOUND'
+      );
     }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-      const error = new Error('Invalid credentials');
-      error.statusCode = 401;
-      throw error;
+      throw createAuthError('Password is incorrect for this account. Try again or use Forgot password.', 401, 'INVALID_PASSWORD');
     }
     if (!user.isActive) {
-      const error = new Error('Account deactivated');
-      error.statusCode = 403;
-      throw error;
+      throw createAuthError('This account is deactivated. Contact support to restore access.', 403, 'ACCOUNT_DEACTIVATED');
     }
 
     const loginAt = new Date();

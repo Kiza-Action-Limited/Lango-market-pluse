@@ -73,7 +73,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       const errorMessage = handleApiError(error);
       toast.error(errorMessage.message || 'Login failed');
-      return { success: false, error: errorMessage.message };
+      return { success: false, error: errorMessage.message, code: errorMessage.code, status: errorMessage.status };
     }
   };
 
