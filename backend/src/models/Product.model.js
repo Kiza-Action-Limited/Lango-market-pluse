@@ -34,11 +34,44 @@ const ReviewSchema = new mongoose.Schema(
       min: 1,
       max: 5,
     },
+    title: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: '',
+    },
     comment: {
       type: String,
       required: true,
       trim: true,
       maxlength: 1000,
+    },
+    order: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Order',
+      index: true,
+    },
+    verified: {
+      type: Boolean,
+      default: false,
+    },
+    helpful: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    unhelpful: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    sellerResponse: {
+      comment: {
+        type: String,
+        trim: true,
+        maxlength: 1000,
+      },
+      respondedAt: Date,
     },
   },
   { timestamps: true }

@@ -42,6 +42,7 @@ const BuyerReviews = () => {
       ...current,
       [productId]: {
         rating: 5,
+        title: '',
         comment: '',
         ...(current[productId] || {}),
         ...patch,
@@ -50,9 +51,9 @@ const BuyerReviews = () => {
   };
 
   const submitReview = async (productId) => {
-    const draft = formState[productId] || { rating: 5, comment: '' };
-    if (!String(draft.comment || '').trim()) {
-      toast.error('Write a short review comment');
+    const draft = formState[productId] || { rating: 5, title: '', comment: '' };
+    if (String(draft.comment || '').trim().length < 10) {
+      toast.error('Write at least 10 characters for your review');
       return;
     }
 
@@ -60,6 +61,7 @@ const BuyerReviews = () => {
     try {
       await productService.addReview(productId, {
         rating: Number(draft.rating || 5),
+        title: String(draft.title || '').trim(),
         comment: String(draft.comment).trim(),
       });
       toast.success('Review saved');
@@ -107,7 +109,7 @@ const BuyerReviews = () => {
               const product = item.product || {};
               const seller = item.seller || {};
               const productId = product._id || product.id;
-              const draft = formState[productId] || { rating: item.review?.rating || 5, comment: item.review?.comment || '' };
+              const draft = formState[productId] || { rating: item.review?.rating || 5, title: item.review?.title || '', comment: item.review?.comment || '' };
               return (
                 <article key={`${item.order?.id}-${productId}`} className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
                   <div className="grid gap-4 lg:grid-cols-[auto_1fr_auto]">
@@ -135,7 +137,7 @@ const BuyerReviews = () => {
                     </Link>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-[160px_1fr_auto] md:items-end">
+                  <div className="mt-4 grid gap-3 lg:grid-cols-[140px_220px_1fr_auto] lg:items-end">
                     <label className="text-sm font-semibold text-gray-900">
                       Rating
                       <select
@@ -147,6 +149,16 @@ const BuyerReviews = () => {
                           <option key={rating} value={rating}>{rating} stars</option>
                         ))}
                       </select>
+                    </label>
+                    <label className="text-sm font-semibold text-gray-900">
+                      Title
+                      <input
+                        value={draft.title}
+                        onChange={(event) => updateForm(productId, { title: event.target.value })}
+                        maxLength={100}
+                        className="mt-2 h-11 w-full rounded-lg border border-gray-300 px-3 text-sm outline-none focus:border-[#F97316]"
+                        placeholder="Quick summary"
+                      />
                     </label>
                     <label className="text-sm font-semibold text-gray-900">
                       Review

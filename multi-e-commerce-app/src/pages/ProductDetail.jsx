@@ -6,7 +6,7 @@ import { useCart } from '../context/CartContext';
 import { productService } from '../services/productService';
 import { rfqService } from '../services/rfqService';
 import { userService } from '../services/userService';
-import { FaStar, FaStarHalfAlt, FaRegStar, FaShoppingCart, FaHeart, FaRegHeart, FaTruck, FaShieldAlt, FaUndo, FaFileInvoiceDollar } from 'react-icons/fa';
+import { FaStar, FaStarHalfAlt, FaRegStar, FaShoppingCart, FaHeart, FaRegHeart, FaTruck, FaShieldAlt, FaUndo, FaFileInvoiceDollar, FaCheckCircle, FaStore } from 'react-icons/fa';
 import ProductCard from '../components/ProductCard';
 import ProductReviewModal from '../components/ProductReviewModal';
 import toast from 'react-hot-toast';
@@ -22,6 +22,17 @@ const getReviewerName = (review = {}) => (
 const getReviewerImage = (review = {}) => review.user?.profileImageUrl || '';
 
 const getReviewerInitial = (review = {}) => getReviewerName(review).charAt(0).toUpperCase() || 'V';
+
+const getReviewTitle = (review = {}) => (
+  review.title || (Number(review.rating || 0) >= 4 ? 'Good product experience' : 'Product feedback')
+);
+
+const getReviewOrderLabel = (review = {}) => {
+  const order = review.order || {};
+  const orderNumber = order.orderNumber || order.id || order._id;
+  if (!orderNumber) return '';
+  return `Order ${String(orderNumber).slice(-8)}`;
+};
 
 const unpackProductList = (payload) => {
   const list = payload?.products || payload?.data?.products || payload?.data || [];
@@ -67,7 +78,7 @@ const ProductDetail = () => {
   const [quantity, setQuantity] = useState(1);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [reviews, setReviews] = useState([]);
-  const [newReview, setNewReview] = useState({ rating: 5, comment: '' });
+  const [newReview, setNewReview] = useState({ rating: 5, title: '', comment: '' });
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewEligibility, setReviewEligibility] = useState({
     loading: false,
@@ -314,7 +325,14 @@ const ProductDetail = () => {
         });
         return [createdReview, ...next];
       });
-      setNewReview({ rating: 5, comment: '' });
+      if (response?.summary) {
+        setProduct((previous) => ({
+          ...previous,
+          rating: response.summary.averageRating,
+          reviewSummary: response.summary,
+        }));
+      }
+      setNewReview({ rating: 5, title: '', comment: '' });
       setIsReviewModalOpen(false);
       toast.success('Review submitted');
     } catch (error) {
@@ -360,13 +378,17 @@ const ProductDetail = () => {
   const sellerBusinessName = product?.seller?.businessName || product?.seller?.fullName || product?.seller?.name || 'Verified Seller';
   const metadataSource = product.attributes || product.customAttributes || product.metadata || {};
   const metadataEntries = Object.entries(metadataSource).filter(([, value]) => value !== '' && value !== null && value !== undefined);
-  const averageRating = Number(product.rating || 0);
-  const reviewCount = reviews.length;
-  const ratingCounts = reviews.reduce((acc, review) => {
+  const computedRatingCounts = reviews.reduce((acc, review) => {
     const rating = Math.max(1, Math.min(5, Math.round(Number(review.rating || 0))));
     acc[rating] = (acc[rating] || 0) + 1;
     return acc;
   }, {});
+  const reviewSummary = product.reviewSummary || {};
+  const averageRating = Number(reviewSummary.averageRating ?? product.rating ?? 0);
+  const reviewCount = Number(reviewSummary.totalReviews ?? reviews.length);
+  const verifiedReviewCount = Number(reviewSummary.verifiedReviews ?? reviews.filter((review) => review.verified !== false).length);
+  const recommendedPercent = Number(reviewSummary.recommendedPercent ?? 0);
+  const ratingCounts = reviewSummary.ratingCounts || computedRatingCounts;
   const productFacts = [
     { label: 'SKU', value: product.sku || product.trackingSku || 'Not assigned' },
     { label: 'Category', value: product.category || 'Uncategorized' },
@@ -654,8 +676,12 @@ const ProductDetail = () => {
             <p className="text-4xl font-bold text-[#111827]">{averageRating.toFixed(1)}</p>
             <div className="mt-2 flex justify-center">{renderStars(averageRating)}</div>
             <p className="mt-2 text-sm text-gray-600">{reviewCount} review{reviewCount === 1 ? '' : 's'}</p>
+            <p className="mt-1 text-xs font-semibold text-green-700">{verifiedReviewCount} verified purchase{verifiedReviewCount === 1 ? '' : 's'}</p>
           </div>
           <div className="space-y-2">
+            <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm font-semibold text-green-800">
+              {recommendedPercent}% of buyers rated this product 4 stars or higher.
+            </div>
             {[5, 4, 3, 2, 1].map((rating) => {
               const count = ratingCounts[rating] || 0;
               const pct = reviewCount ? Math.round((count / reviewCount) * 100) : 0;
@@ -710,7 +736,7 @@ const ProductDetail = () => {
           ) : (
             reviews.map((review) => (
               <div key={review.id || review._id} className="rounded-lg border border-gray-200 bg-white p-4">
-                <div className="mb-3 flex items-center gap-3">
+                <div className="mb-3 flex items-start gap-3">
                   {getReviewerImage(review) ? (
                     <img
                       src={getReviewerImage(review)}
@@ -723,12 +749,31 @@ const ProductDetail = () => {
                     </div>
                   )}
                   <div>
-                    <p className="font-semibold text-[#111827]">{getReviewerName(review)}</p>
-                    <p className="text-sm text-gray-500">{new Date(review.createdAt).toLocaleDateString()}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-[#111827]">{getReviewerName(review)}</p>
+                      {review.verified !== false && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700">
+                          <FaCheckCircle /> Verified purchase
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      {new Date(review.createdAt).toLocaleDateString()}
+                      {getReviewOrderLabel(review) ? ` . ${getReviewOrderLabel(review)}` : ''}
+                    </p>
                   </div>
                 </div>
                 <div className="mb-2 flex">{renderStars(review.rating)}</div>
+                <h3 className="mb-1 font-semibold text-[#111827]">{getReviewTitle(review)}</h3>
                 <p className="text-gray-600">{review.comment}</p>
+                {review.sellerResponse?.comment && (
+                  <div className="mt-4 rounded-lg border border-orange-100 bg-orange-50 p-3">
+                    <p className="flex items-center gap-2 text-sm font-semibold text-orange-800">
+                      <FaStore /> Seller response
+                    </p>
+                    <p className="mt-1 text-sm text-orange-900">{review.sellerResponse.comment}</p>
+                  </div>
+                )}
               </div>
             ))
           )}

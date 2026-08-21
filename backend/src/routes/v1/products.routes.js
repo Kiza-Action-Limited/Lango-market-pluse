@@ -63,7 +63,9 @@ router.post(
   [
     param('id').isMongoId(),
     body('rating').isFloat({ min: 1, max: 5 }).withMessage('Rating must be between 1 and 5'),
-    body('comment').isString().trim().isLength({ min: 2, max: 1000 }).withMessage('Comment must be between 2 and 1000 characters'),
+    body('title').optional({ checkFalsy: true }).isString().trim().isLength({ max: 100 }).withMessage('Review title must be 100 characters or fewer'),
+    body('comment').isString().trim().isLength({ min: 10, max: 1000 }).withMessage('Review must be between 10 and 1000 characters'),
+    body('orderId').optional({ checkFalsy: true }).isMongoId().withMessage('Order ID must be valid'),
   ],
   productController.addProductReview
 );

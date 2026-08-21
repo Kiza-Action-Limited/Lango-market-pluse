@@ -547,6 +547,13 @@ const DriverAssignmentPanel = ({ logistics, providers, assigning, onAssignDriver
 const QrHandoffPanel = ({ logistics, qrState, loading, onGenerate }) => {
   const activeTokens = qrState?.activeTokens || qrState?.availableTokens || [];
   const audit = qrState?.scanAudit || logistics?.qrScans || [];
+  const sellerVisibleQrState = {
+    ...qrState,
+    tokens: (qrState?.tokens || []).filter((token) => String(token.type || '').toUpperCase() === 'PICKUP'),
+    activeTokens: activeTokens.filter((token) => String(token.type || '').toUpperCase() === 'PICKUP'),
+    availableTokens: (qrState?.availableTokens || activeTokens).filter((token) => String(token.type || '').toUpperCase() === 'PICKUP'),
+  };
+
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -566,11 +573,11 @@ const QrHandoffPanel = ({ logistics, qrState, loading, onGenerate }) => {
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-        Present the pickup QR to the assigned driver only. The delivery QR is confirmed by the buyer or driver at drop-off with GPS.
+        Present the pickup QR to the assigned logistics driver only. Buyers confirm the delivery QR from their Lango Market Pulse order tracking page at drop-off.
       </div>
 
       <div className="mt-3">
-        <QrTokenStatus qrState={qrState} logistics={logistics} showImages />
+        <QrTokenStatus qrState={sellerVisibleQrState} logistics={logistics} showImages />
       </div>
 
       {!activeTokens.length && !loading && (
@@ -596,13 +603,11 @@ const LogisticsPanel = ({
   creating,
   assigning,
   qrLoading,
-  scanning,
   mapTracking,
   mapLoading,
   onCreate,
   onAssignDriver,
   onGenerateQr,
-  onScanQr,
   onRefreshMap,
 }) => {
   const status = String(order.status || '');
@@ -778,9 +783,7 @@ const LogisticsPanel = ({
         logistics={logistics}
         qrState={qrState}
         loading={qrLoading}
-        scanning={scanning}
         onGenerate={onGenerateQr}
-        onScan={onScanQr}
       />
 
       <div className="mt-4 grid grid-cols-1 gap-4 2xl:grid-cols-2">
@@ -807,7 +810,6 @@ const SellerOrders = () => {
   const [creatingShipmentId, setCreatingShipmentId] = useState(null);
   const [assigningLogisticsId, setAssigningLogisticsId] = useState(null);
   const [qrLoadingId, setQrLoadingId] = useState(null);
-  const [scanningLogisticsId, setScanningLogisticsId] = useState(null);
 
   const orderIds = useMemo(() => orders.map(getOrderId).filter(Boolean), [orders]);
   const logisticsIds = useMemo(
@@ -1052,30 +1054,6 @@ const SellerOrders = () => {
     }
   };
 
-  const scanQrToken = async (orderId, logisticsId, step, token) => {
-    setScanningLogisticsId(logisticsId);
-    try {
-      if (step === 'pickup') {
-        await logisticsService.scanPickup(logisticsId, { token });
-      } else {
-        await logisticsService.scanDelivery(logisticsId, { token });
-      }
-      const [logistics, qrState] = await Promise.all([
-        logisticsService.getByOrder(orderId),
-        logisticsService.listTripQrTokens(logisticsId),
-      ]);
-      setLogisticsByOrder((prev) => ({ ...prev, [orderId]: logistics }));
-      setQrByLogistics((prev) => ({ ...prev, [logisticsId]: qrState }));
-      fetchMapsForLogistics([logisticsId]);
-      fetchEscrowForOrders([orderId]);
-      toast.success(`${step === 'pickup' ? 'Pickup' : 'Delivery'} QR scan recorded`);
-    } catch (error) {
-      toast.error(error.response?.data?.message || error.message || 'Failed to record QR scan');
-    } finally {
-      setScanningLogisticsId(null);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -1191,13 +1169,11 @@ const SellerOrders = () => {
                       creating={creatingShipmentId === orderId}
                       assigning={assigningLogisticsId === logisticsId}
                       qrLoading={qrLoadingId === logisticsId}
-                      scanning={scanningLogisticsId === logisticsId}
                       mapTracking={logisticsId ? mapTrackingByLogistics[logisticsId] : null}
                       mapLoading={Boolean(logisticsId && mapLoadingByLogistics[logisticsId])}
                       onCreate={createShipment}
                       onAssignDriver={(payload) => assignDriver(orderId, logisticsId, payload)}
                       onGenerateQr={() => generateQrTokens(logisticsId)}
-                      onScanQr={(step, token) => scanQrToken(orderId, logisticsId, step, token)}
                       onRefreshMap={() => refreshLogisticsMap(orderId, logisticsId)}
                     />
                   </div>

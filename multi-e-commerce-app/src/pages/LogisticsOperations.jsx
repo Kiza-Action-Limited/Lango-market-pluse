@@ -16,6 +16,7 @@ import {
 } from 'react-icons/fa';
 import { useAuth } from '../context/AuthContext';
 import { logisticsService } from '../services/logisticsService';
+import QrHandshakePanel, { QrAuditTrail } from '../components/logistics/QrHandshakePanel';
 
 const initialTripForm = {
   originLat: '',
@@ -55,6 +56,12 @@ const initialQrForm = {
   logisticsId: '',
   type: 'PICKUP',
   tokenId: '',
+};
+
+const routeText = (trip) => {
+  const pickup = trip?.route?.pickup || trip?.pickupAddress?.town || trip?.pickupAddress?.label || 'Pickup';
+  const delivery = trip?.route?.delivery || trip?.shippingAddress?.town || trip?.shippingAddress?.label || 'Delivery';
+  return `${pickup} to ${delivery}`;
 };
 
 const initialEscrowForm = {
@@ -126,8 +133,8 @@ const MetricCard = ({ label, value, icon: Icon, tone = 'orange' }) => {
   );
 };
 
-const Section = ({ title, description, icon: Icon, children, action }) => (
-  <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+const Section = ({ title, description, icon: Icon, children, action, className = '' }) => (
+  <section className={`rounded-2xl border border-gray-200 bg-white p-5 shadow-sm ${className}`}>
     <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div className="flex items-start gap-3">
         <div className="rounded-xl bg-[#FFF7ED] p-3 text-[#F97316]">
@@ -205,6 +212,10 @@ const LogisticsOperations = () => {
   const [qrResult, setQrResult] = useState(null);
   const [qrListResult, setQrListResult] = useState(null);
   const [qrStatsResult, setQrStatsResult] = useState(null);
+  const [qrScanTrips, setQrScanTrips] = useState([]);
+  const [selectedQrTripId, setSelectedQrTripId] = useState('');
+  const [qrScanStep, setQrScanStep] = useState('pickup');
+  const [qrScanLoading, setQrScanLoading] = useState(false);
   const [escrowResult, setEscrowResult] = useState(null);
   const [sinkingResult, setSinkingResult] = useState(null);
   const [myFundResult, setMyFundResult] = useState(null);
@@ -250,6 +261,26 @@ const LogisticsOperations = () => {
         });
       });
   }, [isAllowed, isAdmin]);
+
+  const loadQrScanTrips = async ({ silent = false } = {}) => {
+    if (!silent) setLoadingFor('qrScanTrips', true);
+    try {
+      const dashboard = await logisticsService.getDashboard({ limit: 100 });
+      const trips = Array.isArray(dashboard?.trips) ? dashboard.trips : [];
+      setQrScanTrips(trips);
+      setSelectedQrTripId((current) => current || trips[0]?._id || trips[0]?.id || '');
+    } catch (error) {
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to load QR scan queue');
+    } finally {
+      if (!silent) setLoadingFor('qrScanTrips', false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAllowed && activeTab === 'qr' && !qrScanTrips.length) {
+      loadQrScanTrips({ silent: true });
+    }
+  }, [activeTab, isAllowed, qrScanTrips.length]);
 
   const handleCreateTrip = async (event) => {
     event.preventDefault();
@@ -392,6 +423,25 @@ const LogisticsOperations = () => {
       toast.error(error?.response?.data?.message || error?.message || 'Failed to load QR token stats');
     } finally {
       setLoadingFor('qrStats', false);
+    }
+  };
+
+  const selectedQrTrip = qrScanTrips.find((trip) => String(trip._id || trip.id) === String(selectedQrTripId)) || qrScanTrips[0] || null;
+
+  const handleQrScanSubmit = async ({ token, gpsCoords, step }) => {
+    if (!selectedQrTrip) throw new Error('Select a shipment before scanning.');
+    const logisticsId = selectedQrTrip._id || selectedQrTrip.id;
+    setQrScanLoading(true);
+    try {
+      const result = step === 'pickup'
+        ? await logisticsService.scanPickup(logisticsId, { token, gpsCoords })
+        : await logisticsService.scanDelivery(logisticsId, { token, gpsCoords });
+      setQrResult(result);
+      toast.success(`${step === 'pickup' ? 'Pickup' : 'Delivery'} QR scan recorded.`);
+      await loadQrScanTrips({ silent: true });
+      return result;
+    } finally {
+      setQrScanLoading(false);
     }
   };
 
@@ -842,6 +892,82 @@ const LogisticsOperations = () => {
 
         {activeTab === 'qr' && (
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <Section
+              title="Logistics QR Scan Station"
+              description="Scan seller pickup QR codes and final delivery QR codes with GPS proof from the logistics dashboard."
+              icon={FaQrcode}
+              className="xl:col-span-2"
+              action={(
+                <div className="flex flex-wrap gap-2">
+                  <Link to="/logistics/hub-scanner" className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50">
+                    Hub scanner
+                  </Link>
+                  <Link to="/logistics/driver-scanner" className="rounded-xl bg-[#111827] px-3 py-2 text-xs font-semibold text-white hover:bg-black">
+                    Driver scanner
+                  </Link>
+                </div>
+              )}
+            >
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+                    <p className="font-semibold">Buyer delivery confirmation</p>
+                    <p className="mt-1 text-xs leading-5">
+                      The buyer logs in to Lango Market Pulse, opens their order tracking page, and scans the delivery QR at drop-off. Logistics can scan only when assigned or when admin-authorized.
+                    </p>
+                  </div>
+                  <Field label="Shipment queue">
+                    <Select
+                      value={selectedQrTrip?._id || selectedQrTrip?.id || selectedQrTripId}
+                      onChange={(event) => setSelectedQrTripId(event.target.value)}
+                    >
+                      {qrScanTrips.map((trip) => {
+                        const id = trip._id || trip.id;
+                        return (
+                          <option key={id} value={id}>
+                            {trip.orderNumber || String(id).slice(-8)} - {routeText(trip)}
+                          </option>
+                        );
+                      })}
+                    </Select>
+                  </Field>
+                  <Field label="Scan step">
+                    <Select value={qrScanStep} onChange={(event) => setQrScanStep(event.target.value)}>
+                      <option value="pickup">Pickup QR</option>
+                      <option value="delivery">Delivery QR</option>
+                    </Select>
+                  </Field>
+                  <button
+                    type="button"
+                    onClick={() => loadQrScanTrips()}
+                    disabled={loadingState.qrScanTrips}
+                    className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {loadingState.qrScanTrips ? 'Refreshing...' : 'Refresh scan queue'}
+                  </button>
+                  {!qrScanTrips.length && (
+                    <p className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-500">
+                      No shipment queue loaded yet. Refresh the scan queue or use the dedicated scanner links.
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <QrHandshakePanel
+                    title={qrScanStep === 'pickup' ? 'Pickup QR scanner' : 'Delivery QR scanner'}
+                    subtitle={selectedQrTrip ? routeText(selectedQrTrip) : 'Select a shipment from the queue before scanning.'}
+                    defaultStep={qrScanStep}
+                    allowedSteps={[qrScanStep]}
+                    logistics={selectedQrTrip}
+                    scanning={qrScanLoading}
+                    onScan={handleQrScanSubmit}
+                  />
+                </div>
+              </div>
+              <div className="mt-4">
+                <QrAuditTrail scans={selectedQrTrip?.qrScans || selectedQrTrip?.qr?.scanAudit || []} title="Selected shipment QR audit" />
+              </div>
+            </Section>
+
             <Section
               title="Generate QR Token"
               description="Create pickup or delivery QR tokens directly from the backend."

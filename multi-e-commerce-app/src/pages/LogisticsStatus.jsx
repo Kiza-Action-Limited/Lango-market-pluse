@@ -236,7 +236,7 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
           title={qrScanner.step === 'pickup' ? 'Driver pickup QR scanner' : 'Final delivery QR scanner'}
           subtitle={qrScanner.step === 'pickup'
             ? 'Scan the seller handoff QR at pickup. This moves escrow to in transit.'
-            : 'Scan the receiver delivery QR with GPS at the drop-off location.'}
+            : 'Scan the receiver delivery QR with GPS at drop-off. Buyers can also log in and scan from their order tracking page.'}
           defaultStep={qrScanner.step}
           allowedSteps={[qrScanner.step]}
           logistics={qrScanner.trip}
@@ -460,7 +460,7 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Logistics workspace</p>
               <h1 className="mt-1 text-2xl font-bold text-[#111827]">Status Center</h1>
-              <p className="mt-1 text-sm text-gray-500">Monitor account readiness, live trip states, QR handoffs, and delivery proof.</p>
+              <p className="mt-1 text-sm text-gray-500">Monitor account readiness, live trip states, QR handoffs, buyer delivery scans, and delivery proof.</p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="inline-flex h-10 items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 text-xs font-medium text-green-700">
@@ -532,6 +532,9 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
 
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
             <Panel title="QR Handoff Status" className="xl:col-span-6">
+              <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-900">
+                Pickup QR is scanned by the assigned logistics driver. Delivery QR is scanned by the buyer from order tracking, or by the assigned driver at drop-off with GPS proof.
+              </div>
               <div className="space-y-3">
                 {qrQueue.length ? qrQueue.slice(0, 5).map((trip) => (
                   <div key={trip._id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-gray-200 p-3">
@@ -934,6 +937,9 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
 
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
           <Panel title="QR Handoff Queue" className="xl:col-span-6">
+            <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-900">
+              Buyers confirm delivery by logging in and scanning the delivery QR from their order tracking page. Logistics keeps pickup and driver delivery fallback scanning here.
+            </div>
             <div className="space-y-3">
               {qrQueue.length ? qrQueue.slice(0, 5).map((trip) => (
                 <div key={trip._id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-gray-200 p-3">

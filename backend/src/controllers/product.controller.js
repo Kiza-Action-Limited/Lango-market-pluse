@@ -377,12 +377,59 @@ const getEffectiveMinimumOrderQuantity = (product = {}) => {
     : 1;
 };
 
+const buildReviewTitle = (rating) => {
+  const roundedRating = Math.max(1, Math.min(5, Math.round(Number(rating || 0))));
+  if (roundedRating >= 5) return 'Excellent purchase';
+  if (roundedRating === 4) return 'Good product experience';
+  if (roundedRating === 3) return 'Fair product experience';
+  if (roundedRating === 2) return 'Needs improvement';
+  return 'Poor product experience';
+};
+
+const summarizeReviews = (reviews = []) => {
+  const ratingCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  let totalRating = 0;
+  let verifiedCount = 0;
+  let recommendedCount = 0;
+
+  reviews.forEach((review) => {
+    const rating = Math.max(1, Math.min(5, Math.round(Number(review.rating || 0))));
+    ratingCounts[rating] += 1;
+    totalRating += Number(review.rating || 0);
+    if (review.verified) verifiedCount += 1;
+    if (Number(review.rating || 0) >= 4) recommendedCount += 1;
+  });
+
+  const total = reviews.length;
+  const averageRating = total ? Number((totalRating / total).toFixed(1)) : 0;
+
+  return {
+    averageRating,
+    totalReviews: total,
+    verifiedReviews: verifiedCount,
+    recommendedPercent: total ? Math.round((recommendedCount / total) * 100) : 0,
+    ratingCounts,
+  };
+};
+
+const normalizeReview = (review = {}) => {
+  const raw = typeof review.toObject === 'function' ? review.toObject() : review;
+  return {
+    ...raw,
+    title: raw.title || buildReviewTitle(raw.rating),
+    verified: raw.verified !== false,
+    helpful: Number(raw.helpful || 0),
+    unhelpful: Number(raw.unhelpful || 0),
+  };
+};
+
 const appendInventoryGraph = (product) => {
   if (!product) return product;
   const quantityAvailable = Number(product.quantityAvailable || 0);
   const reservedQuantity = Number(product.reservedQuantity || 0);
   const history = Array.isArray(product.inventoryHistory) ? product.inventoryHistory : [];
   const sku = buildTrackingSku(product);
+  const reviews = Array.isArray(product.reviews) ? product.reviews.map(normalizeReview) : [];
 
   return {
     ...product,
@@ -395,6 +442,9 @@ const appendInventoryGraph = (product) => {
     warehouseStatus: normalizeWarehouseStatus(product.warehouseStatus),
     minThreshold: getEffectiveLowStockThreshold(product),
     availableQuantity: Math.max(0, quantityAvailable - reservedQuantity),
+    rating: summarizeReviews(reviews).averageRating || Number(product.rating || 0),
+    reviewSummary: summarizeReviews(reviews),
+    reviews,
     inventoryGraph: history.length
       ? history.map((entry) => ({
           onHand: Number(entry.onHand || 0),
@@ -1207,20 +1257,22 @@ exports.getMyProducts = async (req, res, next) => {
 exports.getProductReviews = async (req, res, next) => {
   try {
     const product = await Product.findById(req.params.id)
-      .select('reviews')
-      .populate('reviews.user', 'name fullName profileImageUrl');
+      .select('reviews rating')
+      .populate('reviews.user', 'name fullName profileImageUrl')
+      .populate('reviews.order', 'orderNumber status deliveredAt updatedAt');
 
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    const reviews = [...(product.reviews || [])].sort(
+    const reviews = [...(product.reviews || [])].map(normalizeReview).sort(
       (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
     );
 
     res.status(200).json({
       success: true,
       reviews,
+      summary: summarizeReviews(reviews),
     });
   } catch (error) {
     console.error('Error in getProductReviews:', error);
@@ -1255,15 +1307,18 @@ exports.getReviewEligibility = async (req, res, next) => {
         { paymentStatus: 'completed' },
         { paidAt: { $exists: true, $ne: null } },
       ],
-    }).select('_id status paymentStatus paidAt');
+    })
+      .select('_id status paymentStatus paidAt deliveredAt updatedAt')
+      .sort({ deliveredAt: -1, paidAt: -1, updatedAt: -1 });
 
     res.status(200).json({
       success: true,
       canReview: Boolean(paidOrder),
       message: paidOrder
-        ? 'You can review this product.'
+        ? 'You can leave a verified purchase review for this product.'
         : 'Complete payment for this product before writing a review.',
       orderId: paidOrder?._id,
+      orderStatus: paidOrder?.status,
     });
   } catch (error) {
     console.error('Error in getReviewEligibility:', error);
@@ -1282,7 +1337,10 @@ exports.addProductReview = async (req, res, next) => {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const { rating, comment } = req.body;
+    const { rating, comment, orderId } = req.body;
+    const normalizedRating = Math.max(1, Math.min(5, Number(rating || 0)));
+    const normalizedComment = String(comment || '').trim();
+    const normalizedTitle = String(req.body.title || '').trim().slice(0, 100) || buildReviewTitle(normalizedRating);
     const product = await Product.findById(req.params.id);
 
     if (!product) {
@@ -1293,7 +1351,7 @@ exports.addProductReview = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'You cannot review your own product.' });
     }
 
-    const paidOrder = await Order.exists({
+    const paidOrderQuery = {
       buyer: req.user.id,
       product: req.params.id,
       $or: [
@@ -1301,7 +1359,13 @@ exports.addProductReview = async (req, res, next) => {
         { paymentStatus: 'completed' },
         { paidAt: { $exists: true, $ne: null } },
       ],
-    });
+    };
+
+    if (orderId) paidOrderQuery._id = orderId;
+
+    const paidOrder = await Order.findOne(paidOrderQuery)
+      .select('_id orderNumber status paymentStatus paidAt deliveredAt updatedAt')
+      .sort({ deliveredAt: -1, paidAt: -1, updatedAt: -1 });
 
     if (!paidOrder) {
       return res.status(403).json({
@@ -1315,31 +1379,39 @@ exports.addProductReview = async (req, res, next) => {
     );
 
     if (existingReviewIndex >= 0) {
-      product.reviews[existingReviewIndex].rating = Number(rating);
-      product.reviews[existingReviewIndex].comment = String(comment).trim();
+      product.reviews[existingReviewIndex].rating = normalizedRating;
+      product.reviews[existingReviewIndex].title = normalizedTitle;
+      product.reviews[existingReviewIndex].comment = normalizedComment;
+      product.reviews[existingReviewIndex].order = paidOrder._id;
+      product.reviews[existingReviewIndex].verified = true;
       product.reviews[existingReviewIndex].updatedAt = new Date();
     } else {
       product.reviews.unshift({
         user: req.user.id,
-        rating: Number(rating),
-        comment: String(comment).trim(),
+        rating: normalizedRating,
+        title: normalizedTitle,
+        comment: normalizedComment,
+        order: paidOrder._id,
+        verified: true,
       });
     }
 
-    const totalRating = product.reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0);
-    product.rating = product.reviews.length ? Number((totalRating / product.reviews.length).toFixed(1)) : 0;
+    const reviewSummary = summarizeReviews(product.reviews);
+    product.rating = reviewSummary.averageRating;
 
     await product.save();
     await product.populate('reviews.user', 'name fullName profileImageUrl');
+    await product.populate('reviews.order', 'orderNumber status deliveredAt updatedAt');
 
-    const savedReview = product.reviews.find(
+    const savedReview = normalizeReview(product.reviews.find(
       (review) => String(review.user?._id || review.user) === String(req.user.id)
-    );
+    ));
 
     res.status(201).json({
       success: true,
       message: existingReviewIndex >= 0 ? 'Review updated successfully' : 'Review added successfully',
       review: savedReview,
+      summary: summarizeReviews(product.reviews),
     });
   } catch (error) {
     console.error('Error in addProductReview:', error);

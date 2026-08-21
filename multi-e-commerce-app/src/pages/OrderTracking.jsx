@@ -86,7 +86,7 @@ const OrderTracking = () => {
   const [qrScanning, setQrScanning] = useState(false);
   const [reviewItems, setReviewItems] = useState([]);
   const [activeReviewIndex, setActiveReviewIndex] = useState(0);
-  const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
+  const [reviewDraft, setReviewDraft] = useState({ rating: 5, title: '', comment: '' });
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const applyTrackingPayload = useCallback((payload) => {
@@ -275,20 +275,20 @@ const OrderTracking = () => {
 
     if (remember) markReviewPromptShown(sourceOrder);
     setActiveReviewIndex(0);
-    setReviewDraft({ rating: 5, comment: '' });
+    setReviewDraft({ rating: 5, title: '', comment: '' });
     setReviewItems(nextReviewItems);
   };
 
   const closeReviewPrompt = () => {
     setReviewItems([]);
     setActiveReviewIndex(0);
-    setReviewDraft({ rating: 5, comment: '' });
+    setReviewDraft({ rating: 5, title: '', comment: '' });
   };
 
   const moveToNextReview = () => {
     if (activeReviewIndex < reviewItems.length - 1) {
       setActiveReviewIndex((previous) => previous + 1);
-      setReviewDraft({ rating: 5, comment: '' });
+      setReviewDraft({ rating: 5, title: '', comment: '' });
       return;
     }
 
