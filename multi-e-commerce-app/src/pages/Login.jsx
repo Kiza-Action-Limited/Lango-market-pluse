@@ -23,10 +23,10 @@ import { isBuyerUser, isLogisticsUser, isSellerUser } from '../utils/userCategor
 const ADMIN_LOGIN_EMAIL = String(import.meta.env.VITE_ADMIN_LOGIN_EMAIL || 'admin@langomarket.com').toLowerCase();
 
 const INITIAL_CREDENTIALS = {
-  buyer: { identifier: '', password: '', remember: false },
-  seller: { identifier: '', password: '', remember: false },
-  logistics: { identifier: '', password: '', remember: false },
-  admin: { identifier: '', password: '', remember: false },
+  buyer: { identifier: '', password: '' },
+  seller: { identifier: '', password: '' },
+  logistics: { identifier: '', password: '' },
+  admin: { identifier: '', password: '' },
 };
 
 const portalConfig = {
@@ -316,17 +316,7 @@ const Login = () => {
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <label className="flex items-center">
-              <input
-                name={`${role}-remember-me`}
-                type="checkbox"
-                checked={credentials[role].remember}
-                onChange={(event) => updateCredential(role, 'remember', event.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-[#F97316] focus:ring-[#F97316]"
-              />
-              <span className="ml-2 text-sm text-[#6B7280]">Remember me</span>
-            </label>
-
+            <p className="text-xs text-[#6B7280]">Session ends after inactivity or when the browser session closes.</p>
             <Link to={getForgotPasswordPath(role)} className="text-sm font-medium text-[#F97316] transition hover:text-[#EA580C]">
               Forgot password?
             </Link>

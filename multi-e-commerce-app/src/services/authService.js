@@ -1,4 +1,5 @@
 import api from '../config/axios';
+import { clearStoredAuth } from '../utils/authStorage';
 
 const normalizePhoneForLogin = (value) => {
   const digitsOnly = String(value || '').replace(/[^\d+]/g, '');
@@ -74,7 +75,7 @@ export const authService = {
   },
 
   logout: () => {
-    localStorage.removeItem('token');
+    clearStoredAuth();
   },
 
   checkEmailAccount: async (email) => {

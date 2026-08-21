@@ -11,6 +11,14 @@ import {
 } from '../utils/subscription';
 import { subscriptionService } from '../services/subscriptionService';
 import { isBuyerUser, isLogisticsUser, isSellerUser } from '../utils/userCategory';
+import {
+  SESSION_IDLE_TIMEOUT_MS,
+  clearStoredAuth,
+  getLastAuthActivity,
+  getStoredToken,
+  setSessionToken,
+  touchAuthActivity,
+} from '../utils/authStorage';
 
 const AuthContext = createContext();
 
@@ -25,7 +33,7 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [token, setToken] = useState(getStoredToken());
   const [activePlan, setActivePlan] = useState(null);
 
   useEffect(() => {
@@ -45,6 +53,33 @@ export const AuthProvider = ({ children }) => {
     setActivePlan(resolveActivePlan(user));
   }, [user]);
 
+  useEffect(() => {
+    if (!token) return undefined;
+
+    touchAuthActivity();
+    const activityEvents = ['click', 'keydown', 'mousemove', 'scroll', 'touchstart', 'focus'];
+    const markActivity = () => touchAuthActivity();
+    const checkIdleSession = () => {
+      const lastActivity = getLastAuthActivity() || Date.now();
+      if (Date.now() - lastActivity >= SESSION_IDLE_TIMEOUT_MS) {
+        logout({ silent: true });
+        toast.error('Your session expired because there was no activity. Please sign in again.');
+      }
+    };
+
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, markActivity, { passive: true });
+    });
+    const timer = window.setInterval(checkIdleSession, 30000);
+
+    return () => {
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, markActivity);
+      });
+      window.clearInterval(timer);
+    };
+  }, [token]);
+
   const fetchUser = async () => {
     try {
       const currentUser = await authService.getCurrentUser();
@@ -63,7 +98,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const response = await authService.login(identifier, password);
       const { token, user } = response;
-      localStorage.setItem('token', token);
+      setSessionToken(token);
       setToken(token);
       setUser(user);
       if (!options.silentSuccess) {
@@ -85,7 +120,7 @@ export const AuthProvider = ({ children }) => {
       };
       const response = await authService.register(payload);
       const { token, user } = response;
-      localStorage.setItem('token', token);
+      setSessionToken(token);
       setToken(token);
       setUser(user);
       toast.success('Registration successful! Welcome to MultiVendor Hub!');
@@ -98,7 +133,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = ({ silent = false } = {}) => {
-    localStorage.removeItem('token');
+    clearStoredAuth();
     setToken(null);
     setUser(null);
     setActivePlan(null);

@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { API_BASE_URL } from '../config/apiBase';
 import { normalizeApiAssetUrls } from '../utils/assetUrl';
+import { clearStoredAuth, getStoredToken, touchAuthActivity } from '../utils/authStorage';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -13,10 +14,11 @@ const api = axios.create({
 // Request interceptor to add token and support FormData uploads
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     config.headers = config.headers || {};
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      touchAuthActivity();
     }
 
     if (config.data instanceof FormData) {
@@ -52,7 +54,7 @@ api.interceptors.response.use(
       requestUrl.includes('/v1/auth/reset-password');
 
     if (error.response?.status === 401 && !isAuthAttempt) {
-      localStorage.removeItem('token');
+      clearStoredAuth();
       window.location.href = '/login';
     }
     return Promise.reject(error);

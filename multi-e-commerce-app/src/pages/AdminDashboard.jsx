@@ -627,11 +627,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
   // Broadcast Functions
   const handleBroadcast = async () => {
     try {
-      const response = await api.post('/v1/admin/broadcast', broadcastData, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
-      });
+      const response = await api.post('/v1/admin/broadcast', broadcastData);
       setBroadcastResult(response.data?.results || response.data || null);
       alert(response.data?.message || 'Broadcast processed successfully!');
       setBroadcastData({ type: 'all', title: '', message: '', targetRole: 'all', targetUserType: 'all' });
