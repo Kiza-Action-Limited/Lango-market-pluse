@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from 'react';
 import ProductCard from '../components/ProductCard';
 import UnimartStyleShowcase from '../components/MarketPulseShowcase';
 import LazyOnVisible from '../components/LazyOnVisible';
+import MarketplaceTrustFlow from '../components/home/MarketplaceTrustFlow';
 import { useFetchData } from '../hooks/useFetchData';
 import { fetchHomePayload, HOME_DATA_KEY } from '../services/homeDataService';
 
@@ -16,6 +17,7 @@ const Home = () => {
 
   return (
     <div className="bg-[#F9FAFB] animate-fade-in">
+      <MarketplaceTrustFlow />
       <UnimartStyleShowcase homepageAds={data?.homepageAds} />
 
       <section className="py-16 bg-[#F9FAFB]">

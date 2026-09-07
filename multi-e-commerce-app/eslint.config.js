@@ -31,4 +31,10 @@ export default defineConfig([
       'react-hooks/exhaustive-deps': 'off',
     },
   },
+  {
+    files: ['vite.config.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 ])

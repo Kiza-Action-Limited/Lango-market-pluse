@@ -265,6 +265,177 @@ img[class~="object-cover"] {
   animation: contentFadeIn 280ms ease-out;
 }
 
+@keyframes marketFlowSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes marketFlowCounterSpin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes marketFlowScan {
+  0%,
+  100% {
+    transform: translate(-50%, 0) scale(1);
+  }
+  50% {
+    transform: translate(-50%, 235px) scale(1.04);
+  }
+}
+
+@keyframes marketFlowPulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes marketPointerMove {
+  to {
+    stroke-dashoffset: -56;
+  }
+}
+
+@keyframes marketFlowFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes marketFlowCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes marketFlowNodePulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes marketFlowLogoPulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 8px 16px rgb(249 115 22 / 0.12));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 14px 24px rgb(249 115 22 / 0.24));
+    transform: scale(1.04);
+  }
+}
+
+.market-flow-grid {
+  background-image:
+    linear-gradient(rgb(15 23 42 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(15 23 42 / 0.045) 1px, transparent 1px),
+    radial-gradient(circle at 20% 30%, rgb(249 115 22 / 0.08), transparent 28%),
+    radial-gradient(circle at 82% 72%, rgb(11 45 85 / 0.08), transparent 30%);
+  background-size: 64px 64px, 64px 64px, 100% 100%, 100% 100%;
+}
+
+.market-flow-card {
+  animation: marketFlowCardIn 520ms ease both;
+  animation-delay: var(--flow-delay, 0s);
+  border: 1px solid rgb(221 231 245 / 0.92);
+  border-left: 4px solid var(--step-color);
+  border-radius: 0.5rem;
+  padding: 0.9rem 1rem 0.9rem 3.45rem;
+}
+
+.market-flow-float {
+  animation: marketFlowFloat 5.2s ease-in-out infinite;
+}
+
+.market-flow-float-delay {
+  animation-delay: -1.6s;
+}
+
+.market-flow-float-slow {
+  animation-duration: 6.4s;
+}
+
+.market-flow-pointer {
+  animation: marketPointerMove 6s linear infinite;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.market-flow-node,
+.market-flow-node-core {
+  animation: marketFlowNodePulse 2.8s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.market-flow-node-core {
+  animation-delay: 180ms;
+}
+
+.market-flow-logo {
+  animation: marketFlowLogoPulse 4s ease-in-out infinite;
+}
+
+.market-flow-radar {
+  animation: marketFlowPulse 5s ease-in-out infinite;
+  box-shadow:
+    0 0 0 22px rgb(249 115 22 / 0.08),
+    0 0 0 48px rgb(11 45 85 / 0.045),
+    0 0 0 74px rgb(249 178 51 / 0.035);
+}
+
+.market-flow-segments {
+  animation: marketFlowSpin 24s linear infinite;
+  background: conic-gradient(
+    from -24deg,
+    #f2871a 0deg 52deg,
+    transparent 52deg 72deg,
+    #0b2d55 72deg 124deg,
+    transparent 124deg 144deg,
+    #f9b233 144deg 196deg,
+    transparent 196deg 216deg,
+    #2f4258 216deg 268deg,
+    transparent 268deg 288deg,
+    #16a34a 288deg 340deg,
+    transparent 340deg 360deg
+  );
+  mask: radial-gradient(farthest-side, transparent calc(100% - 52px), #000 calc(100% - 51px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 52px), #000 calc(100% - 51px));
+}
+
+.market-flow-dash {
+  animation: marketFlowCounterSpin 18s linear infinite;
+}
+
+.market-flow-scan {
+  animation: marketFlowScan 5.5s ease-in-out infinite;
+}
+
 @keyframes dropdownIn {
   from {
     opacity: 0;
@@ -366,6 +537,19 @@ img[class~="object-cover"] {
   }
 
   .logo-marquee-track {
+    animation: none;
+  }
+
+  .market-flow-segments,
+  .market-flow-dash,
+  .market-flow-scan,
+  .market-flow-radar,
+  .market-flow-pointer,
+  .market-flow-float,
+  .market-flow-card,
+  .market-flow-node,
+  .market-flow-node-core,
+  .market-flow-logo {
     animation: none;
   }
 
