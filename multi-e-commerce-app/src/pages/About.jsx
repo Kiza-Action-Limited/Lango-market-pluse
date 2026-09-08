@@ -129,7 +129,7 @@ const About = () => (
         className="absolute inset-0 h-full w-full object-cover"
       />
       <div className="absolute inset-0 bg-[#0B1220]/78" />
-      <div className="relative mx-auto flex min-h-[72vh] max-w-screen-2xl items-center px-4 py-16 md:px-6">
+      <div className="relative mx-auto flex min-h-[72vh] max-w-screen-2xl items-center px-4 pb-28 pt-16 md:px-6 md:pb-32">
         <div className="max-w-4xl text-white">
           <p className="inline-flex rounded-md border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#FDBA74]">
             Our Story
@@ -153,7 +153,7 @@ const About = () => (
           </div>
         </div>
       </div>
-      <div className="relative mx-auto -mt-24 max-w-screen-2xl px-4 pb-8 md:px-6">
+      <div className="relative mx-auto -mt-10 max-w-screen-2xl px-4 pb-8 md:-mt-12 md:px-6">
         <div className="grid overflow-hidden rounded-lg border border-white/15 bg-white shadow-xl md:grid-cols-4">
           {marketplaceStats.map((stat) => (
             <div key={stat.label} className="border-b border-gray-100 p-5 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0">

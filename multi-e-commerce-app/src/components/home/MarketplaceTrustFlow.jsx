@@ -200,6 +200,7 @@ const StepCard = ({ step, mobile = false, index = 0 }) => {
       style={{
         '--step-color': step.accent,
         '--flow-delay': `${index * 0.12}s`,
+        ...(mobile ? { paddingLeft: '5rem' } : {}),
         ...(step.showWalletRelease ? { minHeight: '108px', paddingRight: '6rem' } : {}),
       }}
     >
