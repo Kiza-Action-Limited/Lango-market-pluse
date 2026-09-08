@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { FaBars, FaChevronDown, FaSearch, FaShoppingCart, FaSignInAlt, FaTimes, FaUser, FaUserPlus } from 'react-icons/fa';
+import { FaBars, FaChevronDown, FaInfoCircle, FaSearch, FaShoppingCart, FaSignInAlt, FaStore, FaTimes, FaTruck, FaUser, FaUserPlus } from 'react-icons/fa';
 import { createPrefetchHandlers } from '../utils/prefetch';
 
 const categoryOptions = [
@@ -17,6 +17,20 @@ const categoryOptions = [
 const currencyOptions = [
   { label: 'KSH', code: 'KSH' }
   
+];
+
+const partnerLinks = [
+  {
+    label: 'Sell on Lango Market Pulse',
+    to: '/seller-plans',
+    icon: FaStore,
+    prefetch: true,
+  },
+  {
+    label: 'Deliver on Lango Market Pulse',
+    to: '/logistics-partners',
+    icon: FaTruck,
+  },
 ];
 
 const Navbar = () => {
@@ -204,30 +218,6 @@ const Navbar = () => {
               )}
             </div>
 
-            <div
-              className="relative"
-              onMouseEnter={() => setOpenDropdown('partner')}
-              onMouseLeave={() => setOpenDropdown(null)}
-            >
-              <button
-                onClick={() => toggleDropdown('partner')}
-                className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2 font-semibold"
-              >
-                <span>Partner With Us</span>
-                <FaChevronDown size={12} />
-              </button>
-              {openDropdown === 'partner' && (
-                <div className="absolute right-0 mt-2 w-64 bg-white text-[#111827] rounded-lg shadow-lg border border-gray-200 py-1">
-                  <Link to="/seller-plans" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
-                    Sell on Lango Market Pulse
-                  </Link>
-                  <Link to="/logistics-partners" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>
-                    Deliver on Lango Market Pulse
-                  </Link>
-                </div>
-              )}
-            </div>
-
             <Link to="/cart" className="relative hover:opacity-90" onClick={closeAllMenus}>
               <FaShoppingCart size={20} />
               {cartCount > 0 && (
@@ -259,8 +249,17 @@ const Navbar = () => {
       </div>
 
       <div className="bg-[#2F4258] px-3 py-3">
-        <div className="mx-auto max-w-[1366px]">
-          <form onSubmit={handleSubmit} className="mx-auto flex h-11 w-full max-w-xl items-center rounded-full bg-white pl-4 pr-2 shadow-sm">
+        <div className="mx-auto flex max-w-[1366px] flex-col gap-2 lg:flex-row lg:items-center lg:justify-center">
+          <Link
+            to="/about"
+            className="hidden h-10 items-center justify-center gap-2 rounded-full border border-white/20 bg-white px-4 text-sm font-extrabold text-[#0B2D55] shadow-sm transition hover:bg-[#FFF4E7] hover:text-[#E97A12] md:inline-flex"
+            onClick={closeAllMenus}
+            {...createPrefetchHandlers('/about')}
+          >
+            <FaInfoCircle className="shrink-0 text-[#F2871A]" size={15} />
+            <span>About</span>
+          </Link>
+          <form onSubmit={handleSubmit} className="flex h-11 w-full items-center rounded-full bg-white pl-4 pr-2 shadow-sm lg:max-w-md xl:max-w-xl">
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -272,6 +271,20 @@ const Navbar = () => {
               <FaSearch size={14} />
             </button>
           </form>
+          <nav className="hidden grid-cols-2 gap-2 md:grid lg:flex lg:shrink-0" aria-label="Partner actions">
+            {partnerLinks.map(({ label, to, icon: Icon, prefetch }) => (
+              <Link
+                key={to}
+                to={to}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-white/20 bg-white px-3 text-xs font-extrabold text-[#0B2D55] shadow-sm transition hover:bg-[#FFF4E7] hover:text-[#E97A12] xl:px-4 xl:text-sm"
+                onClick={closeAllMenus}
+                {...(prefetch ? createPrefetchHandlers(to) : {})}
+              >
+                <Icon className="shrink-0 text-[#F2871A]" size={15} />
+                <span className="whitespace-nowrap">{label}</span>
+              </Link>
+            ))}
+          </nav>
         </div>
       </div>
 
@@ -327,11 +340,27 @@ const Navbar = () => {
             )}
 
             <Link to="/products" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/products')}>Shop</Link>
+            <Link to="/about" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/about')}>About</Link>
             {isAuthenticated && !isBuyerAccount && (
               <Link to="/mizigo-engine" className="block font-semibold" onClick={closeAllMenus}>
                 Plan 4 Mizigo
               </Link>
             )}
+
+            <div className="grid gap-2">
+              {partnerLinks.map(({ label, to, icon: Icon, prefetch }) => (
+                <Link
+                  key={to}
+                  to={to}
+                  className="flex items-center gap-2 rounded bg-white px-3 py-2 font-semibold text-[#0B2D55]"
+                  onClick={closeAllMenus}
+                  {...(prefetch ? createPrefetchHandlers(to) : {})}
+                >
+                  <Icon className="text-[#F2871A]" size={14} />
+                  <span>{label}</span>
+                </Link>
+              ))}
+            </div>
 
             <button onClick={() => toggleDropdown('categoryMobile')} className="w-full bg-[#E97A12] px-3 py-2 rounded flex items-center justify-between">
               <span>All</span>
@@ -368,20 +397,6 @@ const Navbar = () => {
               </div>
             )}
 
-            <button onClick={() => toggleDropdown('partnerMobile')} className="w-full bg-[#E97A12] px-3 py-2 rounded flex items-center justify-between font-semibold">
-              <span>Partner With Us</span>
-              <FaChevronDown size={12} />
-            </button>
-            {openDropdown === 'partnerMobile' && (
-              <div className="bg-white text-[#111827] rounded-lg py-1">
-                <Link to="/seller-plans" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus} {...createPrefetchHandlers('/seller-plans')}>
-                  Sell on Lango Market Pulse
-                </Link>
-                <Link to="/logistics-partners" className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>
-                  Deliver on Lango Market Pulse
-                </Link>
-              </div>
-            )}
           </div>
         </div>
       )}

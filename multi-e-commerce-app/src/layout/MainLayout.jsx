@@ -34,7 +34,7 @@ const MainLayout = () => {
       ) : (
         <Navbar />
       )}
-      <main className={`min-w-0 grow bg-gray-50 ${isAuthPage || isWorkspaceView ? '' : 'pt-[112px] sm:pt-[116px] md:pt-[108px]'}`}>
+      <main className={`min-w-0 grow bg-gray-50 ${isAuthPage || isWorkspaceView ? '' : 'pt-[112px] sm:pt-[116px] md:pt-[160px] lg:pt-[112px]'}`}>
         {!isAuthPage && !isWorkspaceView && (
           <div className="max-w-screen-2xl mx-auto px-4 pt-3">
             <ProfileCompletionReminder />
