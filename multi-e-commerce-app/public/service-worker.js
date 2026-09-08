@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lango-marketpulse-shell-v2';
+const CACHE_NAME = 'lango-marketpulse-shell-v3';
 const SHELL_ASSETS = ['/', '/manifest.webmanifest', '/marketpulse-logo.png'];
 
 self.addEventListener('install', (event) => {
@@ -23,17 +23,34 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhooks/')) return;
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('/')));
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('/', responseClone)).catch(() => null);
+          }
+          return response;
+        })
+        .catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(fetch(request).catch(() => caches.match(request)));
     return;
   }
 
   event.respondWith(
     fetch(request)
       .then((response) => {
-        const responseClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone)).catch(() => null);
+        if (response.ok) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone)).catch(() => null);
+        }
         return response;
       })
-      .catch(() => caches.match(request).then((cached) => cached || caches.match('/')))
+      .catch(() => caches.match(request))
   );
 });

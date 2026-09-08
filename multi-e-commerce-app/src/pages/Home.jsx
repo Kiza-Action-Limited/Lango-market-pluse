@@ -1,12 +1,11 @@
-import React, { Suspense, lazy } from 'react';
+import React from 'react';
 import ProductCard from '../components/ProductCard';
 import UnimartStyleShowcase from '../components/MarketPulseShowcase';
 import LazyOnVisible from '../components/LazyOnVisible';
 import MarketplaceTrustFlow from '../components/home/MarketplaceTrustFlow';
+import HomeBelowFold from '../components/home/HomeBelowFold';
 import { useFetchData } from '../hooks/useFetchData';
 import { fetchHomePayload, HOME_DATA_KEY } from '../services/homeDataService';
-
-const HomeBelowFold = lazy(() => import('../components/home/HomeBelowFold'));
 
 const Home = () => {
   const { data, loading } = useFetchData(HOME_DATA_KEY, fetchHomePayload, {
@@ -49,12 +48,10 @@ const Home = () => {
       <LazyOnVisible
         fallback={<div className="h-60 bg-white border-y border-gray-100 skeleton-shimmer" />}
       >
-        <Suspense fallback={<div className="h-60 bg-white border-y border-gray-100 skeleton-shimmer" />}>
-          <HomeBelowFold
-            businessPartners={data?.businessPartners || []}
-            loading={loading}
-          />
-        </Suspense>
+        <HomeBelowFold
+          businessPartners={data?.businessPartners || []}
+          loading={loading}
+        />
       </LazyOnVisible>
     </div>
   );
