@@ -20,8 +20,6 @@ import platformImage from '../assets/images/1000_F_1388403127_VLbGx3CB7xsMA56fZa
 import { createPrefetchHandlers } from '../utils/prefetch';
 import { isBuyerUser, isLogisticsUser, isSellerUser } from '../utils/userCategory';
 
-const ADMIN_LOGIN_EMAIL = String(import.meta.env.VITE_ADMIN_LOGIN_EMAIL || 'admin@langomarket.com').toLowerCase();
-
 const INITIAL_CREDENTIALS = {
   buyer: { identifier: '', password: '' },
   seller: { identifier: '', password: '' },
@@ -189,11 +187,6 @@ const Login = () => {
     }
     if (!cleanPassword) {
       toast.error('Enter your password.');
-      return;
-    }
-
-    if (cleanIdentifier.toLowerCase() === ADMIN_LOGIN_EMAIL && role !== 'admin') {
-      toast.error('This email is for the Admin portal. Choose Admin Sign In to continue.');
       return;
     }
 

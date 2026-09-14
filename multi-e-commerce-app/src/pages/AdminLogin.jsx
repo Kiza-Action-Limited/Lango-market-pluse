@@ -5,8 +5,6 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import marketPulseLogo from '../assets/Marketpulse-logo.png';
 
-const ADMIN_LOGIN_EMAIL = String(import.meta.env.VITE_ADMIN_LOGIN_EMAIL || 'admin@langomarket.com').toLowerCase();
-
 const AdminLogin = () => {
   const { login, logout, isAuthenticated, isAdmin, isSeller, loading } = useAuth();
   const navigate = useNavigate();
@@ -18,12 +16,6 @@ const AdminLogin = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!identifier.trim() || !password) return;
-    const normalizedIdentifier = identifier.trim().toLowerCase();
-
-    if (normalizedIdentifier !== ADMIN_LOGIN_EMAIL) {
-      toast.error('Only authorized admin credentials are allowed on this portal.');
-      return;
-    }
 
     setSubmitting(true);
     const result = await login(identifier.trim(), password);

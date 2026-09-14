@@ -83,7 +83,7 @@ const AdminProfile = () => {
   const [profileImage, setProfileImage] = useState(localStorage.getItem(profileKey) || '');
 
   const adminName = user?.name || user?.fullName || 'Admin User';
-  const adminEmail = user?.email || 'admin@langomarket.com';
+  const adminEmail = user?.email || 'Not available';
   const adminRole = user?.role || 'admin';
 
   const handleImageUpload = (event) => {
