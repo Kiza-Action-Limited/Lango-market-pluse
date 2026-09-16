@@ -5,12 +5,8 @@ const routeImporters = {
   '/products': () => import('../pages/Products'),
   '/login': () => import('../pages/Login'),
   '/register': () => import('../pages/Register'),
-  '/seller': async () => {
-    await Promise.all([import('../layouts/SellerLayout'), import('../pages/SellerDashboard')]);
-  },
-  '/admin': async () => {
-    await Promise.all([import('../layouts/AdminLayout'), import('../pages/AdminDashboard')]);
-  },
+  '/seller': () => import('../pages/SellerDashboard'),
+  '/admin': () => import('../pages/AdminDashboard'),
 };
 
 const normalizePath = (path) => {
