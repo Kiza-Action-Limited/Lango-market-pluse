@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { FaBars, FaChevronDown, FaInfoCircle, FaSearch, FaShoppingCart, FaSignInAlt, FaStore, FaTimes, FaTruck, FaUser, FaUserPlus } from 'react-icons/fa';
+import { FaBriefcase, FaChevronDown, FaHome, FaInfoCircle, FaSearch, FaShoppingBag, FaShoppingCart, FaSignInAlt, FaStore, FaTh, FaTimes, FaTruck, FaUser, FaUserPlus } from 'react-icons/fa';
 import { createPrefetchHandlers } from '../utils/prefetch';
 
 const categoryOptions = [
@@ -41,6 +41,7 @@ const Navbar = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const menuRef = useRef(null);
 
   const cartCount = getCartCount();
@@ -48,6 +49,11 @@ const Navbar = () => {
   const isLogisticsUser = userRole === 'logistics';
   const isBuyerAccount = ['buyer', 'consumer'].includes(userRole) && !isSeller && !isAdmin && !isLogisticsUser;
   const accountLabel = user?.fullName || user?.name || 'My Account';
+  const mobileQuickLinks = [
+    { label: 'Home', to: '/', icon: FaHome },
+    { label: 'Shop', to: '/products', icon: FaShoppingBag, prefetch: true },
+    { label: 'Sell', to: '/seller-plans', icon: FaBriefcase, prefetch: true },
+  ];
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -228,22 +234,66 @@ const Navbar = () => {
             </Link>
           </div>
 
-          <div className="ml-auto flex shrink-0 items-center gap-2 md:hidden">
-            <Link to="/cart" className="relative hover:opacity-90" onClick={closeAllMenus}>
-              <FaShoppingCart size={20} />
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 md:hidden">
+            {isAuthenticated ? (
+              <>
+                <Link
+                  to="/profile"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/70 bg-[#0B2D55] text-white shadow-sm"
+                  onClick={closeAllMenus}
+                  aria-label="Profile"
+                >
+                  <FaUser size={15} />
+                </Link>
+              </>
+            ) : (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    toggleDropdown('authMobileTop');
+                  }}
+                  className="inline-flex h-9 items-center gap-1 rounded-full border border-white/70 bg-[#0B2D55] px-2.5 text-white shadow-sm"
+                  aria-expanded={openDropdown === 'authMobileTop'}
+                  aria-haspopup="menu"
+                  aria-label="Account actions"
+                >
+                  <FaUser size={14} />
+                  <FaChevronDown size={10} />
+                </button>
+                {openDropdown === 'authMobileTop' && (
+                  <div className="absolute right-0 top-11 z-50 w-44 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-[#111827] shadow-xl">
+                    <Link
+                      to="/login"
+                      className="flex items-center gap-2 px-3 py-2 text-sm font-semibold hover:bg-gray-100"
+                      onClick={closeAllMenus}
+                      {...createPrefetchHandlers('/login')}
+                    >
+                      <FaSignInAlt className="text-[#F2871A]" size={13} />
+                      <span>Login</span>
+                    </Link>
+                    <Link
+                      to="/register"
+                      className="flex items-center gap-2 px-3 py-2 text-sm font-semibold hover:bg-gray-100"
+                      onClick={closeAllMenus}
+                      {...createPrefetchHandlers('/register')}
+                    >
+                      <FaUserPlus className="text-[#F2871A]" size={13} />
+                      <span>Register</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
+            <Link to="/cart" className="relative inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#E97A12] text-white shadow-sm" onClick={closeAllMenus} aria-label="Cart">
+              <FaShoppingCart size={17} />
               {cartCount > 0 && (
-                <span className="absolute -top-2 -right-2 bg-[#111827] text-white text-[10px] h-4 w-4 rounded-full flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#0B2D55] text-[10px] text-white">
                   {cartCount}
                 </span>
               )}
             </Link>
-            <button
-              onClick={() => setIsMobileMenuOpen((prev) => !prev)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded bg-[#E97A12]"
-              aria-label={isMobileMenuOpen ? 'Close mobile menu' : 'Open mobile menu'}
-            >
-              {isMobileMenuOpen ? <FaTimes size={16} /> : <FaBars size={16} />}
-            </button>
           </div>
         </div>
       </div>
@@ -291,7 +341,7 @@ const Navbar = () => {
       {isMobileMenuOpen && (
         <div className="max-h-[calc(100dvh-112px)] overflow-y-auto border-t border-[#E97A12] bg-[#F2871A] text-white md:hidden">
           <div className="space-y-3 px-4 py-3">
-            {isAuthenticated ? (
+            {isAuthenticated && (
               <>
                 <button onClick={() => toggleDropdown('accountMobile')} className="flex w-full items-center justify-between rounded bg-[#E97A12] px-3 py-2 font-semibold">
                   <span className="truncate">{accountLabel}</span>
@@ -316,30 +366,8 @@ const Navbar = () => {
                   </div>
                 )}
               </>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <Link
-                  to="/login"
-                  className="flex items-center justify-center gap-2 rounded bg-[#E97A12] px-3 py-2 font-semibold"
-                  onClick={closeAllMenus}
-                  {...createPrefetchHandlers('/login')}
-                >
-                  <FaSignInAlt size={14} />
-                  <span>Sign in</span>
-                </Link>
-                <Link
-                  to="/register"
-                  className="flex items-center justify-center gap-2 rounded bg-[#0B2D55] px-3 py-2 font-semibold text-white"
-                  onClick={closeAllMenus}
-                  {...createPrefetchHandlers('/register')}
-                >
-                  <FaUserPlus size={14} />
-                  <span>Create account</span>
-                </Link>
-              </div>
             )}
 
-            <Link to="/products" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/products')}>Shop</Link>
             <Link to="/about" className="block font-semibold" onClick={closeAllMenus} {...createPrefetchHandlers('/about')}>About</Link>
             {isAuthenticated && !isBuyerAccount && (
               <Link to="/mizigo-engine" className="block font-semibold" onClick={closeAllMenus}>
@@ -363,7 +391,7 @@ const Navbar = () => {
             </div>
 
             <button onClick={() => toggleDropdown('categoryMobile')} className="w-full bg-[#E97A12] px-3 py-2 rounded flex items-center justify-between">
-              <span>All</span>
+              <span>Categories</span>
               <FaChevronDown size={12} />
             </button>
             {openDropdown === 'categoryMobile' && (
@@ -400,6 +428,42 @@ const Navbar = () => {
           </div>
         </div>
       )}
+      <nav className="fixed inset-x-0 bottom-0 z-50 grid grid-cols-4 border-t-2 border-[#F2871A] bg-[#2F4258] px-1 pb-[calc(env(safe-area-inset-bottom)+0.2rem)] pt-1.5 shadow-[0_-10px_28px_rgba(11,45,85,0.18)] md:hidden" aria-label="Mobile quick navigation">
+        {mobileQuickLinks.map(({ label, to, icon: Icon, prefetch }) => {
+          const isActive = location.pathname === to || (to === '/products' && location.pathname.startsWith('/products')) || (to === '/seller-plans' && location.pathname.startsWith('/seller-plans'));
+          return (
+            <Link
+              key={to}
+              to={to}
+              className={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-sm text-[10px] font-semibold transition ${
+                isActive ? 'text-white' : 'text-white/55 hover:text-white'
+              }`}
+              onClick={closeAllMenus}
+              {...(prefetch ? createPrefetchHandlers(to) : {})}
+            >
+              <Icon size={20} />
+              <span className="max-w-full truncate leading-none">{label}</span>
+              <span className={`absolute bottom-0 h-1 w-5 rounded-full bg-[#F2871A] transition ${isActive ? 'opacity-100' : 'opacity-0'}`} />
+            </Link>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => {
+            setOpenDropdown(null);
+            setIsMobileMenuOpen((prev) => !prev);
+          }}
+          className={`relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-sm text-[10px] font-semibold transition ${
+            isMobileMenuOpen ? 'text-white' : 'text-white/55 hover:text-white'
+          }`}
+          aria-expanded={isMobileMenuOpen}
+          aria-label={isMobileMenuOpen ? 'Close mobile menu' : 'Open mobile menu'}
+        >
+          {isMobileMenuOpen ? <FaTimes size={20} /> : <FaTh size={20} />}
+          <span className="leading-none">More</span>
+          <span className={`absolute bottom-0 h-1 w-5 rounded-full bg-[#F2871A] transition ${isMobileMenuOpen ? 'opacity-100' : 'opacity-0'}`} />
+        </button>
+      </nav>
     </header>
   );
 };
