@@ -1015,7 +1015,7 @@ exports.register = async (req, res) => {
 
     const result = await authService.register({
       phone,
-      password,
+      password, 
       email,
       fullName,
       role,
