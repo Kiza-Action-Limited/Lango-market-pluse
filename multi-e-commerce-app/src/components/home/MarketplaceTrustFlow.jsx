@@ -78,8 +78,8 @@ const desktopCards = [
   {
     number: '06',
     title: 'QR Verification',
-    subtitle: 'Confirm handover',
-    text: 'Buyer scans the delivery QR to confirm goods and trigger escrow release.',
+    subtitle: 'Buyer delivery scan',
+    text: 'At drop-off, the buyer scans the delivery QR. GPS proof confirms receipt and starts escrow release.',
     icon: QrCode,
     accent: '#0B2D55',
     className: 'left-[15.5%] top-[268px]',
@@ -103,8 +103,8 @@ const journeySteps = [
   { number: '04', title: 'Seller prepares', text: 'Goods ready', icon: PackageCheck, color: '#F9B233' },
   { number: '05', title: 'Pickup QR', text: 'Driver collects', icon: Truck, color: '#F2871A' },
   { number: '06', title: 'In transit', text: 'Live tracking', icon: MapPin, color: '#0B2D55' },
-  { number: '07', title: 'Release payment', text: 'Seller and logistics get paid', icon: WalletCards, color: '#16A34A' },
-  { number: '08', title: 'Delivery QR', text: 'Buyer confirms receipt', icon: QrCode, color: '#2F4258' },
+  { number: '07', title: 'Delivery QR', text: 'Buyer confirms receipt', icon: QrCode, color: '#2F4258' },
+  { number: '08', title: 'Release payment', text: 'Seller and logistics get paid', icon: WalletCards, color: '#16A34A' },
   { number: '09', title: 'Wallets paid', text: 'Product money + delivery fee', icon: CreditCard, color: '#F2871A' },
   { number: '10', title: 'Review', text: 'Rate seller', icon: Star, color: '#F9B233' },
   { number: '11', title: 'Support', text: 'Resolve issues', icon: Headphones, color: '#2F4258' },
@@ -253,21 +253,47 @@ const ProductLaptop = () => (
   </div>
 );
 
-const QrPhone = () => (
-  <div className="market-flow-float market-flow-float-delay absolute left-[5.5%] top-[276px] hidden h-[122px] w-[88px] rounded-[19px] border-[5px] border-[#0F172A] bg-white p-2.5 text-center shadow-xl shadow-slate-900/15 lg:block">
-    <p className="text-[10px] font-extrabold leading-3 text-[#0B1220]">Scan QR Code</p>
-    <div className="mx-auto mt-2.5 grid h-[50px] w-[50px] grid-cols-5 gap-1 bg-white">
-      {Array.from({ length: 25 }).map((_, index) => (
-        <span
-          key={index}
-          className={`h-full w-full ${[0, 1, 3, 4, 6, 8, 10, 12, 13, 16, 18, 20, 21, 23, 24].includes(index) ? 'bg-[#0B1220]' : 'bg-white'}`}
-        />
-      ))}
+const DeliveryQrPattern = () => {
+  const filledCells = new Set([
+    0, 1, 2, 4, 5, 6,
+    7, 9, 11, 13,
+    14, 15, 16, 18, 20,
+    22, 24, 25, 27, 29, 31, 32,
+    35, 36, 38, 41,
+    42, 44, 46, 47, 48,
+  ]);
+
+  return (
+    <div className="relative mx-auto mt-2.5 h-[64px] w-[64px] rounded-lg border border-[#DDE7F5] bg-white p-1.5 shadow-inner">
+      <span className="delivery-qr-scan-line absolute left-1 right-1 top-1 z-10 h-0.5 rounded-full bg-[#F2871A] shadow-[0_0_10px_rgba(242,135,26,0.7)]" aria-hidden="true" />
+      <div className="grid h-full w-full grid-cols-7 gap-0.5">
+        {Array.from({ length: 49 }).map((_, index) => (
+          <span
+            key={index}
+            className={`h-full w-full rounded-[1px] ${
+              filledCells.has(index) ? 'bg-[#0B2D55]' : index % 5 === 0 ? 'bg-[#F2871A]/20' : 'bg-white'
+            }`}
+          />
+        ))}
+      </div>
+      <span className="absolute left-2 top-2 h-3 w-3 rounded-sm border-[3px] border-[#0B2D55] bg-white" aria-hidden="true" />
+      <span className="absolute right-2 top-2 h-3 w-3 rounded-sm border-[3px] border-[#0B2D55] bg-white" aria-hidden="true" />
+      <span className="absolute bottom-2 left-2 h-3 w-3 rounded-sm border-[3px] border-[#0B2D55] bg-white" aria-hidden="true" />
     </div>
-    <p className="mt-2.5 inline-flex items-center gap-1 text-[10px] font-bold text-[#16A34A]">
-      <Check size={12} aria-hidden="true" />
-      Verified
+  );
+};
+
+const QrPhone = () => (
+  <div className="market-flow-float market-flow-float-delay absolute left-[4.8%] top-[258px] hidden h-[148px] w-[104px] rounded-[21px] border-[5px] border-[#0F172A] bg-white p-2.5 text-center shadow-xl shadow-slate-900/15 lg:block">
+    <div className="mx-auto mb-1 h-1 w-8 rounded-full bg-[#CBD5E1]" aria-hidden="true" />
+    <p className="text-[10px] font-extrabold uppercase leading-3 text-[#0B2D55]">Delivery QR</p>
+    <p className="mt-0.5 text-[8px] font-bold leading-3 text-[#64748B]">Order #LMP-2048</p>
+    <DeliveryQrPattern />
+    <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#ECFDF5] px-2 py-1 text-[9px] font-extrabold text-[#16A34A]">
+      <Check size={11} aria-hidden="true" />
+      GPS verified
     </p>
+    <p className="mt-1 text-[8px] font-bold leading-3 text-[#F2871A]">Scan at drop-off</p>
   </div>
 );
 

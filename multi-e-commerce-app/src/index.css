@@ -287,6 +287,21 @@ img[class~="object-cover"] {
   }
 }
 
+@keyframes deliveryQrSweep {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  18%,
+  82% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(54px);
+  }
+}
+
 @keyframes marketFlowPulse {
   0%,
   100% {
@@ -434,6 +449,10 @@ img[class~="object-cover"] {
 
 .market-flow-scan {
   animation: marketFlowScan 5.5s ease-in-out infinite;
+}
+
+.delivery-qr-scan-line {
+  animation: deliveryQrSweep 2.6s ease-in-out infinite;
 }
 
 @keyframes dropdownIn {
