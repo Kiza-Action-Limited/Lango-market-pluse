@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lango-marketpulse-shell-v3';
-const SHELL_ASSETS = ['/', '/manifest.webmanifest', '/marketpulse-logo.png'];
+const CACHE_NAME = 'lango-marketpulse-shell-v4';
+const SHELL_ASSETS = ['/manifest.webmanifest', '/marketpulse-logo.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -23,17 +23,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhooks/')) return;
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const responseClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put('/', responseClone)).catch(() => null);
-          }
-          return response;
-        })
-        .catch(() => caches.match('/'))
-    );
+    event.respondWith(fetch(request));
     return;
   }
 
