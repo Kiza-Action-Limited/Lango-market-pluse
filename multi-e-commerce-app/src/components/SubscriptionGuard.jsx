@@ -16,7 +16,7 @@ export const SubscriptionGuard = ({ children }) => {
     return <Navigate to="/seller/subscription-plans" replace />;
   }
 
-  return children || <Outlet />;
+  return children || <Outlet />; 
 };
 
 
