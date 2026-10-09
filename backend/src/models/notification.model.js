@@ -18,7 +18,7 @@ const NOTIFICATION_TYPES = Object.freeze(['push', 'sms', 'email', 'in_app']);
 
 const NOTIFICATION_CHANNELS = Object.freeze([
   'order_update',    // Order status changes (packed, dispatched, delivered)
-  'payment',         // Escrow release, M-Pesa credit, payouts
+  'payment',         // Escrow release, wallet credit, payouts
   'scarcity_alert',  // Low stock, supply disruptions, dead stock
   'group_buy',       // Group trip ready, promotions, bulk deals
   'new_product',     // New farm listings, new stock, manufacturer launches

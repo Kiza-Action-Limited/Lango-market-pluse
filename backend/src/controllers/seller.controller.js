@@ -47,7 +47,7 @@ const sellerCsvHeaders = {
     'buyer', 'buyerPhone', 'buyerEmail',
     'product', 'productSku', 'productCategory', 'unit',
     'quantity', 'unitPrice', 'productSubtotal', 'logisticsFee', 'totalAmount',
-    'status', 'paymentStatus', 'paymentIntentId', 'paymentReference', 'paymentMethod', 'mpesaReceiptNumber', 'paidAt',
+    'status', 'paymentStatus', 'paymentIntentId', 'paymentReference', 'paymentMethod', 'paidAt',
     'escrowStatus', 'escrowAmount', 'escrowCurrency', 'escrowHeldAt', 'escrowReleasedAt',
     'sellerPayout', 'platformFee', 'driverPayout', 'sinkingFundAmount', 'refundAmount',
     'logisticsStatus', 'trackingNumber', 'carrier', 'driver', 'driverPhone', 'shippingCost',
@@ -60,7 +60,7 @@ const sellerCsvHeaders = {
   reviews: ['id', 'product', 'reviewer', 'order', 'rating', 'title', 'verified', 'helpful', 'unhelpful', 'createdAt'],
   logistics: ['id', 'orderNumber', 'buyer', 'driver', 'status', 'carrier', 'trackingNumber', 'shippingCost', 'estimatedDelivery', 'actualDelivery', 'createdAt'],
   transactions: ['id', 'type', 'amount', 'currency', 'balanceBefore', 'balanceAfter', 'reference', 'status', 'createdAt'],
-  payments: ['id', 'transactionId', 'order', 'amount', 'currency', 'paymentMethod', 'status', 'mpesaReceiptNumber', 'paidAt', 'createdAt'],
+  payments: ['id', 'transactionId', 'order', 'amount', 'currency', 'paymentMethod', 'status', 'paidAt', 'createdAt'],
   subscriptions: ['id', 'planId', 'status', 'amount', 'startDate', 'endDate', 'autoRenew', 'createdAt'],
   documents: ['id', 'source', 'documentType', 'title', 'documentNumber', 'hasFile', 'url', 'uploadedAt'],
 };
@@ -120,7 +120,7 @@ const parseJournalBoolean = (value, fallback = false) => {
 };
 
 const JOURNAL_ENTRY_TYPES = new Set(['offline_sale', 'offline_purchase', 'expense', 'return', 'stock_adjustment']);
-const JOURNAL_WALLET_PAYMENT_METHODS = new Set(['cash', 'mpesa', 'bank', 'card', 'mixed']);
+const JOURNAL_WALLET_PAYMENT_METHODS = new Set(['cash', 'bank', 'card', 'wallet', 'verto', 'mixed']);
 
 const journalTypeLabel = (entryType) => ({
   offline_sale: 'Offline Sale',
@@ -497,9 +497,8 @@ const getSellerExportRows = async (type, sellerId) => {
           status: order.status,
           paymentStatus: payment?.status || (order.paidAt ? 'completed' : 'pending'),
           paymentIntentId: order.paymentIntentId,
-          paymentReference: payment?.transactionId || escrow?.mpesaReceiptNumber || '',
+          paymentReference: payment?.transactionId || escrow?.providerReceiptNumber || '',
           paymentMethod: payment?.paymentMethod || '',
-          mpesaReceiptNumber: payment?.mpesaReceiptNumber || escrow?.mpesaReceiptNumber || '',
           paidAt: order.paidAt || payment?.paidAt || escrow?.paidAt,
           escrowStatus: escrow?.status || '',
           escrowAmount: escrow?.amount,
@@ -638,7 +637,6 @@ const getSellerExportRows = async (type, sellerId) => {
         currency: payment.currency,
         paymentMethod: payment.paymentMethod,
         status: payment.status,
-        mpesaReceiptNumber: payment.mpesaReceiptNumber,
         paidAt: payment.paidAt,
         createdAt: payment.createdAt,
       }));
@@ -1087,7 +1085,7 @@ exports.createJournalEntry = async (req, res, next) => {
       if (!JOURNAL_WALLET_PAYMENT_METHODS.has(paymentMethod)) {
         return res.status(400).json({
           success: false,
-          message: 'Customer refunds must use a paid method such as cash, M-Pesa, bank, card, or mixed.',
+          message: 'Customer refunds must use a paid method such as cash, bank, card, wallet, Verto, or mixed.',
         });
       }
     }

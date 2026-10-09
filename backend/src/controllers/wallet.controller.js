@@ -64,34 +64,6 @@ exports.transfer = async (req, res, next) => {
 };
 
 /**
- * Withdraw to M-Pesa
- * POST /api/v1/wallet/withdraw
- */
-exports.withdraw = async (req, res, next) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { amount, phoneNumber } = req.body;
-    const result = await walletService.withdraw(
-      req.user.id,
-      amount,
-      phoneNumber
-    );
-
-    res.status(200).json({
-      success: true,
-      message: 'Withdrawal initiated',
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
  * Get transaction history
  * GET /api/v1/wallet/transactions
  */

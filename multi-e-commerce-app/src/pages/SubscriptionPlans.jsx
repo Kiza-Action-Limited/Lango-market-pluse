@@ -224,7 +224,7 @@ const SubscriptionOverviewPanel = ({ overview, loading, pendingPayment, onAction
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4">
         <p className="text-sm text-[#6B7280]">
-          {pendingPayment ? 'A pending M-Pesa payment is saved for this account.' : 'Subscription changes route through the secure seller payment flow.'}
+          {pendingPayment ? 'A pending Verto payment is saved for this account.' : 'Subscription changes route through the secure seller payment flow.'}
         </p>
         <button
           type="button"
@@ -672,9 +672,9 @@ const SubscriptionPlans = () => {
           <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-950">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="font-semibold">Pending M-Pesa subscription payment</p>
+                <p className="font-semibold">Pending Verto subscription payment</p>
                 <p className="mt-1 text-sm">
-                  {latestPendingPayment.message || 'Complete your phone STK prompt, then check the saved payment status.'}
+                  {latestPendingPayment.message || 'Complete the Verto payment, then check the saved payment status.'}
                 </p>
               </div>
               <button

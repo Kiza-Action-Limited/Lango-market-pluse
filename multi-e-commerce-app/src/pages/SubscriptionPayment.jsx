@@ -43,7 +43,7 @@ export const SubscriptionPayment = () => {
           <div>
             <h1 className="text-3xl font-bold text-[#111827]">Choose Subscription Payment</h1>
             <p className="mt-2 text-sm text-[#6B7280]">
-              Paid seller plans continue through the server-verified M-Pesa checkout before activation.
+              Paid seller plans continue through the server-verified Verto checkout before activation.
             </p>
           </div>
           <div className="inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-semibold text-green-800">

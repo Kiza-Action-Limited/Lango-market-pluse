@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { body, param, query } = require('express-validator');
 const orderController = require('../../controllers/order.controller');
-const paymentController = require('../../controllers/payment.controller');
 const { protect: authMiddleware } = require('../../middleware/auth');
 const requireVerified = require('../../middleware/requireVerified');
 
@@ -19,11 +18,6 @@ router.post('/', [
   body('logisticsProviderId').optional({ nullable: true, checkFalsy: true }).isMongoId().withMessage('Choose a valid logistics company'),
   body('logisticsPreference.notes').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ max: 300 }),
 ], orderController.createOrder);
-
-router.post('/:id/pay', requireVerified, [
-  param('id').isMongoId(),
-  body('phoneNumber').optional().isMobilePhone(),
-], paymentController.initiateMpesaPayment);
 
 router.get('/', [
   query('status').optional().isIn([

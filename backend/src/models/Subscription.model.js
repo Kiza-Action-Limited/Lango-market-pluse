@@ -39,7 +39,7 @@ const subscriptionSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['mpesa', 'commission'],
+      enum: ['verto', 'manual', 'commission'],
       default: null
     },
     price: {

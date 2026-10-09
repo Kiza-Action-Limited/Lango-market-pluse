@@ -119,7 +119,7 @@ Create new order
     "postalCode": "00100"
   },
   "deliveryMethod": "pickup|home_delivery|courier",
-  "paymentMethod": "wallet|mpesa|card"
+  "paymentMethod": "wallet|verto|card"
 }
 ```
 
@@ -142,17 +142,16 @@ Cancel order (Before shipped)
 
 ## 4. Payment Routes
 
-### POST /payments/mpesa/stkpush
-Initiate M-Pesa STK Push
+### POST /payments/verto/create
+Create a Verto payment request
 ```json
 {
-  "orderId": "order_id",
-  "phoneNumber": "0712345678"
+  "orderId": "order_id"
 }
 ```
 
-### GET /payments/mpesa/status/:checkoutRequestId
-Check M-Pesa payment status
+### GET /payments/verto/status/:reference
+Check Verto payment status
 
 ### GET /payments/wallet/balance
 Get wallet balance
@@ -164,15 +163,6 @@ Transfer to another user
   "toUserId": "user_id",
   "amount": 500,
   "description": "Payment for goods"
-}
-```
-
-### POST /payments/wallet/withdraw
-Withdraw to M-Pesa
-```json
-{
-  "amount": 1000,
-  "phoneNumber": "0712345678"
 }
 ```
 
@@ -200,15 +190,6 @@ Transfer funds to another user
   "toUserId": "user_id",
   "amount": 500,
   "description": "optional description"
-}
-```
-
-### POST /wallet/withdraw
-Withdraw to M-Pesa
-```json
-{
-  "amount": 1000,
-  "phoneNumber": "0712345678"
 }
 ```
 
@@ -562,7 +543,7 @@ Subscribe to plan
 ```json
 {
   "plan": "basic|premium|enterprise",
-  "paymentMethod": "mpesa|card|wallet"
+  "paymentMethod": "verto|card|wallet"
 }
 ```
 

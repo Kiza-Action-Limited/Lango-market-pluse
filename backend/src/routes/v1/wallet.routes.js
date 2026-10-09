@@ -74,20 +74,6 @@ router.post(
 );
 
 /**
- * Withdraw to M-Pesa
- */
-router.post(
-  '/withdraw',
-  requireVerified,
-  [
-    body('amount').isFloat({ min: 50 }).withMessage('Minimum withdrawal is 50'),
-    body('phoneNumber').isMobilePhone('en-KE').withMessage('Invalid phone number'),
-  ],
-  idempotency('wallet:withdraw'),
-  walletController.withdraw
-);
-
-/**
  * Add funds to wallet
  */
 router.post(
@@ -95,8 +81,8 @@ router.post(
   [
     body('amount').isFloat({ min: 10 }).withMessage('Amount must be at least 10'),
     body('paymentMethod')
-      .isIn(['mpesa', 'card', 'bank_transfer'])
-      .withMessage('Invalid payment method'),
+      .isIn(['verto'])
+      .withMessage('Verto is the supported wallet top-up method'),
     body('description').optional().isString().trim(),
   ],
   idempotency('wallet:add-funds'),

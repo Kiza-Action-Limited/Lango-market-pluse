@@ -17,7 +17,7 @@ import { formatCurrency } from '../utils/formatters';
 import { PRODUCT_CATEGORY_OPTIONS, getAutoLowStockThreshold, getEffectiveLowStockThreshold } from '../utils/inventorySensitivity';
 
 const units = ['kg', 'g', 'ton', 'piece', 'bunch', 'litre'];
-const paymentMethods = ['cash', 'mpesa', 'bank', 'card', 'credit', 'mixed'];
+const paymentMethods = ['cash', 'verto', 'bank', 'card', 'credit', 'mixed'];
 
 const initialProductForm = {
   name: '',
@@ -340,7 +340,7 @@ const SellerJournal = () => {
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-bold text-[#111827]">Record Offline Customer Sale</h2>
-              <p className="text-sm text-gray-500">Use this for walk-in customers, phone orders, or cash/M-Pesa sales outside the site.</p>
+              <p className="text-sm text-gray-500">Use this for walk-in customers, phone orders, or cash/Verto sales outside the site.</p>
             </div>
             <span className="flex h-10 w-10 items-center justify-center rounded-md bg-green-50 text-green-700">
               <FaShoppingCart />
@@ -383,7 +383,7 @@ const SellerJournal = () => {
             </label>
             <label className="block text-sm font-semibold text-[#111827]">
               Reference
-              <input name="reference" value={saleForm.reference} onChange={handleSaleChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-[#F97316]" placeholder="Receipt or M-Pesa code" />
+              <input name="reference" value={saleForm.reference} onChange={handleSaleChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 px-3 text-sm outline-none focus:border-[#F97316]" placeholder="Receipt or Verto code" />
             </label>
             <label className="block text-sm font-semibold text-[#111827] sm:col-span-2">
               Notes

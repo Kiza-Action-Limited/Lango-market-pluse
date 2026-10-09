@@ -44,7 +44,7 @@ const agentReferralSchema = new mongoose.Schema(
     },
     source: {
       type: String,
-      enum: ['subscription', 'mpesa_subscription', 'mizigo_onboarding', 'admin'],
+      enum: ['subscription', 'verto_subscription', 'mizigo_onboarding', 'admin'],
       default: 'subscription',
       index: true,
     },

@@ -283,7 +283,7 @@ const SharedGroupTripPanel = ({
     return {
       participantUserId: getParticipantId(firstParticipant),
       paymentStatus: canManagePayments ? 'paid' : 'pending',
-      paymentMethod: 'mpesa',
+      paymentMethod: 'verto',
       paymentReference: '',
       paymentPhone: '',
       amount: canManagePayments ? firstParticipant?.share || '' : trip.yourShare || '',
@@ -908,11 +908,7 @@ const SharedGroupTripPanel = ({
                       onChange={(event) => updatePaymentDraft(tripId, { paymentMethod: event.target.value })}
                       className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs"
                     >
-                      <option value="mpesa">M-Pesa</option>
-                      <option value="cash">Cash</option>
-                      <option value="wallet">Wallet</option>
-                      <option value="bank_transfer">Bank transfer</option>
-                      <option value="card">Card</option>
+                      <option value="verto">Verto</option>
                     </select>
                     <input
                       value={paymentDraft.amount}
@@ -925,13 +921,13 @@ const SharedGroupTripPanel = ({
                     <input
                       value={paymentDraft.paymentReference}
                       onChange={(event) => updatePaymentDraft(tripId, { paymentReference: event.target.value })}
-                      placeholder="M-Pesa receipt/reference"
+                      placeholder="Verto receipt/reference"
                       className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs"
                     />
                     <input
                       value={paymentDraft.paymentPhone}
                       onChange={(event) => updatePaymentDraft(tripId, { paymentPhone: event.target.value })}
-                      placeholder="Phone number"
+                      placeholder="Verto account reference"
                       className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs sm:col-span-2"
                     />
                   </div>

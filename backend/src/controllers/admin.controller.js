@@ -3592,7 +3592,7 @@ const adminCsvHeaders = {
   users: ['id', 'name', 'email', 'phone', 'role', 'businessType', 'businessName', 'verificationStatus', 'isActive', 'isBlocked', 'createdAt'],
   products: ['id', 'name', 'seller', 'sellerEmail', 'category', 'price', 'unit', 'quantityAvailable', 'reservedQuantity', 'status', 'sku', 'createdAt'],
   orders: ['id', 'orderNumber', 'buyer', 'seller', 'product', 'quantity', 'unitPrice', 'totalAmount', 'status', 'paidAt', 'deliveredAt', 'createdAt'],
-  payments: ['id', 'transactionId', 'user', 'order', 'amount', 'currency', 'paymentMethod', 'status', 'mpesaReceiptNumber', 'paidAt', 'createdAt'],
+  payments: ['id', 'transactionId', 'user', 'order', 'amount', 'currency', 'paymentMethod', 'status', 'paidAt', 'createdAt'],
   transactions: ['id', 'user', 'type', 'amount', 'currency', 'balanceBefore', 'balanceAfter', 'reference', 'status', 'createdAt'],
   logistics: ['id', 'orderNumber', 'buyer', 'seller', 'driver', 'status', 'carrier', 'trackingNumber', 'shippingCost', 'estimatedDelivery', 'actualDelivery', 'createdAt'],
   subscriptions: [
@@ -3697,7 +3697,6 @@ const getAdminExportRows = async (type, filters = {}) => {
         currency: payment.currency,
         paymentMethod: payment.paymentMethod,
         status: payment.status,
-        mpesaReceiptNumber: payment.mpesaReceiptNumber,
         paidAt: payment.paidAt,
         createdAt: payment.createdAt,
       }));

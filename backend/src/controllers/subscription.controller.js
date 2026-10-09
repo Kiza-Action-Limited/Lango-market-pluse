@@ -231,6 +231,7 @@ exports.subscribe = async (req, res, next) => {
     const subscription = await billingService.subscribe(req.user.id, planId, paymentMethod, {
       paymentCompleted,
       paymentReference,
+      serverVerified: paymentMethod === 'verto' && Boolean(paymentCompleted && paymentReference),
       agentNationalId,
     });
     
@@ -632,7 +633,7 @@ exports.checkFeatureAccess = async (req, res, next) => {
 };
 
 /**
- * Webhook for subscription billing (M-Pesa auto-renewal)
+ * Webhook for subscription billing
  * POST /api/v1/subscriptions/webhook
  */
 exports.billingWebhook = async (req, res, next) => {

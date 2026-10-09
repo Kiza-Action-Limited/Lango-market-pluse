@@ -5,6 +5,7 @@ const app = require('./app');
 const connectDB = require('./config/db');
 const { initSocket } = require('./config/socket');
 const logger = require('./utils/logger');
+const { getVertoConfig, validateVertoConfig, getSafeVertoConfig } = require('./config/verto');
 
 const PORT = process.env.PORT || 5000;
 
@@ -24,6 +25,11 @@ process.on('uncaughtException', (error) => {
 
 const startServer = async () => {
   try {
+    const vertoValidation = validateVertoConfig(getVertoConfig());
+    if (!vertoValidation.ok && getVertoConfig().enabled) {
+      throw new Error(`Verto configuration invalid: ${vertoValidation.errors.join(' ')}`);
+    }
+
     const mongoConnected = await connectDB();
     if (!mongoConnected) {
       process.env.AUTH_FALLBACK_MODE = 'true';
@@ -37,6 +43,8 @@ const startServer = async () => {
 
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      const vertoStatus = getSafeVertoConfig();
+      console.log(`Verto payments: ${vertoStatus.enabled ? 'enabled' : 'disabled'} (${vertoStatus.environment})`);
     });
   } catch (error) {
     logger.error('Failed to start server', {

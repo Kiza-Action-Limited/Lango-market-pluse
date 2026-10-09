@@ -647,7 +647,7 @@ const LogisticsApplication = () => {
                 </h2>
                 <p className="mt-2 max-w-2xl text-sm text-gray-600">
                   {verificationStatus === 'verified'
-                    ? 'You can now manage assignments, GPS tracking, QR handoffs, wallet payouts, and delivery proof from the logistics dashboard.'
+                    ? 'You can now manage assignments, GPS tracking, QR handoffs, Verto payouts, and delivery proof from the logistics dashboard.'
                     : `Your form has been cleared and your documents are queued for review. Expected review: ${reviewDueText}.`}
                 </p>
               </div>

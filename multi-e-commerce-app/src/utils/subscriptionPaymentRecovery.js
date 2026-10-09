@@ -45,7 +45,7 @@ export const clearPendingSubscriptionPayment = (user, planId) => {
   try {
     window.localStorage.removeItem(key);
   } catch {
-    // Ignore storage failures; payment state can still be recovered by starting a new STK request.
+    // Ignore storage failures; payment state can still be recovered by starting a new Verto request.
   }
 };
 

@@ -54,7 +54,7 @@ class EscrowService {
           },
         },
         $set: {
-          mpesaCheckoutId: checkoutRequestId,
+          providerCheckoutId: checkoutRequestId,
           merchantRequestId,
           amount: order.totalAmount,
           ...(logistics?._id ? { logistics: logistics._id } : {}),
@@ -66,7 +66,7 @@ class EscrowService {
     await auditService.record({
       entityType: 'Escrow',
       entityId: escrow._id,
-      action: 'STK_PUSH_INITIATED',
+      action: 'VERTO_PAYMENT_REQUESTED',
       actor: order.buyer,
       newValue: { checkoutRequestId, merchantRequestId, amount: order.totalAmount },
     });
@@ -75,7 +75,7 @@ class EscrowService {
   }
 
   async markPaymentHeld({ checkoutRequestId, amount, transactionId, transactionDate }) {
-    const escrow = await Escrow.findOne({ mpesaCheckoutId: checkoutRequestId });
+    const escrow = await Escrow.findOne({ providerCheckoutId: checkoutRequestId });
     if (!escrow) return null;
 
     const order = await Order.findById(escrow.order);
@@ -98,7 +98,7 @@ class EscrowService {
     if (!alreadyHeld) {
       escrow.status = 'HELD';
       escrow.amount = Number(amount || escrow.amount);
-      escrow.mpesaReceiptNumber = transactionId;
+      escrow.providerReceiptNumber = transactionId;
       escrow.paidAt = paidAt;
       escrow.heldAt = new Date();
       if (logistics?._id) escrow.logistics = logistics._id;
@@ -123,7 +123,7 @@ class EscrowService {
         balanceAfter: 0,
         reference: transactionId || checkoutRequestId,
         orderId: order._id,
-        description: `M-Pesa escrow hold for order ${order._id}`,
+        description: `Escrow hold for order ${order._id}`,
         metadata: { checkoutRequestId, transactionDate },
       });
 
@@ -141,7 +141,7 @@ class EscrowService {
   }
 
   async markPaymentFailed({ checkoutRequestId, errorMessage }) {
-    const escrow = await Escrow.findOne({ mpesaCheckoutId: checkoutRequestId });
+    const escrow = await Escrow.findOne({ providerCheckoutId: checkoutRequestId });
     if (!escrow) return null;
 
     const oldStatus = escrow.status;
@@ -497,6 +497,67 @@ class EscrowService {
       };
     }
 
+    if (['seller', 'driver', 'fleet_owner'].includes(role)) {
+      const vertoPaymentService = require('../payment/vertoPayment.service');
+      const existing = await Payout.findOne({
+        escrow: escrow._id,
+        order: escrow.order,
+        recipient: recipient._id,
+        role,
+        channel: 'verto',
+        status: { $in: ['pending', 'queued', 'submitted', 'completed'] },
+      });
+
+      if (existing) {
+        const payout = {
+          recipient: recipient._id,
+          role,
+          amount: value,
+          status: existing.status,
+          requestedAt: existing.requestedAt,
+          completedAt: existing.completedAt,
+          providerTransactionId: existing.providerPayoutReference,
+        };
+        const hasEscrowPayout = escrow.payouts.some((item) => (
+          String(item.providerTransactionId || '') === String(existing.providerPayoutReference || existing._id)
+        ));
+        if (!hasEscrowPayout) {
+          escrow.payouts.push(payout);
+          await escrow.save();
+        }
+        return { ...payout, payoutId: existing._id, provider: 'verto', reused: true };
+      }
+
+      const { payout: payoutRecord } = await vertoPaymentService.initiatePayout({
+        orderId: escrow.order,
+        role,
+        recipientId: recipient._id,
+        amountOverride: value,
+        reason: remarks,
+        idempotencyKey: `escrow-release-${escrow._id}-${role}`,
+      });
+
+      payoutRecord.escrow = escrow._id;
+      payoutRecord.role = role;
+      payoutRecord.recipient = recipient._id;
+      await payoutRecord.save();
+
+      const payout = {
+        recipient: recipient._id,
+        role,
+        amount: value,
+        status: payoutRecord.status,
+        requestedAt: payoutRecord.requestedAt || payoutRecord.createdAt,
+        completedAt: payoutRecord.completedAt,
+        providerTransactionId: payoutRecord.providerPayoutReference,
+      };
+
+      escrow.payouts.push(payout);
+      await escrow.save();
+
+      return { ...payout, payoutId: payoutRecord._id, provider: 'verto' };
+    }
+
     const reference = `ESCROW_${String(role).toUpperCase()}_${escrow.order}_${Date.now()}`;
     const walletCredit = await walletService.creditWallet(
       recipient._id,
@@ -521,7 +582,7 @@ class EscrowService {
       status: 'completed',
       requestedAt: new Date(),
       completedAt: new Date(),
-      mpesaTransactionId: walletCredit.transaction?._id?.toString(),
+      providerTransactionId: walletCredit.transaction?._id?.toString(),
     };
 
     const payoutRecord = await Payout.create({
@@ -721,31 +782,6 @@ class EscrowService {
     });
 
     return { dispute, release };
-  }
-
-  async handleB2CResult(result) {
-    const conversationId = result?.ConversationID || result?.Result?.ConversationID;
-    const resultCode = result?.ResultCode ?? result?.Result?.ResultCode;
-    const resultDesc = result?.ResultDesc || result?.Result?.ResultDesc;
-    if (!conversationId) return null;
-
-    const escrow = await Escrow.findOne({ 'payouts.mpesaConversationId': conversationId });
-    if (!escrow) return null;
-
-    const payout = escrow.payouts.find((item) => item.mpesaConversationId === conversationId);
-    payout.status = Number(resultCode) === 0 ? 'completed' : 'failed';
-    payout.failureReason = resultDesc;
-    payout.completedAt = new Date();
-    await escrow.save();
-
-    await auditService.record({
-      entityType: 'Escrow',
-      entityId: escrow._id,
-      action: 'B2C_RESULT',
-      newValue: { conversationId, resultCode, resultDesc, payoutStatus: payout.status },
-    });
-
-    return payout;
   }
 
   async getEscrowStatus(orderId, userId, userRole) {

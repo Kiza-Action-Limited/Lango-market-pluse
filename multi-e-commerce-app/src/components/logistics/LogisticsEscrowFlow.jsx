@@ -101,7 +101,7 @@ const LogisticsEscrowFlow = ({ order, tracking, trip, className = '' }) => {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-[#111827]">Buyer Order Escrow Flow</h2>
-          <p className="mt-1 text-sm text-gray-500">Buyer M-Pesa payment, escrow hold, QR delivery chain, delivery confirmation, and seller payout.</p>
+          <p className="mt-1 text-sm text-gray-500">Buyer Verto payment, escrow hold, QR delivery chain, delivery confirmation, and seller payout.</p>
         </div>
         <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${state.payout ? 'border-[#16A34A]/30 bg-[#F0FDF4] text-[#15803D]' : 'border-[#F97316]/30 bg-[#FFF7ED] text-[#9A3412]'}`}>
           {state.payout ? 'PAYOUT READY' : 'IN PROGRESS'}
@@ -111,7 +111,7 @@ const LogisticsEscrowFlow = ({ order, tracking, trip, className = '' }) => {
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_48px_minmax(0,1fr)] md:items-stretch">
         <StepNode
           icon={FaMobileAlt}
-          title="Buyer Pays M-Pesa"
+          title="Buyer Pays Verto"
           actor="Buyer ordering from seller"
           done={state.payment}
           active={activeKey === 'payment'}

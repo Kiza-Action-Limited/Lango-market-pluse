@@ -29,13 +29,26 @@ const Checkout = () => {
     gpsLat: '',
     gpsLng: '',
   });
-  const [mpesaPhone, setMpesaPhone] = useState(user?.phone || '');
   const [logisticsProviders, setLogisticsProviders] = useState([]);
   const [selectedLogisticsProviderId, setSelectedLogisticsProviderId] = useState('');
   const [buyerLogisticsPreference, setBuyerLogisticsPreference] = useState(null);
   const [providersLoading, setProvidersLoading] = useState(false);
-  const paymentMethod = 'mpesa';
-  const kenyaMpesaPhonePattern = /^(\+?254|0)?[71][0-9]{8}$/;
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('verto');
+  const [vertoConfig, setVertoConfig] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    paymentService.getVertoConfig()
+      .then((config) => {
+        if (active) setVertoConfig(config);
+      })
+      .catch(() => {
+        if (active) setVertoConfig(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const fetchLogisticsProviders = async () => {
@@ -186,14 +199,8 @@ const Checkout = () => {
       return;
     }
 
-    const paymentPhone = mpesaPhone.trim();
-    if (!paymentPhone) {
-      toast.error('Enter the buyer M-Pesa phone number');
-      return;
-    }
-
-    if (!kenyaMpesaPhonePattern.test(paymentPhone)) {
-      toast.error('Enter a valid M-Pesa number, for example 0712345678');
+    if (!vertoConfig?.enabled) {
+      toast.error('Verto is not available for this environment yet.');
       return;
     }
 
@@ -208,7 +215,7 @@ const Checkout = () => {
           product: getCartItemProductId(item),
           quantity: item.quantity,
           deliveryAddress,
-          paymentMethod,
+          paymentMethod: selectedPaymentMethod,
           logisticsProviderId: selectedLogisticsProviderId || undefined,
           logisticsPreference: {
             notes: selectedLogisticsDisplay
@@ -237,15 +244,14 @@ const Checkout = () => {
 
       for (const orderId of orderIds) {
         try {
-          const paymentResult = await paymentService.initiateMpesaPayment({
-            orderId,
-            phoneNumber: paymentPhone,
-          });
+          const paymentResult = await paymentService.initiateVertoPayment({ orderId });
           const checkoutRequestId =
             paymentResult?.checkoutRequestId ||
             paymentResult?.CheckoutRequestID ||
+            paymentResult?.providerReference ||
             paymentResult?.data?.checkoutRequestId ||
-            paymentResult?.data?.CheckoutRequestID;
+            paymentResult?.data?.CheckoutRequestID ||
+            paymentResult?.data?.providerReference;
           paymentRequests.push({ orderId, checkoutRequestId });
         } catch (paymentError) {
           failedPaymentPrompts += 1;
@@ -255,7 +261,7 @@ const Checkout = () => {
 
       const sentPromptCount = paymentRequests.filter((request) => request.checkoutRequestId).length;
       if (sentPromptCount > 0) {
-        toast.success(sentPromptCount === 1 ? 'M-Pesa prompt sent to your phone' : `${sentPromptCount} M-Pesa prompts sent to your phone`);
+        toast.success(sentPromptCount === 1 ? 'Verto payment request created' : `${sentPromptCount} Verto payment requests created`);
       }
 
       if (failedPaymentPrompts > 0) {
@@ -556,26 +562,33 @@ const Checkout = () => {
                   <FaLock className="text-xl text-[#16A34A]" />
                   <h2 className="text-xl font-semibold text-[#111827]">Payment Method</h2>
                 </div>
-                <div className="rounded-lg border border-[#16A34A]/30 bg-[#16A34A]/5 p-4">
-                  <p className="font-semibold text-[#111827]">M-Pesa</p>
-                  <p className="mt-1 text-sm text-[#6B7280]">
-                    Pay securely via M-Pesa STK Push. A prompt will be sent to your phone number.
-                  </p>
-                  <label className="mt-4 block text-sm font-medium text-[#111827]">
-                    M-Pesa Phone Number *
+                <div className="space-y-3">
+                  <label
+                    className={`block rounded-lg border p-4 transition ${
+                      vertoConfig?.enabled
+                        ? 'cursor-pointer border-[#0EA5E9] bg-sky-50'
+                        : 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-70'
+                    }`}
+                  >
                     <input
-                      type="tel"
-                      value={mpesaPhone}
-                      onChange={(event) => setMpesaPhone(event.target.value)}
-                      required
-                      inputMode="tel"
-                      className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#16A34A]"
-                      placeholder="0712345678"
+                      type="radio"
+                      name="paymentMethod"
+                      value="verto"
+                      checked={selectedPaymentMethod === 'verto'}
+                      disabled={!vertoConfig?.enabled}
+                      onChange={() => setSelectedPaymentMethod('verto')}
+                      className="sr-only"
                     />
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-[#111827]">Verto</p>
+                        <p className="mt-1 text-sm text-[#6B7280]">
+                          Buyer payment is verified by Verto, held in escrow, then released to seller and logistics accounts after delivery if no dispute is open.
+                        </p>
+                      </div>
+                      {selectedPaymentMethod === 'verto' && <FaCheckCircle className="mt-1 shrink-0 text-[#0EA5E9]" />}
+                    </div>
                   </label>
-                  <p className="mt-2 text-xs text-[#166534]">
-                    Enter the buyer number that should receive the STK Push.
-                  </p>
                 </div>
               </div>
 
@@ -590,7 +603,7 @@ const Checkout = () => {
                     Processing...
                   </span>
                 ) : (
-                  'Place Order - M-Pesa includes logistics'
+                  'Place Order - Pay with Verto'
                 )}
               </button>
             </form>
@@ -643,7 +656,7 @@ const Checkout = () => {
                 </div>
                 <div className="flex justify-between text-xs text-[#6B7280]">
                   <span>{estimatedDistanceKm ? `${estimatedDistanceKm.toFixed(1)} km estimated route` : 'Minimum fee until GPS/hub route is known'}</span>
-                  <span>Held in escrow</span>
+                  <span>{selectedPaymentMethod === 'verto' && !vertoConfig?.capabilities?.escrow ? 'Provider confirmed' : 'Held in escrow'}</span>
                 </div>
                 <div className="mt-2 border-t border-gray-200 pt-3">
                   <div className="flex justify-between text-lg font-bold">
@@ -651,7 +664,9 @@ const Checkout = () => {
                     <span className="text-[#F97316]">{formatCurrency(total)}</span>
                   </div>
                   <p className="mt-1 text-xs text-[#6B7280]">
-                    Buyer payment holds product and logistics money in escrow until delivery QR confirmation.
+                    {selectedPaymentMethod === 'verto' && !vertoConfig?.capabilities?.escrow
+                      ? 'Verto payment status is trusted only after backend/provider confirmation.'
+                      : 'Buyer payment holds product and logistics money in escrow until delivery QR confirmation.'}
                   </p>
                 </div>
               </div>

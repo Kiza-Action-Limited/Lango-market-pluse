@@ -424,7 +424,7 @@ router.post(
     param('tripId').isString().trim().notEmpty(),
     body('participantUserId').optional({ checkFalsy: true }).isMongoId(),
     body('paymentStatus').optional({ checkFalsy: true }).isIn(['unpaid', 'pending', 'paid', 'failed', 'refunded']),
-    body('paymentMethod').optional({ checkFalsy: true }).isIn(['mpesa', 'cash', 'wallet', 'bank_transfer', 'card']),
+    body('paymentMethod').optional({ checkFalsy: true }).isIn(['verto']),
     body('paymentReference').optional({ checkFalsy: true }).isString().trim().isLength({ max: 120 }),
     body('paymentPhone').optional({ checkFalsy: true }).isString().trim().isLength({ max: 32 }),
     body('amount').optional({ checkFalsy: true }).isFloat({ min: 0 }),

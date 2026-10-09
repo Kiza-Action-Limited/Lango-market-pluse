@@ -5,7 +5,7 @@
  * Kakuma–Kitale Corridor | Plan 4 "Mizigo"
  * 
  * Complete Google Maps & GPS Integration
- * 3-Way QR Handshake | M-Pesa Escrow | Sinking Fund
+ * 3-Way QR Handshake | Escrow | Sinking Fund
  */
 
 const Logistics = require('../models/Logistics.model');
@@ -343,7 +343,7 @@ const buildPayoutSnapshot = (trip, escrow, userId) => {
     status: completedPayout?.status || (released ? 'completed' : escrow?.status === 'DISPUTED' ? 'frozen' : 'pending'),
     released,
     releasedAt: completedPayout?.completedAt || trip?.settlement?.releasedAt || escrow?.releasedAt || null,
-    reference: completedPayout?.mpesaTransactionId || completedPayout?._id || null,
+    reference: completedPayout?.providerTransactionId || completedPayout?._id || null,
   };
 };
 
@@ -758,7 +758,7 @@ const summarizeGroupTrip = (trip, userId) => {
       weightKg: participant.weightKg,
       share: participant.share,
       paymentStatus: participant.paymentStatus || 'unpaid',
-      paymentMethod: participant.paymentMethod || 'mpesa',
+      paymentMethod: participant.paymentMethod || 'wallet',
       paymentReference: participant.paymentReference || '',
       paymentPhone: participant.paymentPhone || '',
       paymentAmount: participant.paymentAmount || participant.share || 0,
@@ -4138,7 +4138,7 @@ exports.joinGroupTrip = async (req, res, next) => {
       weightKg,
       share: costShare,
       paymentStatus: 'unpaid',
-      paymentMethod: 'mpesa',
+      paymentMethod: 'verto',
       paymentAmount: costShare,
       joinedAt: new Date(),
     });
@@ -4193,7 +4193,7 @@ exports.recordGroupTripPayment = async (req, res, next) => {
     const {
       participantUserId,
       paymentStatus,
-      paymentMethod = 'mpesa',
+      paymentMethod = 'verto',
       paymentReference = '',
       paymentPhone = '',
       amount,
@@ -4207,9 +4207,9 @@ exports.recordGroupTripPayment = async (req, res, next) => {
     const normalizedStatus = canManagePayment
       ? requestedStatus
       : (requestedStatus === 'failed' ? 'failed' : 'pending');
-    const normalizedMethod = String(paymentMethod || 'mpesa').toLowerCase();
+    const normalizedMethod = String(paymentMethod || 'verto').toLowerCase();
     const allowedStatuses = ['unpaid', 'pending', 'paid', 'failed', 'refunded'];
-    const allowedMethods = ['mpesa', 'cash', 'wallet', 'bank_transfer', 'card'];
+    const allowedMethods = ['verto'];
 
     if (!allowedStatuses.includes(normalizedStatus)) {
       return res.status(400).json({ success: false, message: 'Invalid group trip payment status.' });
@@ -4270,7 +4270,6 @@ exports.recordGroupTripPayment = async (req, res, next) => {
         status: normalizedStatus === 'paid' ? 'completed' : 'pending',
         transactionId: `GT-${groupTrip.tripId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         phoneNumber: participant.paymentPhone || undefined,
-        mpesaReceiptNumber: normalizedMethod === 'mpesa' && participant.paymentReference ? participant.paymentReference : undefined,
         description: `Group trip payment for ${groupTrip.routeLabel || groupTrip.tripId}`,
         paidAt: normalizedStatus === 'paid' ? now : undefined,
         metadata: {

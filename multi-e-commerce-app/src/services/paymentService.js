@@ -1,6 +1,5 @@
 import api from '../config/axios';
 import {
-  normalizeKenyanMpesaPhone,
   requireMongoId,
   requireOrderReference,
   requirePositiveAmount,
@@ -10,38 +9,63 @@ import {
 const unwrap = (response) => response?.data?.data ?? response?.data ?? response ?? null;
 
 export const paymentService = {
-  initiateMpesaPayment: async ({ orderId, phoneNumber }) => {
+  getVertoConfig: async () => {
+    const response = await api.get('/v1/payments/verto/config');
+    return unwrap(response);
+  },
+
+  initiateVertoPayment: async ({ orderId }) => {
+    const body = { orderId: requireOrderReference(orderId) };
+    const response = await api.post('/v1/payments/verto/create', body, withIdempotency('verto-create'));
+    return unwrap(response);
+  },
+
+  checkVertoStatus: async (providerReference) => {
+    const response = await api.get(`/v1/payments/verto/status/${encodeURIComponent(providerReference)}`);
+    return unwrap(response);
+  },
+
+  getVertoTransactions: async (params = {}) => {
+    const response = await api.get('/v1/payments/verto/transactions', { params });
+    return unwrap(response);
+  },
+
+  getVertoPayouts: async (params = {}) => {
+    const response = await api.get('/v1/payments/verto/payouts', { params });
+    return unwrap(response);
+  },
+
+  createVertoPayout: async (payload = {}) => {
     const body = {
-      orderId: requireOrderReference(orderId),
-      phoneNumber: normalizeKenyanMpesaPhone(phoneNumber),
+      ...payload,
+      orderId: requireMongoId(payload.orderId, 'Order ID'),
+      reason: String(payload.reason || '').trim(),
     };
-    const response = await api.post('/v1/payments/stk-push', body, withIdempotency('stk-push'));
+    const response = await api.post('/v1/payments/verto/payouts', body, withIdempotency('verto-payout'));
     return unwrap(response);
   },
 
-  checkMpesaStatus: async (checkoutRequestId) => {
-    const response = await api.get(`/v1/payments/mpesa/status/${encodeURIComponent(checkoutRequestId)}`);
-    return unwrap(response);
-  },
-
-  initiateSubscriptionMpesaPayment: async ({ planId, phoneNumber, agentNationalId }) => {
+  initiateSubscriptionVertoPayment: async ({ planId, paymentReference, agentNationalId }) => {
     if (!['solo', 'smart', 'growth'].includes(planId)) {
       throw new Error('Choose a valid seller subscription plan.');
     }
 
-    const body = { planId };
-    if (phoneNumber) {
-      body.phoneNumber = normalizeKenyanMpesaPhone(phoneNumber);
+    const body = {
+      planId,
+      paymentMethod: 'verto',
+      paymentCompleted: true,
+      paymentReference: String(paymentReference || '').trim(),
+    };
+    if (!body.paymentReference) {
+      throw new Error('Enter the verified Verto payment reference.');
     }
-    if (agentNationalId) {
-      body.agentNationalId = String(agentNationalId).replace(/\D/g, '');
-    }
-    const response = await api.post('/v1/payments/mpesa/subscription/stkpush', body, withIdempotency('subscription-stkpush'));
+    if (agentNationalId) body.agentNationalId = String(agentNationalId).replace(/\D/g, '');
+    const response = await api.post('/v1/subscriptions/subscribe', body, withIdempotency('subscription-verto'));
     return unwrap(response);
   },
 
-  checkSubscriptionMpesaStatus: async (checkoutRequestId) => {
-    const response = await api.get(`/v1/payments/mpesa/subscription/status/${encodeURIComponent(checkoutRequestId)}`);
+  checkSubscriptionVertoStatus: async (paymentReference) => {
+    const response = await api.get(`/v1/payments/verto/status/${encodeURIComponent(paymentReference)}`);
     return unwrap(response);
   },
 
@@ -79,7 +103,7 @@ export const paymentService = {
     const body = {
       ...payload,
       amount: requirePositiveAmount(payload?.amount, 50, 'Withdrawal amount'),
-      phoneNumber: normalizeKenyanMpesaPhone(payload?.phoneNumber),
+      provider: 'verto',
     };
     const response = await api.post('/v1/wallet/withdraw', body, withIdempotency('wallet-withdraw'));
     return unwrap(response);
@@ -89,6 +113,7 @@ export const paymentService = {
     const body = {
       ...payload,
       amount: requirePositiveAmount(payload?.amount, 10, 'Top-up amount'),
+      paymentMethod: 'verto',
     };
     const response = await api.post('/v1/wallet/add-funds', body, withIdempotency('wallet-add-funds'));
     return unwrap(response);

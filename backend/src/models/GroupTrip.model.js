@@ -15,8 +15,8 @@ const participantSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['mpesa', 'cash', 'wallet', 'bank_transfer', 'card'],
-      default: 'mpesa',
+      enum: ['cash', 'wallet', 'bank_transfer', 'card', 'verto'],
+      default: 'wallet',
     },
     paymentReference: {
       type: String,

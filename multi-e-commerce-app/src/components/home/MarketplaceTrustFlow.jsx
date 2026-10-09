@@ -24,7 +24,7 @@ const featureBadges = [
   { label: 'Secure Escrow', icon: ShieldCheck, color: 'text-[#F2871A]' },
   { label: 'Delivery Tracking', icon: Truck, color: 'text-[#16A34A]' },
   { label: 'QR Verification', icon: QrCode, color: 'text-[#0B2D55]' },
-  { label: 'M-Pesa Payments', icon: CreditCard, color: 'text-[#0EA85B]' },
+  { label: 'Verto Payments', icon: CreditCard, color: 'text-[#0EA85B]' },
   { label: 'Wallet Payouts', icon: WalletCards, color: 'text-[#F2871A]' },
   { label: 'Support & Disputes', icon: Headphones, color: 'text-[#2F4258]' },
 ];
@@ -52,7 +52,7 @@ const desktopCards = [
     number: '03',
     title: 'Secure Escrow',
     subtitle: 'Payment protected',
-    text: 'Buyer pays through M-Pesa. Funds are held securely until delivery is verified.',
+    text: 'Buyer pays through Verto. Funds are held securely until delivery is verified.',
     icon: LockKeyhole,
     accent: '#16A34A',
     className: 'right-[15.5%] top-[238px]',
@@ -336,7 +336,7 @@ const SellerShop = () => (
   </div>
 );
 
-const MpesaPhone = () => (
+const VertoPhone = () => (
   <div className="market-flow-float absolute right-[5.5%] top-[248px] hidden h-[118px] w-[82px] rounded-[20px] border-[5px] border-[#0F172A] bg-white p-2.5 text-center shadow-xl shadow-slate-900/15 lg:block">
     <p className="mt-1.5 text-base font-extrabold text-[#16A34A]">M-PESA</p>
     <div className="mx-auto mt-3 flex h-9 w-9 items-center justify-center rounded-full bg-[#16A34A] text-white">
@@ -457,7 +457,7 @@ const MarketplaceTrustFlow = () => (
         <QrPhone />
         <MapPreview />
         <SellerShop />
-        <MpesaPhone />
+        <VertoPhone />
         <TruckPreview />
         <CentralHub className="top-[292px] -translate-y-1/2" />
 

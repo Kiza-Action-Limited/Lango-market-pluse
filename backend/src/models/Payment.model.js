@@ -25,7 +25,7 @@ const PaymentSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['mpesa', 'cash', 'card', 'wallet', 'bank_transfer', 'paypal'],
+      enum: ['verto'],
       required: true,
       index: true,
     },
@@ -41,8 +41,72 @@ const PaymentSchema = new mongoose.Schema(
       sparse: true,
       trim: true,
     },
+    provider: {
+      type: String,
+      trim: true,
+      index: true,
+    },
+    providerPaymentReference: {
+      type: String,
+      trim: true,
+      index: true,
+      unique: true,
+      sparse: true,
+    },
+    providerStatus: {
+      type: String,
+      trim: true,
+      index: true,
+    },
+    amountMinor: {
+      type: Number,
+      min: 0,
+    },
+    providerFee: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    platformCommission: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    sellerAllocation: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    logisticsAllocation: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    holdStatus: {
+      type: String,
+      enum: ['not_supported', 'not_held', 'pending', 'held', 'released', 'failed'],
+      default: 'not_supported',
+      index: true,
+    },
+    releaseStatus: {
+      type: String,
+      enum: ['not_supported', 'not_requested', 'pending', 'authorized', 'processing', 'completed', 'failed'],
+      default: 'not_supported',
+      index: true,
+    },
+    payoutStatus: {
+      type: String,
+      enum: ['not_supported', 'not_requested', 'pending', 'processing', 'completed', 'failed'],
+      default: 'not_supported',
+      index: true,
+    },
+    reconciliationStatus: {
+      type: String,
+      enum: ['pending', 'matched', 'mismatch', 'requires_review', 'not_required'],
+      default: 'pending',
+      index: true,
+    },
     checkoutRequestId: String,
-    mpesaReceiptNumber: String,
     phoneNumber: String,
     description: String,
     metadata: {

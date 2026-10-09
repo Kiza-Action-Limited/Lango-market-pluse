@@ -158,7 +158,7 @@ export const AuthProvider = ({ children }) => {
     try {
       await subscriptionService.subscribe({
         planId: nextPlan.id,
-        paymentMethod: paymentMeta.paymentMethod || 'mpesa',
+        paymentMethod: paymentMeta.paymentMethod || 'verto',
         paymentCompleted: paymentMeta.paymentCompleted ?? true,
         paymentReference: paymentMeta.paymentReference,
         agentNationalId: paymentMeta.agentNationalId,

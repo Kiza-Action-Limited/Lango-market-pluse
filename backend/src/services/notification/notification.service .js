@@ -584,7 +584,7 @@ async function notifyDriverApproaching({
  * @param {number} p.sellerPayout      - KES released to seller
  * @param {number} p.driverPayout      - KES released to driver (after commission & sinking fund)
  * @param {string} [p.proofUrl]        - Delivery proof document URL
- * @param {string} [p.paymentEta]      - Expected M-Pesa settlement time
+ * @param {string} [p.paymentEta]      - Expected payment settlement time
  */
 async function notifyDeliveryConfirmed({
   sellerId, driverId, shipmentId, cargoSummary,
@@ -771,7 +771,7 @@ async function notifyDeadStockAlert({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Fired when an M-Pesa payment is confirmed and credited to a user's wallet.
+ * Fired when a payment is confirmed and credited to a user's wallet.
  * Recipient: the payee only.
  *
  * @param {Object} p

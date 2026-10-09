@@ -6,7 +6,7 @@
  *
  * Tracks every shipment from warehouse to doorstep with:
  *  - 3-way QR handshake (pickup → delivery → auto-release)
- *  - M-Pesa escrow integration hooks
+ *  - Escrow integration hooks
  *  - GPS verification at delivery (50 m radius enforced in service layer)
  *  - Sinking fund deduction on every payout
  *  - Fleet-owner vs solo-driver payment routing
@@ -122,7 +122,7 @@ const settlementSchema = new mongoose.Schema(
         'dispute_resolution',
       ],
     },
-    mpesaReference   : { type: String, trim: true },
+    providerReference: { type: String, trim: true },
   },
   { _id: false }
 );

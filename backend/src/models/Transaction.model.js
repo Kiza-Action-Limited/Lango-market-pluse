@@ -46,7 +46,7 @@ const TransactionSchema = new mongoose.Schema(
       default: 'KES',
     },
     reference: {
-      type: String, // Order ID, M-Pesa reference, etc.
+      type: String, // Order ID, provider reference, etc.
       index: true,
     },
     orderId: {

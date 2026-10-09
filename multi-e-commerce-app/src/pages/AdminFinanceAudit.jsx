@@ -42,7 +42,7 @@ const getStatusTone = (value) => {
   if (['success', 'completed', 'paid', 'processed', '0'].some((part) => normalized.includes(part))) {
     return 'bg-[#16A34A]/10 text-[#15803D] border-[#16A34A]/20';
   }
-  if (['pending', 'processing', 'queued', 'stk'].some((part) => normalized.includes(part))) {
+  if (['pending', 'processing', 'queued', 'checkout'].some((part) => normalized.includes(part))) {
     return 'bg-[#F97316]/10 text-[#C2410C] border-[#F97316]/20';
   }
   if (['fail', 'cancel', 'error', 'timeout'].some((part) => normalized.includes(part))) {
@@ -72,8 +72,7 @@ const PaymentResultPanel = ({ title, description, result, emptyText }) => {
   const merchantId = readFirst(result, ['merchantRequestId', 'MerchantRequestID', 'merchantRequestID']);
   const code = readFirst(result, ['responseCode', 'ResponseCode', 'resultCode', 'ResultCode']);
   const amount = readFirst(result, ['amount', 'Amount', 'totalAmount']);
-  const receipt = readFirst(result, ['mpesaReceiptNumber', 'MpesaReceiptNumber', 'receipt', 'reference', 'transactionId']);
-  const phone = readFirst(result, ['phoneNumber', 'phone', 'PhoneNumber']);
+  const receipt = readFirst(result, ['vertoReceiptNumber', 'VertoReceiptNumber', 'receipt', 'reference', 'transactionId']);
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -96,7 +95,6 @@ const PaymentResultPanel = ({ title, description, result, emptyText }) => {
           <DetailItem label="Result Code" value={code} />
           <DetailItem label="Amount" value={amount !== null ? formatCurrency(amount) : null} />
           <DetailItem label="Receipt" value={receipt} mono />
-          <DetailItem label="Phone" value={phone} mono />
           {status ? (
             <div className="rounded-xl border border-gray-200 bg-[#F9FAFB] p-3 md:col-span-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Message</p>
@@ -167,10 +165,13 @@ const AdminFinanceAudit = () => {
   const [transactionSummary, setTransactionSummary] = useState(null);
   const [escrowSummary, setEscrowSummary] = useState(null);
   const [escrowTransactions, setEscrowTransactions] = useState([]);
-  const [stkForm, setStkForm] = useState({ orderId: '', phoneNumber: '' });
-  const [stkStatusForm, setStkStatusForm] = useState({ checkoutRequestId: '' });
-  const [stkResult, setStkResult] = useState(null);
-  const [stkStatusResult, setStkStatusResult] = useState(null);
+  const [vertoConfig, setVertoConfig] = useState(null);
+  const [vertoTransactions, setVertoTransactions] = useState([]);
+  const [vertoPayouts, setVertoPayouts] = useState([]);
+  const [paymentForm, setPaymentForm] = useState({ orderId: '' });
+  const [paymentStatusForm, setPaymentStatusForm] = useState({ providerReference: '' });
+  const [paymentRequestResult, setPaymentRequestResult] = useState(null);
+  const [paymentStatusResult, setPaymentStatusResult] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState(null);
 
@@ -178,7 +179,7 @@ const AdminFinanceAudit = () => {
     setLoading(true);
     try {
       const safe = (promise) => promise.catch((error) => ({ __error: error }));
-      const [paymentsRes, auditStatsRes, recentRes, transactionHistoryRes, transactionSummaryRes, escrowSummaryRes, escrowTransactionsRes] = await Promise.all([
+      const [paymentsRes, auditStatsRes, recentRes, transactionHistoryRes, transactionSummaryRes, escrowSummaryRes, escrowTransactionsRes, vertoConfigRes, vertoTransactionsRes, vertoPayoutsRes] = await Promise.all([
         safe(api.get('/v1/admin/payments', { params: { page: 1, limit: 25 } })),
         safe(api.get('/v1/audit/stats')),
         safe(api.get('/v1/audit/recent')),
@@ -186,6 +187,9 @@ const AdminFinanceAudit = () => {
         safe(paymentService.getTransactionSummary(30)),
         safe(paymentService.getEscrowSummary()),
         safe(paymentService.getEscrowTransactions()),
+        safe(paymentService.getVertoConfig()),
+        safe(paymentService.getVertoTransactions({ page: 1, limit: 20 })),
+        safe(paymentService.getVertoPayouts({ page: 1, limit: 20 })),
       ]);
 
       setPayments(paymentsRes?.data?.payments || []);
@@ -195,6 +199,9 @@ const AdminFinanceAudit = () => {
       setTransactionSummary(transactionSummaryRes?.__error ? null : (transactionSummaryRes?.data || transactionSummaryRes || null));
       setEscrowSummary(escrowSummaryRes?.__error ? null : (escrowSummaryRes?.data || escrowSummaryRes || null));
       setEscrowTransactions(escrowTransactionsRes?.transactions || escrowTransactionsRes?.data?.transactions || []);
+      setVertoConfig(vertoConfigRes?.__error ? null : (vertoConfigRes?.data || vertoConfigRes || null));
+      setVertoTransactions(vertoTransactionsRes?.transactions || vertoTransactionsRes?.data?.transactions || []);
+      setVertoPayouts(vertoPayoutsRes?.payouts || vertoPayoutsRes?.data?.payouts || []);
 
       if (transactionHistoryRes?.__error || transactionSummaryRes?.__error || escrowSummaryRes?.__error || escrowTransactionsRes?.__error) {
         const message =
@@ -226,33 +233,32 @@ const AdminFinanceAudit = () => {
     }
   };
 
-  const handleSendStkPush = async (event) => {
+  const handleCreateVertoPayment = async (event) => {
     event.preventDefault();
-    if (!stkForm.orderId.trim()) {
+    if (!paymentForm.orderId.trim()) {
       toast.error('Order ID is required');
       return;
     }
     try {
-      const result = await paymentService.initiateMpesaPayment({
-        orderId: stkForm.orderId.trim(),
-        phoneNumber: stkForm.phoneNumber.trim() || undefined,
+      const result = await paymentService.initiateVertoPayment({
+        orderId: paymentForm.orderId.trim(),
       });
-      setStkResult(result);
-      toast.success('M-Pesa prompt sent');
+      setPaymentRequestResult(result);
+      toast.success('Verto payment request created');
     } catch (error) {
-      toast.error(error?.response?.data?.message || 'Failed to send M-Pesa prompt');
+      toast.error(error?.response?.data?.message || 'Failed to create Verto payment request');
     }
   };
 
-  const handleCheckStkStatus = async (event) => {
+  const handleCheckVertoStatus = async (event) => {
     event.preventDefault();
-    if (!stkStatusForm.checkoutRequestId.trim()) {
-      toast.error('Checkout request ID is required');
+    if (!paymentStatusForm.providerReference.trim()) {
+      toast.error('Provider reference is required');
       return;
     }
     try {
-      const result = await paymentService.checkMpesaStatus(stkStatusForm.checkoutRequestId.trim());
-      setStkStatusResult(result);
+      const result = await paymentService.checkVertoStatus(paymentStatusForm.providerReference.trim());
+      setPaymentStatusResult(result);
       toast.success('Payment status loaded');
     } catch (error) {
       toast.error(error?.response?.data?.message || 'Failed to load payment status');
@@ -327,38 +333,123 @@ const AdminFinanceAudit = () => {
           <Card title="Recent Audits" value={recentCount} hint="Recent records from /v1/audit/recent" icon={FaChartPie} />
         </div>
 
+        <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-[#111827]">Verto Operations</h2>
+              <p className="text-sm text-gray-500">Safe backend configuration, provider references, and payout readiness.</p>
+            </div>
+            <StatusBadge value={vertoConfig?.enabled ? `Enabled ${vertoConfig.environment}` : `Disabled ${vertoConfig?.environment || ''}`} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <DetailItem label="Environment" value={vertoConfig?.environment || 'Not configured'} />
+            <DetailItem label="Payments" value={vertoConfig?.capabilities?.payments ? 'Enabled' : 'Disabled'} />
+            <DetailItem label="Escrow / Hold" value={vertoConfig?.capabilities?.escrow ? 'Provider enabled' : 'Unavailable'} />
+            <DetailItem label="Payouts" value={vertoConfig?.capabilities?.payouts ? 'Enabled' : 'Disabled'} />
+          </div>
+
+          {Array.isArray(vertoConfig?.validationErrors) && vertoConfig.validationErrors.length > 0 && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {vertoConfig.validationErrors.join(' ')}
+            </div>
+          )}
+
+          <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
+            <div className="overflow-hidden rounded-xl border border-gray-200">
+              <div className="border-b border-gray-200 bg-[#F9FAFB] px-4 py-3">
+                <p className="text-sm font-semibold text-[#111827]">Verto Transactions</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
+                      <th className="px-4 py-3">Reference</th>
+                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Order</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vertoTransactions.map((payment) => (
+                      <tr key={payment._id} className="border-b last:border-b-0">
+                        <td className="px-4 py-3 font-mono text-xs">{payment.providerPaymentReference || payment.transactionId || '-'}</td>
+                        <td className="px-4 py-3">{formatCurrency(payment.amount || 0)}</td>
+                        <td className="px-4 py-3"><StatusBadge value={payment.status} /></td>
+                        <td className="px-4 py-3">{payment.order?.orderNumber || '-'}</td>
+                      </tr>
+                    ))}
+                    {vertoTransactions.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-6 text-center text-sm text-gray-500">No Verto transactions returned.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-gray-200">
+              <div className="border-b border-gray-200 bg-[#F9FAFB] px-4 py-3">
+                <p className="text-sm font-semibold text-[#111827]">Verto Payouts</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
+                      <th className="px-4 py-3">Reference</th>
+                      <th className="px-4 py-3">Role</th>
+                      <th className="px-4 py-3">Amount</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vertoPayouts.map((payout) => (
+                      <tr key={payout._id} className="border-b last:border-b-0">
+                        <td className="px-4 py-3 font-mono text-xs">{payout.providerPayoutReference || '-'}</td>
+                        <td className="px-4 py-3 capitalize">{payout.role}</td>
+                        <td className="px-4 py-3">{formatCurrency(payout.amount || 0)}</td>
+                        <td className="px-4 py-3"><StatusBadge value={payout.status} /></td>
+                      </tr>
+                    ))}
+                    {vertoPayouts.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-6 text-center text-sm text-gray-500">No Verto payouts returned.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-[#111827]">M-Pesa Payment Console</h2>
-                <p className="text-sm text-gray-500">Call the backend STK push and status endpoints from the frontend.</p>
+                <h2 className="text-lg font-semibold text-[#111827]">Verto Payment Console</h2>
+                <p className="text-sm text-gray-500">Call the backend Verto checkout and status endpoints from the frontend.</p>
               </div>
             </div>
-            <form onSubmit={handleSendStkPush} className="space-y-3">
+            <form onSubmit={handleCreateVertoPayment} className="space-y-3">
               <input
-                value={stkForm.orderId}
-                onChange={(e) => setStkForm((prev) => ({ ...prev, orderId: e.target.value }))}
+                value={paymentForm.orderId}
+                onChange={(e) => setPaymentForm((prev) => ({ ...prev, orderId: e.target.value }))}
                 className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#F97316]"
                 placeholder="Order ID or order number"
               />
-              <input
-                value={stkForm.phoneNumber}
-                onChange={(e) => setStkForm((prev) => ({ ...prev, phoneNumber: e.target.value }))}
-                className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#F97316]"
-                placeholder="Phone number e.g. +2547..."
-              />
               <button type="submit" className="inline-flex items-center rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#EA580C]">
-                Send STK Push
+                Create Verto Payment
               </button>
             </form>
 
-            <form onSubmit={handleCheckStkStatus} className="mt-5 space-y-3">
+            <form onSubmit={handleCheckVertoStatus} className="mt-5 space-y-3">
               <input
-                value={stkStatusForm.checkoutRequestId}
-                onChange={(e) => setStkStatusForm((prev) => ({ ...prev, checkoutRequestId: e.target.value }))}
+                value={paymentStatusForm.providerReference}
+                onChange={(e) => setPaymentStatusForm((prev) => ({ ...prev, providerReference: e.target.value }))}
                 className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-[#F97316]"
-                placeholder="Checkout Request ID"
+                placeholder="Verto provider reference"
               />
               <button type="submit" className="inline-flex items-center rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50">
                 Check Payment Status
@@ -367,16 +458,16 @@ const AdminFinanceAudit = () => {
 
             <div className="mt-5 grid grid-cols-1 gap-3">
               <PaymentResultPanel
-                title="STK Push Result"
-                description="Prompt response returned after sending the customer payment request."
-                result={stkResult}
-                emptyText="Send an STK push to see checkout request details here."
+                title="Verto Payment Result"
+                description="Provider response returned after creating the payment request."
+                result={paymentRequestResult}
+                emptyText="Create a Verto payment request to see provider details here."
               />
               <PaymentResultPanel
                 title="Payment Status Result"
-                description="Status response for the checkout request ID."
-                result={stkStatusResult}
-                emptyText="Enter a checkout request ID to check the live payment status."
+                description="Status response for the provider reference."
+                result={paymentStatusResult}
+                emptyText="Enter a provider reference to check the live payment status."
               />
             </div>
           </section>

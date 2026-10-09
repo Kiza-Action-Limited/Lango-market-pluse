@@ -2,61 +2,55 @@ const express = require('express');
 const router = express.Router();
 const { body, param, query } = require('express-validator');
 const paymentController = require('../../controllers/payment.controller');
-const { protect: authMiddleware } = require('../../middleware/auth');
-const subscriptionGate = require('../../middleware/subscriptionGate');
+const { protect: authMiddleware, authorize } = require('../../middleware/auth');
 const requireVerified = require('../../middleware/requireVerified');
 const idempotency = require('../../middleware/idempotency');
 
+router.post('/verto/webhook', paymentController.handleVertoWebhook);
+
 router.use(authMiddleware);
 
-// M-Pesa
-const orderStkValidation = [
-  body('orderId').notEmpty().withMessage('Order ID or order number required'),
-  body('phoneNumber')
-    .notEmpty()
-    .withMessage('Enter the buyer M-Pesa phone number')
-    .matches(/^(\+?254|0)?[71][0-9]{8}$/)
-    .withMessage('Enter a valid Kenya M-Pesa number, for example 0712345678 or 254712345678'),
-];
-
-router.post('/stk-push', requireVerified, idempotency('payments:stk-push', { required: true }), orderStkValidation, paymentController.initiateMpesaPayment);
-router.post('/mpesa/stk-push', requireVerified, idempotency('payments:stk-push'), orderStkValidation, paymentController.initiateMpesaPayment);
-router.post('/mpesa/stkpush', requireVerified, idempotency('payments:stk-push'), orderStkValidation, paymentController.initiateMpesaPayment);
-
-router.get('/mpesa/status/:checkoutRequestId', paymentController.checkMpesaStatus);
-
-router.post('/mpesa/subscription/stkpush', idempotency('payments:subscription-stkpush'), [
-  body('planId').isIn(['solo', 'smart', 'growth']).withMessage('Choose a paid seller plan'),
-  body('phoneNumber').optional().matches(/^(\+?254|0)?[71][0-9]{8}$/).withMessage('Invalid M-Pesa phone number'),
-  body('agentNationalId').optional({ nullable: true, checkFalsy: true }).matches(/^[0-9]{5,20}$/).withMessage('Agent National ID must contain 5 to 20 digits'),
-], subscriptionGate.checkRole('OWNER'), paymentController.initiateSubscriptionMpesaPayment);
-
-router.get(
-  '/mpesa/subscription/status/:checkoutRequestId',
-  param('checkoutRequestId').isString().isLength({ min: 5 }),
-  subscriptionGate.checkRole('OWNER'),
-  paymentController.checkSubscriptionMpesaStatus
+// Verto
+router.get('/verto/config', paymentController.getVertoConfig);
+router.post(
+  '/verto/create',
+  requireVerified,
+  idempotency('payments:verto-create', { required: true }),
+  [
+    body('orderId').notEmpty().withMessage('Order ID or order number required'),
+  ],
+  paymentController.createVertoPayment
 );
+router.get('/verto/status/:reference', param('reference').isString().isLength({ min: 3 }), paymentController.checkVertoPaymentStatus);
+router.get('/verto/transactions', authorize('admin'), paymentController.getVertoTransactions);
+router.get('/verto/payouts', authorize('admin'), paymentController.getVertoPayouts);
+router.post(
+  '/verto/payouts',
+  authorize('admin'),
+  idempotency('payments:verto-payout', { required: true }),
+  [
+    body('orderId').isMongoId(),
+    body('role').optional().isIn(['seller', 'driver']),
+    body('reason').notEmpty().isString().trim().isLength({ min: 8, max: 500 }),
+  ],
+  paymentController.createVertoPayout
+);
+router.get('/verto/wallets', authorize('admin'), paymentController.getVertoWallets);
 
 // Wallet
-router.get('/wallet/balance', subscriptionGate.checkRole('OWNER', 'FLEET_OWNER'), paymentController.getWalletBalance);
+router.get('/wallet/balance', paymentController.getWalletBalance);
 router.post('/wallet/transfer', [
   body('toUserId').isMongoId(),
   body('amount').isFloat({ min: 1 }),
   body('description').optional(),
-], subscriptionGate.checkRole('OWNER', 'FLEET_OWNER'), idempotency('payments:wallet-transfer'), paymentController.walletTransfer);
-
-router.post('/wallet/withdraw', [
-  body('amount').isFloat({ min: 10 }),
-  body('phoneNumber').isMobilePhone(),
-], subscriptionGate.checkRole('OWNER', 'FLEET_OWNER'), idempotency('payments:wallet-withdraw'), paymentController.withdrawToMpesa);
+], idempotency('payments:wallet-transfer'), paymentController.walletTransfer);
 
 router.post('/sms-credits/topup', [
   body('credits').isInt({ min: 1 }),
   body('amount').isFloat({ min: 0 }),
   body('paymentCompleted').isBoolean(),
   body('paymentReference').isString().isLength({ min: 3 }),
-], subscriptionGate.checkRole('OWNER'), paymentController.topUpSmsCredits);
+], paymentController.topUpSmsCredits);
 
 // Ledger
 router.get('/transactions', [
@@ -75,6 +69,6 @@ router.get('/transactions', [
     'commission',
     'sinking_fund',
   ]),
-], subscriptionGate.checkRole('OWNER', 'FLEET_OWNER'), paymentController.getTransactionHistory);
+], paymentController.getTransactionHistory);
 
 module.exports = router;

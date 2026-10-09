@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { 
   FaCheckCircle, FaTruck, FaBox, FaHourglassHalf, FaMapMarkerAlt, 
-  FaClock, FaPhone, FaBrain, FaArrowLeft, FaCreditCard, FaMobileAlt, FaSyncAlt,
+  FaClock, FaPhone, FaBrain, FaArrowLeft, FaCreditCard, FaSyncAlt,
   FaShieldAlt, FaExclamationTriangle, FaMoneyBillWave, FaStore, FaRoute,
 } from 'react-icons/fa';
 import toast from 'react-hot-toast';
@@ -75,7 +75,6 @@ const OrderTracking = () => {
   const [loading, setLoading] = useState(true);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
   const [lastGpsRefreshAt, setLastGpsRefreshAt] = useState('');
-  const [mpesaPhone, setMpesaPhone] = useState('');
   const [checkoutRequestId, setCheckoutRequestId] = useState(checkoutRequestFromUrl);
   const [paymentStatus, setPaymentStatus] = useState('');
   const [sendingPayment, setSendingPayment] = useState(false);
@@ -105,7 +104,6 @@ const OrderTracking = () => {
 
     setOrder(normalizedOrder);
     setTracking(normalizedTracking);
-    setMpesaPhone((previous) => previous || normalizedOrder.shippingAddress?.phone || '');
     setCheckoutRequestId((previous) => previous || normalizedOrder.paymentIntentId || '');
 
     return normalizedOrder;
@@ -317,7 +315,7 @@ const OrderTracking = () => {
     try {
       await orderService.confirmDelivery(order.id);
       await refreshOrderAfterPayment();
-      toast.success('Delivery confirmed. Escrow payout has been released to wallets.');
+      toast.success('Delivery confirmed. Escrow payout release has been sent through Verto.');
     } catch (error) {
       toast.error(error?.response?.data?.message || error?.message || 'Unable to confirm delivery');
     } finally {
@@ -360,32 +358,24 @@ const OrderTracking = () => {
     }
   };
 
-  const sendMpesaPrompt = async () => {
-    if (!mpesaPhone.trim()) {
-      toast.error('Enter the M-Pesa phone number that will receive the STK prompt');
-      return;
-    }
-
+  const sendVertoPrompt = async () => {
     setSendingPayment(true);
     setPaymentStatus('');
 
     try {
-      const result = await paymentService.initiateMpesaPayment({
-        orderId: order.id,
-        phoneNumber: mpesaPhone.trim(),
-      });
-      const requestId = result?.checkoutRequestId || result?.CheckoutRequestID;
+      const result = await paymentService.initiateVertoPayment({ orderId: order.id });
+      const requestId = result?.providerReference || result?.checkoutRequestId || result?.CheckoutRequestID;
 
       if (requestId) {
         setCheckoutRequestId(requestId);
-        setPaymentStatus('STK Push sent. Enter your M-Pesa PIN on your phone to complete payment.');
-        toast.success('M-Pesa STK Push sent');
+        setPaymentStatus('Verto payment request created. Complete the provider checkout to hold funds in escrow.');
+        toast.success('Verto payment request created');
       } else {
-        setPaymentStatus(result?.message || 'Payment request sent. Check your phone.');
-        toast.success('Payment request sent');
+        setPaymentStatus(result?.message || 'Verto payment request created.');
+        toast.success('Verto payment request created');
       }
     } catch (error) {
-      const message = error?.response?.data?.message || error?.message || 'Failed to send M-Pesa prompt';
+      const message = error?.response?.data?.message || error?.message || 'Failed to create Verto payment request';
       setPaymentStatus(message);
       toast.error(message);
     } finally {
@@ -395,14 +385,14 @@ const OrderTracking = () => {
 
   const checkPaymentStatus = async () => {
     if (!checkoutRequestId) {
-      toast.error('Send an STK Push first');
+      toast.error('Create a Verto checkout first');
       return;
     }
 
     setCheckingPayment(true);
 
     try {
-      const result = await paymentService.checkMpesaStatus(checkoutRequestId);
+      const result = await paymentService.checkVertoStatus(checkoutRequestId);
       const status = result?.status || '';
       const message = result?.message || 'Payment status checked';
 
@@ -740,7 +730,7 @@ const OrderTracking = () => {
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[#16A34A]">
             <FaCreditCard />
-            <h2 className="text-xl font-bold text-[#111827]">Complete M-Pesa Payment</h2>
+            <h2 className="text-xl font-bold text-[#111827]">Complete Verto Payment</h2>
           </div>
           <p className="mt-2 text-sm text-[#6B7280]">
             Pay {formatCurrency(order.total)} before tracking, seller processing, and delivery updates are shown.
@@ -751,37 +741,25 @@ const OrderTracking = () => {
         </span>
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-        <label className="block text-sm font-semibold text-[#111827]" htmlFor="trackingMpesaPhone">
-          M-Pesa phone number
-          <div className="relative mt-2">
-            <FaMobileAlt className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              id="trackingMpesaPhone"
-              type="tel"
-              value={mpesaPhone}
-              onChange={(event) => setMpesaPhone(event.target.value)}
-              placeholder="07XXXXXXXX or 2547XXXXXXXX"
-              className="h-11 w-full rounded-lg border border-gray-300 pl-10 pr-3 text-sm outline-none focus:border-[#16A34A] focus:ring-2 focus:ring-[#16A34A]/20"
-            />
-          </div>
-        </label>
-
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+        <p className="text-sm text-[#374151]">
+          Verto will create a provider checkout and hold the order total in escrow after confirmation.
+        </p>
         <button
           type="button"
-          onClick={sendMpesaPrompt}
+          onClick={sendVertoPrompt}
           disabled={sendingPayment || checkingPayment}
           className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#16A34A] px-5 text-sm font-semibold text-white hover:bg-[#15803D] disabled:opacity-60"
         >
           <FaCreditCard />
-          {sendingPayment ? 'Sending...' : checkoutRequestId ? 'Resend STK Push' : 'Send STK Push'}
+          {sendingPayment ? 'Sending...' : checkoutRequestId ? 'Resend Verto checkout' : 'Send Verto checkout'}
         </button>
       </div>
 
       <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-        <p className="text-sm font-semibold text-[#111827]">M-Pesa PIN</p>
+        <p className="text-sm font-semibold text-[#111827]">Secure Verto Checkout</p>
         <p className="mt-1 text-sm text-[#6B7280]">
-          Enter your M-Pesa PIN on the secure prompt that appears on your phone. Do not type your PIN into this website.
+          Complete payment only inside the Verto provider flow. Lango records the provider reference and waits for verified confirmation.
         </p>
       </div>
 
@@ -820,7 +798,7 @@ const OrderTracking = () => {
             <h2 className="text-xl font-bold text-[#111827]">Escrow Payment Protection</h2>
           </div>
           <p className="mt-2 text-sm text-[#6B7280]">
-            Buyer payment is held until delivery is confirmed. Seller and logistics payouts are credited to wallets after release.
+            Buyer payment is held until delivery is confirmed. Seller and logistics payouts are released through Verto after the dispute window clears.
           </p>
         </div>
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${

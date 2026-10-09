@@ -34,7 +34,7 @@ export const subscriptionService = {
     return normalizeSubscriptionPayload(response.data);
   },
 
-  subscribe: async ({ planId, paymentMethod = 'mpesa', paymentCompleted = true, paymentReference, agentNationalId }) => {
+  subscribe: async ({ planId, paymentMethod = 'verto', paymentCompleted = true, paymentReference, agentNationalId }) => {
     const normalizedPlanId = normalizePlanId(planId);
     const body = {
       planId: normalizedPlanId,

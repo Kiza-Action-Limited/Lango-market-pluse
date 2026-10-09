@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FaBuilding, FaCheckCircle, FaCreditCard, FaIdCard, FaMobileAlt, FaSyncAlt } from 'react-icons/fa';
+import { FaBuilding, FaCheckCircle, FaCreditCard, FaIdCard, FaReceipt, FaSyncAlt } from 'react-icons/fa';
 import { ALL_PLANS, PLAN_IDS } from '../config/subscriptionPlans';
 import { useAuth } from '../context/AuthContext';
 import { getPremiumProfileForUser } from '../utils/premiumSellerProfile';
@@ -20,7 +20,7 @@ const SellerPremiumPayment = () => {
   const [checking, setChecking] = useState(false);
   const [checkoutRequestId, setCheckoutRequestId] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
-  const [mpesaPhone, setMpesaPhone] = useState(user?.phone || '');
+  const [paymentReference, setPaymentReference] = useState('');
   const [agentNationalId, setAgentNationalId] = useState(() => String(searchParams.get('agentNationalId') || '').replace(/\D/g, ''));
   const [statusPollingPaused, setStatusPollingPaused] = useState(false);
   const [payeeAccount, setPayeeAccount] = useState({
@@ -47,28 +47,28 @@ const SellerPremiumPayment = () => {
     if (!requestId) return;
     setChecking(true);
     try {
-      const result = await paymentService.checkSubscriptionMpesaStatus(requestId);
+      const result = await paymentService.checkSubscriptionVertoStatus(requestId);
       if (result?.payeeAccount) {
         setPayeeAccount(result.payeeAccount);
       }
-      setPaymentStatus(result?.message || result?.status || 'Waiting for M-Pesa confirmation');
-      if (result?.code === 'MPESA_ACCESS_TOKEN_BLOCKED') {
+      setPaymentStatus(result?.message || result?.status || 'Waiting for Verto confirmation');
+      if (result?.code === 'VERTO_ACCESS_TOKEN_BLOCKED') {
         setStatusPollingPaused(true);
       }
       if (selectedPlan && requestId) {
         savePendingSubscriptionPayment(user, selectedPlan.id, {
           checkoutRequestId: requestId,
-          phoneNumber: mpesaPhone,
+          paymentReference,
           status: result?.status || 'pending',
-          message: result?.message || 'Waiting for M-Pesa confirmation',
-          statusPollingPaused: result?.code === 'MPESA_ACCESS_TOKEN_BLOCKED',
+          message: result?.message || 'Waiting for Verto confirmation',
+          statusPollingPaused: result?.code === 'VERTO_ACCESS_TOKEN_BLOCKED',
           payeeAccount: result?.payeeAccount,
         });
       }
 
       const activated = await completeActivation(result);
       if (!activated && !silent && result?.status === 'failed') {
-        toast.error(result?.message || 'M-Pesa payment was not completed');
+        toast.error(result?.message || 'Verto payment was not completed');
       }
     } catch (error) {
       if (!silent) {
@@ -91,9 +91,9 @@ const SellerPremiumPayment = () => {
     if (!pendingPayment?.checkoutRequestId) return;
 
     setCheckoutRequestId(pendingPayment.checkoutRequestId);
-    setMpesaPhone(pendingPayment.phoneNumber || user?.phone || '');
+    setPaymentReference(pendingPayment.paymentReference || pendingPayment.checkoutRequestId || '');
     setAgentNationalId(String(pendingPayment.agentNationalId || searchParams.get('agentNationalId') || '').replace(/\D/g, ''));
-    setPaymentStatus(pendingPayment.message || 'You have a pending M-Pesa payment. Check status after completing the prompt on your phone.');
+    setPaymentStatus(pendingPayment.message || 'You have a pending Verto payment reference saved on this device.');
     setStatusPollingPaused(Boolean(pendingPayment.statusPollingPaused));
     if (pendingPayment.payeeAccount) {
       setPayeeAccount(pendingPayment.payeeAccount);
@@ -143,8 +143,8 @@ const SellerPremiumPayment = () => {
   if (requiresPremiumVerification && !profile) return null;
 
   const activatePlan = async () => {
-    if (!mpesaPhone.trim()) {
-      toast.error('Enter the M-Pesa phone number that will receive the STK prompt');
+    if (!paymentReference.trim()) {
+      toast.error('Enter the verified Verto payment reference');
       return;
     }
     if (agentNationalId && agentNationalId.length < 5) {
@@ -155,33 +155,18 @@ const SellerPremiumPayment = () => {
     setActivating(true);
     setPaymentStatus('');
     try {
-      const result = await paymentService.initiateSubscriptionMpesaPayment({
+      const result = await paymentService.initiateSubscriptionVertoPayment({
         planId: selectedPlan.id,
-        phoneNumber: mpesaPhone.trim(),
+        paymentReference: paymentReference.trim(),
         agentNationalId,
       });
 
-      if (result?.checkoutRequestId) {
-        if (result?.payeeAccount) {
-          setPayeeAccount(result.payeeAccount);
-        }
-        setCheckoutRequestId(result.checkoutRequestId);
-        setStatusPollingPaused(false);
-        setPaymentStatus('STK Push sent. Enter your M-Pesa PIN on your phone to complete payment.');
-        savePendingSubscriptionPayment(user, selectedPlan.id, {
-          checkoutRequestId: result.checkoutRequestId,
-          phoneNumber: mpesaPhone.trim(),
-          status: result?.status || 'pending',
-          message: 'STK Push sent. Enter your M-Pesa PIN on your phone to complete payment.',
-          payeeAccount: result?.payeeAccount,
-          agentNationalId,
-        });
-        toast.success('M-Pesa STK Push sent to your phone');
-      } else {
-        setPaymentStatus(result?.message || 'M-Pesa payment request sent');
-      }
+      clearPendingSubscriptionPayment(user, selectedPlan.id);
+      await refreshUser?.();
+      toast.success(result?.message || `${selectedPlan.name} activated with Verto`);
+      navigate(`/seller/subscription-plans?plan=${encodeURIComponent(selectedPlan.id)}`);
     } catch (error) {
-      toast.error(error?.response?.data?.message || error?.message || 'Failed to start M-Pesa payment');
+      toast.error(error?.response?.data?.message || error?.message || 'Failed to verify Verto payment');
     } finally {
       setActivating(false);
     }
@@ -217,10 +202,10 @@ const SellerPremiumPayment = () => {
                 <p className="mt-1 text-sm text-[#374151]">
                   Your subscription payment goes to <span className="font-semibold">{payeeAccount?.name || 'Lango Market Pulse'}</span>.
                 </p>
-                {(payeeAccount?.mpesaShortCode || payeeAccount?.accountReference) && (
+                {(payeeAccount?.vertoShortCode || payeeAccount?.accountReference) && (
                   <p className="mt-1 text-xs text-[#6B7280]">
-                    {payeeAccount?.mpesaShortCode ? `M-Pesa business account: ${payeeAccount.mpesaShortCode}` : ''}
-                    {payeeAccount?.mpesaShortCode && payeeAccount?.accountReference ? ' | ' : ''}
+                    {payeeAccount?.vertoShortCode ? `Verto business account: ${payeeAccount.vertoShortCode}` : ''}
+                    {payeeAccount?.vertoShortCode && payeeAccount?.accountReference ? ' | ' : ''}
                     {payeeAccount?.accountReference ? `Reference: ${payeeAccount.accountReference}` : ''}
                   </p>
                 )}
@@ -242,30 +227,30 @@ const SellerPremiumPayment = () => {
 
           {checkoutRequestId && (
             <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
-              <p className="font-semibold">Pending M-Pesa checkout</p>
+              <p className="font-semibold">Pending Verto reference</p>
               <p className="mt-1">
-                Request #{String(checkoutRequestId).slice(-10)} is saved on this device. Complete the STK prompt, then use I Have Paid to activate the plan.
+                Reference #{String(checkoutRequestId).slice(-10)} is saved on this device. Confirm it with Verto, then use I Have Paid to activate the plan.
               </p>
             </div>
           )}
 
           <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
-            <label className="block text-sm font-semibold text-[#111827]" htmlFor="mpesaPhone">
-              M-Pesa phone number
+            <label className="block text-sm font-semibold text-[#111827]" htmlFor="vertoReference">
+              Verto payment reference
             </label>
             <div className="relative mt-2">
-              <FaMobileAlt className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <FaReceipt className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
-                id="mpesaPhone"
-                type="tel"
-                value={mpesaPhone}
-                onChange={(event) => setMpesaPhone(event.target.value)}
-                placeholder="07XXXXXXXX or 2547XXXXXXXX"
+                id="vertoReference"
+                type="text"
+                value={paymentReference}
+                onChange={(event) => setPaymentReference(event.target.value)}
+                placeholder="Verto transaction reference"
                 className="h-11 w-full rounded-lg border border-gray-300 pl-10 pr-3 text-sm outline-none focus:border-[#F97316] focus:ring-2 focus:ring-[#F97316]/20"
               />
             </div>
             <p className="mt-2 text-xs text-[#6B7280]">
-              An STK Push will appear on this phone. Enter your M-Pesa PIN there to confirm payment.
+              Enter the verified Verto reference from your completed subscription payment.
             </p>
           </div>
 
@@ -304,7 +289,7 @@ const SellerPremiumPayment = () => {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#F97316] text-white font-semibold hover:bg-[#EA580C] disabled:opacity-60"
             >
               <FaCreditCard />
-              {activating ? 'Sending STK Push...' : checkoutRequestId ? 'Resend STK Push' : 'Proceed To Payment & Activate'}
+              {activating ? 'Verifying Verto payment...' : 'Activate With Verto'}
             </button>
 
             {checkoutRequestId && (

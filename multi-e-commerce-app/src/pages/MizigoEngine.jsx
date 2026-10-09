@@ -501,7 +501,7 @@ const MizigoEngine = () => {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <Section
             icon={FaLock}
-            title="Asynchronous 3-Way M-Pesa Escrow"
+            title="Asynchronous 3-Way Verto Escrow"
             description="Escrow state machine and payout records are derived from live escrow transactions."
           >
             <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
@@ -614,7 +614,7 @@ const MizigoEngine = () => {
             <EmptyState>RFQ submission requires a real RFQ endpoint and returned quote negotiation records.</EmptyState>
             <EmptyState>Short-lived QR hashes with GPS telemetry require token issue, expiry, and verification fields.</EmptyState>
             <EmptyState>72-hour dispute freeze requires escrow dispute window and freeze expiry fields.</EmptyState>
-            <EmptyState>Decoupled M-Pesa B2C callbacks require worker status and payout callback visibility endpoints.</EmptyState>
+            <EmptyState>Decoupled Verto payout callbacks require worker status and payout callback visibility endpoints.</EmptyState>
           </div>
         </Section>
 

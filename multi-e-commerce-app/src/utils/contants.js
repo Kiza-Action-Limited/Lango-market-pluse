@@ -30,7 +30,7 @@ export const ORDER_STATUS = {
 };
 
 export const PAYMENT_METHODS = {
-  MPESA : 'mpesa',
+  VERTO : 'verto',
 };
 
 export const SHIPPING_COST = 5;

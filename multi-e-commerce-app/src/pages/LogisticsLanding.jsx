@@ -40,7 +40,7 @@ const capabilityBlocks = [
   {
     icon: FaWallet,
     label: 'Escrow-Linked Payouts',
-    text: 'Delivery earnings stay connected to order completion, proof of delivery, and wallet settlement flows.',
+    text: 'Delivery earnings stay connected to order completion, proof of delivery, and Verto settlement flows.',
   },
 ];
 
@@ -71,7 +71,7 @@ const proofRows = [
   { label: 'Pickup confirmation', value: 'QR scan and timestamp' },
   { label: 'Delivery confirmation', value: 'Receiver QR proof' },
   { label: 'Tracking status', value: 'Seller and buyer visibility' },
-  { label: 'Settlement path', value: 'Escrow release to wallet' },
+  { label: 'Settlement path', value: 'Escrow release through Verto' },
 ];
 
 const applicationSteps = [
@@ -264,7 +264,7 @@ const LogisticsLanding = () => {
             <p className="text-sm font-semibold uppercase tracking-wide text-[#F97316]">Proof and payout flow</p>
             <h2 className="mt-2 text-3xl font-bold text-[#111827]">Keep buyers, sellers, and providers aligned on every delivery.</h2>
             <p className="mt-4 text-sm leading-7 text-[#6B7280]">
-              The logistics workspace connects assignment updates, QR handoffs, delivery proof, and wallet payout records so delivery work is easier to trust.
+              The logistics workspace connects assignment updates, QR handoffs, delivery proof, and Verto payout records so delivery work is easier to trust.
             </p>
           </div>
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -288,7 +288,7 @@ const LogisticsLanding = () => {
             <p className="text-sm font-semibold uppercase tracking-wide text-[#FDBA74]">Become a verified logistics provider</p>
             <h2 className="mt-2 text-3xl font-bold">Create your provider account and complete verification.</h2>
             <p className="mt-3 text-sm leading-6 text-gray-300">
-              Once approved, you can manage assignments, GPS tracking, QR handoffs, wallet payouts, and delivery proof from the logistics dashboard.
+              Once approved, you can manage assignments, GPS tracking, QR handoffs, Verto payouts, and delivery proof from the logistics dashboard.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link to="/register?role=logistics" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#F97316] px-5 text-sm font-semibold text-white hover:bg-[#EA580C]">

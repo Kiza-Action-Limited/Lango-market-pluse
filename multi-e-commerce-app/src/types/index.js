@@ -21,7 +21,7 @@ export const OrderStatus = {
 };
 
 export const PaymentMethod = {
-  MOBILE_MONEY:"mpesa"
+  VERTO: 'verto'
 };
 
 export const BusinessType = {

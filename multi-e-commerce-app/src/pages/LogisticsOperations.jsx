@@ -39,9 +39,8 @@ const initialGroupTripPaymentForm = {
   participantUserId: '',
   amount: '',
   paymentStatus: 'paid',
-  paymentMethod: 'mpesa',
+  paymentMethod: 'verto',
   paymentReference: '',
-  paymentPhone: '',
   notes: '',
 };
 
@@ -789,18 +788,11 @@ const LogisticsOperations = () => {
                 </Field>
                 <Field label="Method">
                   <Select value={groupTripPaymentForm.paymentMethod} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, paymentMethod: e.target.value }))}>
-                    <option value="mpesa">M-Pesa</option>
-                    <option value="cash">Cash</option>
-                    <option value="wallet">Wallet</option>
-                    <option value="bank_transfer">Bank transfer</option>
-                    <option value="card">Card</option>
+                    <option value="verto">Verto</option>
                   </Select>
                 </Field>
                 <Field label="Reference">
                   <Input value={groupTripPaymentForm.paymentReference} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, paymentReference: e.target.value }))} />
-                </Field>
-                <Field label="Phone">
-                  <Input value={groupTripPaymentForm.paymentPhone} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, paymentPhone: e.target.value }))} />
                 </Field>
                 <Field label="Notes">
                   <Input value={groupTripPaymentForm.notes} onChange={(e) => setGroupTripPaymentForm((prev) => ({ ...prev, notes: e.target.value }))} />

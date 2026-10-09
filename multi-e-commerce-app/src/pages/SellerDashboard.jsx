@@ -637,7 +637,7 @@ const SellerDashboard = () => {
               <div>
                 <p className="text-sm font-semibold text-[#111827]">Subscription payment needs attention</p>
                 <p className="mt-1 text-xs text-amber-800">
-                  {pendingSubscriptionPayments[0].message || 'M-Pesa confirmation is still pending.'}
+                  {pendingSubscriptionPayments[0].message || 'Verto confirmation is still pending.'}
                 </p>
               </div>
             </div>
@@ -765,7 +765,7 @@ const SellerDashboard = () => {
                 </span>
                 <div>
                   <p className="text-sm font-semibold text-[#111827]">Journal posts to seller main account</p>
-                  <p className="mt-1 text-xs leading-5 text-gray-500">Cash, M-Pesa, bank, card, and mixed journal payments update wallet balance so released money can be withdrawn from the payout center.</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">Cash, Verto, bank, card, and mixed journal payments update wallet balance so released money can be withdrawn from the payout center.</p>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2 text-xs">
@@ -957,7 +957,7 @@ const SellerDashboard = () => {
                       Payment
                       <select name="paymentMethod" value={journalForm.paymentMethod} onChange={handleJournalFormChange} className="mt-1 h-10 w-full rounded-md border border-gray-300 bg-white px-3 text-sm outline-none focus:border-[#F97316]">
                         <option value="cash">Cash</option>
-                        <option value="mpesa">M-Pesa</option>
+                        <option value="verto">Verto</option>
                         <option value="bank">Bank</option>
                         <option value="credit">Credit</option>
                         <option value="mixed">Mixed</option>

@@ -53,7 +53,7 @@ router.get('/report/:type', subscriptionController.getReport);
 // Subscription management
 router.post('/subscribe', [
   body('planId').isIn(['solo', 'smart', 'growth', 'mizigo']),
-  body('paymentMethod').optional().isIn(['mpesa', 'commission']),
+  body('paymentMethod').optional().isIn(['verto', 'manual', 'commission']),
   body('paymentCompleted').optional().isBoolean(),
   body('paymentReference').optional().isString().isLength({ min: 3 }),
   body('agentNationalId').optional({ nullable: true, checkFalsy: true }).matches(/^[0-9]{5,20}$/).withMessage('Agent National ID must contain 5 to 20 digits'),

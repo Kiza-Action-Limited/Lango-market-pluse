@@ -231,7 +231,7 @@ const statusTone = (status) => {
 const buildTimeline = (order, logistics, escrow) => {
   const entries = [
     { label: 'Order created', status: 'created', time: order.createdAt, detail: 'Buyer placed the order' },
-    { label: 'Payment held', status: escrow?.escrowStatus || order.status, time: order.paidAt || escrow?.paidAt, detail: 'M-Pesa payment secured in escrow' },
+    { label: 'Payment held', status: escrow?.escrowStatus || order.status, time: order.paidAt || escrow?.paidAt, detail: 'Verto payment secured in escrow' },
   ];
 
   (order.timeline || []).forEach((item) => {

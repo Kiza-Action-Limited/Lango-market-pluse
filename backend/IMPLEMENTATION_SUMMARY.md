@@ -57,12 +57,13 @@
 - ✅ /api/v1/escrow - Escrow management
 - ✅ /api/v1/disputes - Dispute resolution
 - ✅ /api/v1/groupbuy - Group buying
-- ✅ /webhooks/mpesa - M-Pesa callbacks
+- ✅ /api/v1/payments/verto/webhook - Verto payment callbacks
 
 ### 4. **Services Created/Updated**
 
 **Payment Services:**
-- ✅ mpesa.service.js - M-Pesa integration (STK Push, B2C, callbacks)
+- ✅ vertoPayment.service.js - Verto payment and payout integration
+- ✅ vertoWebhook.service.js - Verto webhook processing
 - ✅ wallet.service.js - Wallet operations (transfer, withdraw, lock/unlock)
 - ✅ ledger.service.js - Financial ledger management
 - ✅ review.service.js - Review operations
@@ -102,7 +103,7 @@
 
 ### 6. **Configuration Files**
 - ✅ db.js - MongoDB connection
-- ✅ mpesa.js - M-Pesa Daraja API setup
+- ✅ verto.js - Verto provider configuration
 - ✅ redis.js - Redis connection
 - ✅ cloudinary.config.js - Image upload service
 - ✅ email.js - Email service configuration
@@ -142,8 +143,8 @@
 - Cart validation
 
 ### Payment Processing
-- M-Pesa STK Push integration
-- M-Pesa B2C withdrawal
+- Verto payment request integration
+- Verto payout tracking where enabled
 - Payment status tracking
 - Transaction history
 - Refund processing
@@ -221,7 +222,7 @@
 - JWT for authentication
 
 **External Services:**
-- M-Pesa (Daraja API) - Payment processing
+- Verto - Payment processing
 - Cloudinary - Image hosting
 - African SMS - SMS service
 - Nodemailer - Email service
@@ -242,7 +243,7 @@ backend/
 │   ├── server.js             # Server entry point
 │   ├── config/               # Configuration files
 │   │   ├── db.js
-│   │   ├── mpesa.js
+│   │   ├── verto.js
 │   │   ├── redis.js
 │   │   ├── cloudinary.config.js
 │   │   ├── email.js

@@ -2,7 +2,6 @@ const mongoose = require('mongoose');
 const Wallet = require('../../models/Wallet.model');
 const Transaction = require('../../models/Transaction.model');
 const WalletEntry = require('../../models/WalletEntry.model');
-const { b2cPayment, normalizeMpesaPhone } = require('../../config/mpesa');
 const { toMinorUnits } = require('../../utils/money');
 
 const normalizeAmount = (amount) => {
@@ -14,17 +13,6 @@ const normalizeAmount = (amount) => {
 };
 
 const makeReference = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-
-const isMpesaB2CConfigured = () => Boolean(
-  process.env.MPESA_CONSUMER_KEY &&
-  process.env.MPESA_CONSUMER_SECRET &&
-  process.env.MPESA_PASSKEY &&
-  (process.env.MPESA_SHORTCODE || process.env.MPESA_SHORT_CODE) &&
-  process.env.MPESA_INITIATOR_NAME &&
-  process.env.MPESA_INITIATOR_CREDENTIAL &&
-  process.env.MPESA_B2C_RESULT_URL &&
-  process.env.MPESA_B2C_TIMEOUT_URL
-);
 
 class WalletService {
   async getWallet(userId, session = null) {
@@ -227,92 +215,6 @@ class WalletService {
     } finally {
       session.endSession();
     }
-  }
-
-  async withdraw(userId, amount, phoneNumber) {
-    const value = normalizeAmount(amount);
-    const normalizedPhone = normalizeMpesaPhone(phoneNumber);
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    let result;
-    let reference;
-
-    try {
-      reference = makeReference('MPESA_WITHDRAW');
-      result = await this.debitWallet(
-        userId,
-        value,
-        reference,
-        `Withdrawal to M-Pesa ${normalizedPhone}`,
-        {
-          session,
-          status: 'pending',
-          type: 'withdrawal',
-          metadata: {
-            phoneNumber: normalizedPhone,
-            payoutChannel: 'mpesa',
-            payoutStatus: isMpesaB2CConfigured() ? 'submitting' : 'queued',
-            payoutProvider: 'safaricom_b2c',
-            originatorConversationId: reference,
-          },
-        }
-      );
-
-      await session.commitTransaction();
-    } catch (error) {
-      await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
-    }
-
-    let payoutStatus = isMpesaB2CConfigured() ? 'submitted' : 'queued';
-    let payoutResponse = null;
-    let providerMessage = isMpesaB2CConfigured()
-      ? 'Withdrawal sent to M-Pesa B2C.'
-      : 'Withdrawal queued. Configure M-Pesa B2C credentials to send automatically.';
-
-    if (isMpesaB2CConfigured()) {
-      try {
-        payoutResponse = await b2cPayment({
-          phoneNumber: normalizedPhone,
-          amount: value,
-          remarks: `Wallet withdrawal ${reference}`,
-          occasion: 'Wallet withdrawal',
-          originatorConversationId: reference,
-        });
-        await Transaction.findByIdAndUpdate(result.transaction._id, {
-          status: 'pending',
-          'metadata.payoutStatus': 'submitted',
-          'metadata.mpesaConversationId': payoutResponse.ConversationID || '',
-          'metadata.mpesaOriginatorConversationId': payoutResponse.OriginatorConversationID || reference,
-          'metadata.mpesaResponseCode': payoutResponse.ResponseCode || '',
-          'metadata.mpesaResponseDescription': payoutResponse.ResponseDescription || '',
-        });
-      } catch (error) {
-        payoutStatus = 'queued';
-        providerMessage = 'Withdrawal queued. M-Pesa B2C submission failed and can be retried by operations.';
-        await Transaction.findByIdAndUpdate(result.transaction._id, {
-          'metadata.payoutStatus': 'queued',
-          'metadata.payoutError': error.message,
-        });
-      }
-    }
-
-    return {
-      success: true,
-      message: providerMessage,
-      reference,
-      payoutStatus,
-      payoutResponse,
-      transaction: await Transaction.findById(result.transaction._id).lean(),
-      wallet: {
-        balance: result.wallet.balance,
-        lockedBalance: result.wallet.lockedBalance,
-        availableBalance: Math.max(0, result.wallet.balance - result.wallet.lockedBalance),
-        currency: result.wallet.currency,
-      },
-    };
   }
 
   async addFunds(userId, amount, paymentMethod, description) {

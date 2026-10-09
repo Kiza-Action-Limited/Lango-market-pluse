@@ -373,18 +373,18 @@ class BillingService {
 
     // Validate payment for monthly plans
     if (normalizedPlanId !== 'mizigo') {
-      if (paymentMethod !== 'mpesa') {
-        throw httpError('M-Pesa is the only supported payment method for monthly plans', 400);
+      if (!['verto', 'manual'].includes(paymentMethod)) {
+        throw httpError('Verto is the supported payment method for monthly plans', 400);
       }
       if (!paymentMeta?.serverVerified) {
-        throw httpError('Complete M-Pesa payment before plan activation', 402, {
+        throw httpError('Complete verified payment before plan activation', 402, {
           requiredPayment: 'subscription',
           requiredAmount: price,
           currency: 'KES'
         });
       }
       if (!paymentMeta?.paymentReference) {
-        throw httpError('M-Pesa payment reference is required', 400);
+        throw httpError('Verified payment reference is required', 400);
       }
     } else {
       // Mizigo validation
@@ -409,7 +409,7 @@ class BillingService {
       startDate,
       endDate,
       features: buildFeatures(normalizedPlanId),
-      paymentMethod: normalizedPlanId === 'mizigo' ? 'commission' : 'mpesa',
+      paymentMethod: normalizedPlanId === 'mizigo' ? 'commission' : paymentMethod,
       lastPaymentDate: paymentMeta?.paymentCompleted ? new Date() : null,
       nextBillingDate: normalizedPlanId === 'mizigo' ? null : new Date(startDate.setDate(startDate.getDate() + 30)),
       autoRenew: normalizedPlanId !== 'mizigo',
@@ -457,7 +457,7 @@ class BillingService {
         balanceBefore: user.walletBalance || 0,
         balanceAfter: user.walletBalance || 0,
         reference: paymentMeta.paymentReference,
-        description: `M-Pesa payment for Lango ${planName} plan - ${price} KES`,
+        description: `Verified payment for Lango ${planName} plan - ${price} KES`,
         metadata: buildPlatformRevenueMetadata({
           planId: normalizedPlanId,
           planName,
@@ -493,7 +493,7 @@ class BillingService {
     const { paymentReference, payment } = options;
 
     if (!paymentReference) {
-      throw httpError('Verified M-Pesa payment reference is required', 400);
+      throw httpError('Verified payment reference is required', 400);
     }
 
     const alreadyActivatedAt = payment?.metadata?.get
@@ -504,17 +504,17 @@ class BillingService {
       return Subscription.findOne({ user: userId });
     }
 
-    const subscription = await this.subscribe(userId, planId, 'mpesa', {
+    const subscription = await this.subscribe(userId, planId, 'verto', {
       paymentCompleted: true,
       paymentReference,
       serverVerified: true,
-      source: 'mpesa_verified',
+      source: 'verto_verified',
       revenueAccount: PLATFORM_ACCOUNT.name,
       agentNationalId: payment?.metadata?.get
         ? payment.metadata.get('agentNationalId')
         : payment?.metadata?.agentNationalId,
       referralIdempotencyKey: checkoutRequestIdFromPayment(payment) || paymentReference,
-      referralSource: 'mpesa_subscription',
+      referralSource: 'verto_subscription',
     });
 
     if (payment) {
@@ -647,7 +647,7 @@ class BillingService {
       startDate,
       endDate,
       features: buildFeatures(normalizedPlanId),
-      paymentMethod: normalizedPlanId === PLAN_IDS.MIZIGO ? 'commission' : 'mpesa',
+      paymentMethod: normalizedPlanId === PLAN_IDS.MIZIGO ? 'commission' : 'manual',
       lastPaymentDate: status === 'active' ? new Date() : null,
       nextBillingDate: normalizedPlanId === PLAN_IDS.MIZIGO || status !== 'active' ? null : endDate,
       autoRenew: Boolean(options.autoRenew),
@@ -718,7 +718,7 @@ class BillingService {
     }
     
     // Create new subscription (this will replace the old one)
-    const paymentMethod = normalizedNewPlanId === 'mizigo' ? 'commission' : 'mpesa';
+    const paymentMethod = normalizedNewPlanId === 'mizigo' ? 'commission' : 'manual';
     const newSubscription = await this.subscribe(userId, normalizedNewPlanId, paymentMethod, {
       paymentCompleted: !paymentNeeded || paymentCompleted,
       paymentReference: paymentReference || `UPGRADE_${Date.now()}`,
@@ -766,7 +766,7 @@ class BillingService {
     }
     
     if (!paymentReference) {
-      throw httpError('M-Pesa payment reference is required', 400);
+      throw httpError('Verified payment reference is required', 400);
     }
     
     // Calculate credits: 1 KES = 1 SMS credit (example rate)
@@ -852,7 +852,7 @@ class BillingService {
     
     const currentCredits = getSmsCreditState(subscription);
     if (currentCredits.balance < creditCount) {
-      const error = new Error('Insufficient SMS credits. Please top up via M-Pesa.');
+      const error = new Error('Insufficient SMS credits. Please top up with a verified payment.');
       error.statusCode = 402;
       error.requiredPayment = 'sms_credits';
       error.currentBalance = currentCredits.balance;
@@ -964,7 +964,7 @@ class BillingService {
   }
 
   /**
-   * Handle auto-renewal via M-Pesa
+   * Handle auto-renewal
    */
   async handleAutoRenewal(subscriptionId) {
     const subscription = await Subscription.findById(subscriptionId);
@@ -977,8 +977,7 @@ class BillingService {
     const user = await User.findById(subscription.user);
     if (!user) throw httpError('User not found', 404);
     
-    // Attempt M-Pesa charge
-    // This would integrate with M-Pesa API
+    // Attempt provider charge when automatic billing is configured.
     const paymentSuccessful = true; // Simulated
     
     if (paymentSuccessful) {

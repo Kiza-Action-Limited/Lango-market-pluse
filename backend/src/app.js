@@ -32,13 +32,12 @@ const contactRoutes = require('./routes/v1/contact.routes');
 const businessRoutes = require('./routes/v1/business.routes');
 const sellerRoutes = require('./routes/v1/seller.routes');
 const marketingRoutes = require('./routes/v1/marketing.routes');
-const callbackRoutes = require('./routes/v1/callbacks.routes');
-const mpesaWebhookRoutes = require('./routes/webhooks/mpesa.webhook');
 const errorHandler = require('./middleware/errorHandler');
 const requestLogger = require('./middleware/requestLogger');
 const securityHeaders = require('./middleware/securityHeaders');
 const simpleRateLimit = require('./middleware/simpleRateLimit');
 const databaseReady = require('./middleware/databaseReady');
+const { getSafeVertoConfig } = require('./config/verto');
 
 const app = express();
 
@@ -92,7 +91,12 @@ app.use(simpleRateLimit({ scope: 'api' }));
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(morgan('dev'));
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({
+  limit: '5mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf?.toString('utf8') || '';
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // Serve static files (for local uploads if needed)
@@ -103,7 +107,10 @@ app.get(['/health', '/api/health'], (req, res) => {
   res.status(200).json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    payments: {
+      verto: getSafeVertoConfig(),
+    },
   });
 });
 
@@ -124,7 +131,6 @@ app.get(['/api/v1/mobile/config', '/api/mobile/config'], (req, res) => {
         pushNotifications: true,
         gpsTracking: true,
         qrScanning: true,
-        mpesaPayments: true,
         csvExports: true,
       },
       endpoints: {
@@ -221,9 +227,6 @@ app.use('/v1/seller', sellerRoutes);
 app.use('/api/v1/marketing', marketingRoutes);
 app.use('/api/marketing', marketingRoutes);
 app.use('/v1/marketing', marketingRoutes);
-app.use('/api/v1/callbacks', callbackRoutes);
-app.use('/webhooks/mpesa', mpesaWebhookRoutes);
-app.use('/api/mpesa', mpesaWebhookRoutes);
 
 // Test route to verify server is working
 app.get('/api/test', (req, res) => {
@@ -256,8 +259,7 @@ app.get('/api/test', (req, res) => {
       qrTokens: '/api/v1/qr-tokens',
       sinkingFund: '/api/v1/sinking-fund',
       audit: '/api/v1/audit',
-      support: '/api/v1/support',
-      webhooks: '/webhooks/mpesa'
+      support: '/api/v1/support'
     }
   });
 });

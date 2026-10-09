@@ -40,7 +40,7 @@ const SellerFinance = () => (
         <InfoTile
           icon={FaClock}
           label="Withdrawal flow"
-          value="M-Pesa queue"
+          value="Verto queue"
           detail="Requests reserve the balance immediately and stay pending for payout processing."
         />
         <InfoTile

@@ -10,7 +10,6 @@ const DEFAULT_ALLOWED_PREFIXES = [
   '/v1/auth',
   '/api/v1/callbacks',
   '/webhooks',
-  '/api/mpesa',
   '/uploads',
 ];
 

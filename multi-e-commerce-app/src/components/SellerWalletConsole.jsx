@@ -143,7 +143,7 @@ const SellerWalletConsole = ({ className = '' }) => {
           className="rounded-xl border border-gray-200 p-4 xl:col-span-2"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!forms.withdrawAmount || !forms.withdrawPhone) return toast.error('Amount and phone number are required');
+            if (!forms.withdrawAmount || !forms.withdrawPhone) return toast.error('Amount and Verto account reference are required');
             return runAction(
               'withdraw',
               () => paymentService.withdrawWalletFunds({
@@ -156,7 +156,7 @@ const SellerWalletConsole = ({ className = '' }) => {
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h4 className="font-semibold text-[#111827]">Withdraw to M-Pesa</h4>
+              <h4 className="font-semibold text-[#111827]">Withdraw to Verto</h4>
               <p className="mt-1 text-sm text-gray-500">Minimum withdrawal is KES 50. The amount is reserved immediately while payout is pending.</p>
             </div>
             <span className="rounded-full border border-[#16A34A]/20 bg-[#16A34A]/10 px-3 py-1 text-xs font-semibold text-[#15803D]">
@@ -177,7 +177,7 @@ const SellerWalletConsole = ({ className = '' }) => {
               value={forms.withdrawPhone}
               onChange={(e) => updateForm('withdrawPhone', e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              placeholder="M-Pesa phone number"
+              placeholder="Verto account reference"
             />
             <button
               type="submit"

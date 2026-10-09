@@ -97,7 +97,7 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
       return;
     }
     if (!withdrawForm.phoneNumber) {
-      toast.error('Enter the M-Pesa phone number for payout.');
+      toast.error('Enter the Verto account reference for payout.');
       return;
     }
 
@@ -107,7 +107,7 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
         amount,
         phoneNumber: withdrawForm.phoneNumber,
       });
-      toast.success(result?.message || 'Withdrawal queued for M-Pesa payout.');
+      toast.success(result?.message || 'Withdrawal queued for Verto payout.');
       setWithdrawForm((prev) => ({ ...prev, amount: '' }));
       fetchAll({ silent: true });
     } catch (error) {
@@ -846,7 +846,7 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12">
-          <Panel title="M-Pesa Wallet Withdrawal" className="xl:col-span-4">
+          <Panel title="Verto Wallet Withdrawal" className="xl:col-span-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-md border border-green-200 bg-green-50 p-3">
                 <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-green-700"><FaWallet /> Available</div>
@@ -863,7 +863,7 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
                 <p className="mt-1 text-sm font-bold text-[#111827]">{formatCurrency(totalWalletBalance)}</p>
               </div>
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
-                <p className="font-semibold uppercase text-amber-700">Pending M-Pesa</p>
+                <p className="font-semibold uppercase text-amber-700">Pending Verto</p>
                 <p className="mt-1 text-sm font-bold text-amber-950">{formatCurrency(pendingWithdrawalAmount)}</p>
               </div>
             </div>
@@ -881,7 +881,7 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
                 type="tel"
                 value={withdrawForm.phoneNumber}
                 onChange={(event) => setWithdrawForm((prev) => ({ ...prev, phoneNumber: event.target.value }))}
-                placeholder="M-Pesa phone number"
+                placeholder="Verto account reference"
                 className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm focus:border-[#F97316] focus:outline-none"
               />
               <button
@@ -889,10 +889,10 @@ const LogisticsStatus = ({ section = 'dashboard' }) => {
                 disabled={withdrawing || availableWalletBalance < 50 || profileStatus !== 'verified'}
                 className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-[#111827] px-4 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-300"
               >
-                <FaMoneyBillWave /> {withdrawing ? 'Queuing payout...' : 'Withdraw to M-Pesa'}
+                <FaMoneyBillWave /> {withdrawing ? 'Queuing payout...' : 'Withdraw to Verto'}
               </button>
               <p className="text-xs text-gray-500">
-                Minimum KES 50. M-Pesa B2C sends automatically when configured; otherwise the request stays queued for operations.
+                Minimum KES 50. Verto payout sends automatically when configured; otherwise the request stays queued for operations.
               </p>
             </form>
           </Panel>

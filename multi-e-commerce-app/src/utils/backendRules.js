@@ -3,22 +3,6 @@ const randomId = () => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
 };
 
-export const normalizeKenyanMpesaPhone = (phoneNumber) => {
-  let normalized = String(phoneNumber || '').trim().replace(/\D/g, '');
-
-  if (normalized.startsWith('0')) {
-    normalized = `254${normalized.slice(1)}`;
-  } else if (/^[71]\d{8}$/.test(normalized)) {
-    normalized = `254${normalized}`;
-  }
-
-  if (!/^254[71]\d{8}$/.test(normalized)) {
-    throw new Error('Enter a valid Kenya M-Pesa number, for example 0712345678 or 254712345678.');
-  }
-
-  return normalized;
-};
-
 export const requireOrderReference = (orderId) => {
   const value = String(orderId || '').trim();
   if (!value) throw new Error('Order ID or order number is required.');

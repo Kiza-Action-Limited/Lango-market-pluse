@@ -1,17 +1,10 @@
-const mpesaService = require('../services/payment/mpesa.service');
 const walletService = require('../services/payment/wallet.service');
 const ledgerService = require('../services/payment/ledger.service');
+const vertoPaymentService = require('../services/payment/vertoPayment.service');
+const vertoWebhookService = require('../services/payment/vertoWebhook.service');
 const billingService = require('../services/subscription/billing.service');
-const Payment = require('../models/Payment.model');
-const { getPlatformAccountPublicPayload } = require('../config/platformAccount');
 const { validationResult } = require('express-validator');
 const smsService = require('../services/notification/sms.service');
-
-const getMetadataValue = (metadata, key) => {
-  if (!metadata) return undefined;
-  if (typeof metadata.get === 'function') return metadata.get(key);
-  return metadata[key];
-};
 
 const sendPaymentSms = async (user, message, context = 'payment SMS') => {
   const phone = user?.phone;
@@ -25,192 +18,6 @@ const sendPaymentSms = async (user, message, context = 'payment SMS') => {
   }
 };
 
-const formatKes = (amount) => `KES ${Number(amount || 0).toLocaleString('en-KE')}`;
-
-/**
- * Initiate M-Pesa STK Push for order payment
- * POST /api/v1/payments/mpesa/stkpush
- */
-exports.initiateMpesaPayment = async (req, res, next) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      const firstError = errors.array()[0];
-      return res.status(400).json({
-        success: false,
-        message: firstError?.msg || 'Check the payment request details.',
-        errors: errors.array(),
-      });
-    }
-
-    const orderId = req.body.orderId || req.params.id;
-    const phoneNumber = req.body.phoneNumber;
-    const result = await mpesaService.initiatePayment(orderId, phoneNumber, req.user.id);
-    sendPaymentSms(
-      req.user,
-      `Lango Market Pulse: M-Pesa payment request sent. Complete the prompt on ${phoneNumber}.`,
-      'order payment STK SMS'
-    );
-    res.status(200).json({
-      success: true,
-      message: 'STK Push sent to your phone',
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Check M-Pesa transaction status
- * GET /api/v1/payments/mpesa/status/:checkoutRequestId
- */
-exports.checkMpesaStatus = async (req, res, next) => {
-  try {
-    const { checkoutRequestId } = req.params;
-    const status = await mpesaService.queryPaymentStatus(checkoutRequestId);
-    res.status(200).json({
-      success: true,
-      data: status,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Initiate M-Pesa STK Push for subscription payment
- * POST /api/v1/payments/mpesa/subscription/stkpush
- */
-exports.initiateSubscriptionMpesaPayment = async (req, res, next) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, errors: errors.array() });
-    }
-
-    const phoneNumber = req.body.phoneNumber || req.user.phone;
-    await billingService.assertUserCanUseSubscriptionPlan(req.user.id, req.body.planId);
-    const result = await mpesaService.initiateSubscriptionPayment(req.body.planId, phoneNumber, req.user.id, {
-      agentNationalId: req.body.agentNationalId,
-    });
-    sendPaymentSms(
-      req.user,
-      `Lango Market Pulse: Subscription payment request sent for ${req.body.planId}. Complete the M-Pesa prompt on ${phoneNumber}.`,
-      'subscription STK SMS'
-    );
-
-    res.status(200).json({
-      success: true,
-      message: 'M-Pesa prompt sent to your phone. Enter your PIN to complete payment.',
-      data: {
-        ...result,
-        payeeAccount: result.payeeAccount || getPlatformAccountPublicPayload(),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Check subscription M-Pesa payment and activate plan after success
- * GET /api/v1/payments/mpesa/subscription/status/:checkoutRequestId
- */
-exports.checkSubscriptionMpesaStatus = async (req, res, next) => {
-  try {
-    const { checkoutRequestId } = req.params;
-    let payment = await Payment.findOne({ checkoutRequestId, user: req.user.id });
-
-    if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Subscription payment not found',
-      });
-    }
-
-    const purpose = getMetadataValue(payment.metadata, 'purpose');
-    const planId = getMetadataValue(payment.metadata, 'planId');
-    if (purpose !== 'subscription' || !planId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Payment is not a subscription payment',
-      });
-    }
-
-    if (payment.status === 'processing' || payment.status === 'pending') {
-      try {
-        await mpesaService.queryPaymentStatus(checkoutRequestId);
-        payment = await Payment.findOne({ checkoutRequestId, user: req.user.id });
-      } catch (error) {
-        return res.status(200).json({
-          success: true,
-          data: {
-            status: payment.status,
-            checkoutRequestId,
-            planId,
-            activated: false,
-            payeeAccount: getPlatformAccountPublicPayload(),
-            code: error.code,
-            providerStatus: error.providerStatus,
-            message: error.code === 'MPESA_ACCESS_TOKEN_BLOCKED'
-              ? 'Payment is still pending. Safaricom blocked the live status query, so activation will complete when the M-Pesa callback arrives.'
-              : error.message || 'Waiting for M-Pesa confirmation',
-          },
-        });
-      }
-    }
-
-    if (payment.status === 'completed') {
-      const paymentReference = payment.mpesaReceiptNumber || payment.transactionId || checkoutRequestId;
-      const subscriptionSmsAlreadySent = getMetadataValue(payment.metadata, 'subscriptionSmsSent') === true;
-      const subscription = await billingService.activatePaidSubscription(req.user.id, planId, {
-        paymentReference,
-        payment,
-      });
-      if (!subscriptionSmsAlreadySent) {
-        await sendPaymentSms(
-          req.user,
-          `Lango Market Pulse: Payment confirmed. Your ${planId} subscription is active. Ref: ${paymentReference}.`,
-          'subscription confirmation SMS'
-        );
-        if (typeof payment.metadata?.set === 'function') {
-          payment.metadata.set('subscriptionSmsSent', true);
-        } else {
-          payment.metadata = { ...(payment.metadata || {}), subscriptionSmsSent: true };
-        }
-        await payment.save();
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Payment confirmed. Subscription activated.',
-        data: {
-          status: 'completed',
-          activated: true,
-          checkoutRequestId,
-          planId,
-          subscription,
-          payeeAccount: getPlatformAccountPublicPayload(),
-        },
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        status: payment.status,
-        activated: false,
-        checkoutRequestId,
-        planId,
-        payeeAccount: getPlatformAccountPublicPayload(),
-        message: payment.failureReason || 'Waiting for M-Pesa confirmation',
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
 
 /**
  * Get wallet balance for authenticated user
@@ -264,30 +71,7 @@ exports.getTransactionHistory = async (req, res, next) => {
 };
 
 /**
- * Withdraw from wallet to M-Pesa
- * POST /api/v1/payments/wallet/withdraw
- */
-exports.withdrawToMpesa = async (req, res, next) => {
-  try {
-    const { amount, phoneNumber } = req.body;
-    const result = await walletService.withdraw(req.user.id, amount, phoneNumber);
-    sendPaymentSms(
-      req.user,
-      `Lango Market Pulse: Withdrawal of ${formatKes(amount)} initiated to ${phoneNumber}.`,
-      'wallet withdrawal SMS'
-    );
-    res.status(200).json({
-      success: true,
-      message: 'Withdrawal initiated',
-      data: result,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Record an M-Pesa SMS credit top-up after payment confirmation
+ * Record an SMS credit top-up after payment confirmation
  * POST /api/v1/payments/sms-credits/topup
  */
 exports.topUpSmsCredits = async (req, res, next) => {
@@ -314,6 +98,145 @@ exports.topUpSmsCredits = async (req, res, next) => {
       success: true,
       message: 'SMS credits topped up successfully',
       data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getVertoConfig = async (req, res, next) => {
+  try {
+    res.status(200).json({
+      success: true,
+      data: vertoPaymentService.getSafeConfig(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.createVertoPayment = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array(),
+      });
+    }
+
+    const result = await vertoPaymentService.createPaymentRequest({
+      orderId: req.body.orderId,
+      userId: req.user.id,
+      idempotencyKey: req.headers['idempotency-key'],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: result.reused ? result.message : 'Verto payment request created.',
+      data: {
+        paymentId: result.payment?._id,
+        providerReference: result.providerReference,
+        status: result.status,
+        amount: result.amount || result.payment?.amount,
+        currency: result.currency || result.payment?.currency,
+        checkoutUrl: result.checkoutUrl,
+        escrowSupported: vertoPaymentService.getSafeConfig().capabilities.escrow,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.checkVertoPaymentStatus = async (req, res, next) => {
+  try {
+    const payment = await vertoPaymentService.refreshPaymentStatus(req.params.reference, {
+      userId: req.user.id,
+      role: req.user.role,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: payment,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getVertoTransactions = async (req, res, next) => {
+  try {
+    const result = await vertoPaymentService.listTransactions(req.query);
+    res.status(200).json({
+      success: true,
+      ...result,
+      config: vertoPaymentService.getSafeConfig(),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getVertoPayouts = async (req, res, next) => {
+  try {
+    const result = await vertoPaymentService.listPayouts(req.query);
+    res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.createVertoPayout = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array(),
+      });
+    }
+
+    const result = await vertoPaymentService.initiatePayout({
+      orderId: req.body.orderId,
+      role: req.body.role || 'seller',
+      actorId: req.user.id,
+      reason: req.body.reason,
+      idempotencyKey: req.headers['idempotency-key'],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Verto payout request submitted.',
+      data: result.payout,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getVertoWallets = async (req, res, next) => {
+  try {
+    const wallets = await vertoPaymentService.getWallets();
+    res.status(200).json({
+      success: true,
+      data: wallets,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.handleVertoWebhook = async (req, res, next) => {
+  try {
+    const result = await vertoWebhookService.handle(req);
+    res.status(200).json({
+      success: true,
+      duplicate: Boolean(result.duplicate),
+      processingStatus: result.event?.processingStatus,
     });
   } catch (error) {
     next(error);
