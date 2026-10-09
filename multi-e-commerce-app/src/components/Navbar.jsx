@@ -2,16 +2,39 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { FaBriefcase, FaChevronDown, FaHome, FaInfoCircle, FaSearch, FaShoppingBag, FaShoppingCart, FaSignInAlt, FaStore, FaTh, FaTimes, FaTruck, FaUser, FaUserPlus } from 'react-icons/fa';
+import {
+  FaBriefcase,
+  FaChevronDown,
+  FaGem,
+  FaHeartbeat,
+  FaHome,
+  FaInfoCircle,
+  FaLaptop,
+  FaLeaf,
+  FaRunning,
+  FaSearch,
+  FaSeedling,
+  FaShoppingBag,
+  FaShoppingCart,
+  FaSignInAlt,
+  FaStore,
+  FaTh,
+  FaTimes,
+  FaTruck,
+  FaUser,
+  FaUserPlus,
+} from 'react-icons/fa';
 import { createPrefetchHandlers } from '../utils/prefetch';
 
 const categoryOptions = [
-  { label: 'All Categories', to: '/products' },
-  { label: 'Electronics', to: '/products?category=electronics' },
-  { label: 'Fashion', to: '/products?category=fashion' },
-  { label: 'Home and Garden', to: '/products?category=home-garden' },
-  { label: 'Beauty and Health', to: '/products?category=beauty-health' },
-  { label: 'Sports and Outdoor', to: '/products?category=sports-outdoor' },
+  { label: 'All Categories', detail: 'Browse every live product', to: '/categories', icon: FaTh, accent: 'bg-gray-100 text-gray-700' },
+  { label: 'Electronics', detail: 'Phones, gadgets, accessories', to: '/products?category=electronics', icon: FaLaptop, accent: 'bg-blue-50 text-blue-700' },
+  { label: 'Fashion', detail: 'Clothing, shoes, style picks', to: '/products?category=fashion', icon: FaGem, accent: 'bg-pink-50 text-pink-700' },
+  { label: 'Home and Garden', detail: 'Home tools and daily living', to: '/products?category=home-garden', icon: FaHome, accent: 'bg-emerald-50 text-emerald-700' },
+  { label: 'Beauty and Health', detail: 'Wellness and care essentials', to: '/products?category=beauty-health', icon: FaHeartbeat, accent: 'bg-rose-50 text-rose-700' },
+  { label: 'Sports and Outdoor', detail: 'Fitness, travel, outdoor gear', to: '/products?category=sports-outdoor', icon: FaRunning, accent: 'bg-orange-50 text-orange-700' },
+  { label: 'Fresh Produce', detail: 'Farm goods and groceries', to: '/products?category=vegetables', icon: FaSeedling, accent: 'bg-lime-50 text-lime-700' },
+  { label: 'Agri Supplies', detail: 'Tools for growers and traders', to: '/products?category=agriculture', icon: FaLeaf, accent: 'bg-green-50 text-green-700' },
 ];
 
 const currencyOptions = [
@@ -178,18 +201,49 @@ const Navbar = () => {
             >
               <button
                 onClick={() => toggleDropdown('category')}
-                className="bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2"
+                className="nav-category-trigger bg-[#E97A12] px-3 py-2 rounded flex items-center gap-2 font-semibold"
+                aria-expanded={openDropdown === 'category'}
+                aria-haspopup="menu"
               >
-                <span>All</span>
+                <FaTh size={13} />
+                <span>Categories</span>
                 <FaChevronDown size={12} />
               </button>
               {openDropdown === 'category' && (
-                <div className="absolute right-0 mt-2 w-56 bg-white text-[#111827] rounded-lg shadow-lg border border-gray-200 py-1">
+                <div className="absolute right-0 top-full z-50 w-[min(720px,calc(100vw-1.5rem))] pt-2">
+                  <div className="nav-mega-panel overflow-hidden rounded-xl border border-gray-200 bg-white text-[#111827] shadow-2xl">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-gray-100 bg-[#F8FAFC] px-4 py-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-[#F97316]">Shop departments</p>
+                        <p className="mt-0.5 text-sm text-gray-600">Find products by category, seller type, and market demand.</p>
+                      </div>
+                      <Link
+                        to="/categories"
+                        className="hidden rounded-md bg-[#111827] px-3 py-2 text-xs font-semibold text-white transition hover:bg-black sm:inline-flex"
+                        onClick={closeAllMenus}
+                      >
+                        View all
+                      </Link>
+                    </div>
+                    <div className="grid gap-2 p-3 sm:grid-cols-2">
                   {categoryOptions.map((option) => (
-                    <Link key={option.label} to={option.to} className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>
-                      {option.label}
+                    <Link
+                      key={option.label}
+                      to={option.to}
+                      className="nav-category-item group flex items-center gap-3 rounded-lg border border-transparent px-3 py-3 transition hover:border-[#FED7AA] hover:bg-[#FFF7ED]"
+                      onClick={closeAllMenus}
+                    >
+                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${option.accent}`}>
+                        <option.icon size={16} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-[#111827] group-hover:text-[#F97316]">{option.label}</span>
+                        <span className="mt-0.5 block truncate text-xs text-gray-500">{option.detail}</span>
+                      </span>
                     </Link>
                   ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -395,10 +449,16 @@ const Navbar = () => {
               <FaChevronDown size={12} />
             </button>
             {openDropdown === 'categoryMobile' && (
-              <div className="bg-white text-[#111827] rounded-lg py-1">
+              <div className="grid gap-2 rounded-lg bg-white p-2 text-[#111827]">
                 {categoryOptions.map((option) => (
-                  <Link key={option.label} to={option.to} className="block px-4 py-2 hover:bg-gray-100" onClick={closeAllMenus}>
-                    {option.label}
+                  <Link key={option.label} to={option.to} className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-gray-100" onClick={closeAllMenus}>
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded ${option.accent}`}>
+                      <option.icon size={13} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold">{option.label}</span>
+                      <span className="block truncate text-xs text-gray-500">{option.detail}</span>
+                    </span>
                   </Link>
                 ))}
               </div>

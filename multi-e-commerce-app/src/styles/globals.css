@@ -160,6 +160,21 @@
     min-width: 44px;
   }
 
+  .content-fade-in {
+    animation: contentFadeIn 0.32s ease-out both;
+  }
+
+  .skeleton-shimmer {
+    animation: skeletonShimmer 1.4s ease infinite;
+    background-image: linear-gradient(
+      90deg,
+      rgb(229 231 235 / 0.9) 25%,
+      rgb(243 244 246 / 0.95) 37%,
+      rgb(229 231 235 / 0.9) 63%
+    );
+    background-size: 400% 100%;
+  }
+
   .dashboard-shell {
     min-width: 0;
     overflow-x: hidden;
@@ -234,6 +249,146 @@
 
   .dashboard-list-row {
     animation: dashboardFadeRise 0.36s ease-out both;
+  }
+
+  .nav-category-trigger {
+    box-shadow: 0 8px 18px -14px rgb(234 88 12 / 0.75);
+    transition:
+      transform 160ms ease,
+      box-shadow 160ms ease,
+      background-color 160ms ease;
+  }
+
+  .nav-category-trigger:hover,
+  .nav-category-trigger:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 22px -16px rgb(234 88 12 / 0.9);
+  }
+
+  .nav-mega-panel {
+    animation: navMegaIn 0.18s ease-out both;
+    box-shadow: 0 24px 60px -32px rgb(17 24 39 / 0.5);
+    transform-origin: top right;
+  }
+
+  .nav-category-item {
+    transition:
+      transform 160ms ease,
+      border-color 160ms ease,
+      background-color 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .nav-category-item:hover,
+  .nav-category-item:focus-visible {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 30px -24px rgb(17 24 39 / 0.55);
+  }
+
+  .category-landing-card {
+    animation: categoryCardIn 0.42s ease-out both;
+    transition:
+      transform 180ms ease,
+      border-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .category-landing-card:hover,
+  .category-landing-card:focus-visible {
+    border-color: rgb(249 115 22 / 0.45);
+    transform: translateY(-3px);
+    box-shadow: 0 22px 45px -34px rgb(17 24 39 / 0.6);
+  }
+
+  .partner-logo-stage {
+    overflow: hidden;
+    position: relative;
+  }
+
+  .partner-logo-stage::before,
+  .partner-logo-stage::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    top: 0;
+    z-index: 2;
+    width: clamp(2rem, 8vw, 7rem);
+    pointer-events: none;
+  }
+
+  .partner-logo-stage::before {
+    left: 0;
+    background: linear-gradient(90deg, #f8fafc 0%, rgb(248 250 252 / 0) 100%);
+  }
+
+  .partner-logo-stage::after {
+    right: 0;
+    background: linear-gradient(270deg, #f8fafc 0%, rgb(248 250 252 / 0) 100%);
+  }
+
+  .partner-logo-marquee {
+    overflow: hidden;
+    width: 100%;
+  }
+
+  .partner-logo-track {
+    animation: partnerLogoMarquee 36s linear infinite;
+    display: flex;
+    align-items: stretch;
+    width: max-content;
+    will-change: transform;
+  }
+
+  .partner-logo-track-reverse {
+    animation-direction: reverse;
+    animation-duration: 48s;
+  }
+
+  .partner-logo-stage:hover .partner-logo-track {
+    animation-play-state: paused;
+  }
+
+  .partner-logo-card {
+    animation: partnerLogoCardIn 0.42s ease-out both;
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin-right: 0.6rem;
+    min-width: 8.5rem;
+    padding: 0.85rem 0.65rem;
+    transition:
+      border-color 180ms ease,
+      box-shadow 180ms ease,
+      transform 180ms ease;
+    width: 8.5rem;
+  }
+
+  .partner-logo-card:hover,
+  .partner-logo-card:focus-visible {
+    border-color: rgb(249 115 22 / 0.4);
+    box-shadow: 0 14px 28px -24px rgb(17 24 39 / 0.55);
+    transform: translateY(-3px);
+  }
+
+  .partner-logo-ring {
+    border-radius: 9999px;
+    box-shadow:
+      0 0 0 5px rgb(249 115 22 / 0.08),
+      0 8px 20px -16px rgb(17 24 39 / 0.75);
+    padding: 0.2rem;
+    transition: box-shadow 180ms ease, transform 180ms ease;
+  }
+
+  .partner-logo-card:hover .partner-logo-ring,
+  .partner-logo-card:focus-visible .partner-logo-ring {
+    box-shadow:
+      0 0 0 5px rgb(249 115 22 / 0.14),
+      0 10px 24px -16px rgb(17 24 39 / 0.8);
+    transform: scale(1.04);
   }
   
   .badge {
@@ -378,6 +533,26 @@
     }
   }
 
+  @keyframes contentFadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes skeletonShimmer {
+    from {
+      background-position: -200% 0;
+    }
+    to {
+      background-position: 200% 0;
+    }
+  }
+
   @keyframes dashboardFadeRise {
     from {
       opacity: 0;
@@ -435,6 +610,48 @@
       box-shadow: 0 0 0 6px rgb(249 115 22 / 0.08);
     }
   }
+
+  @keyframes navMegaIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes categoryCardIn {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes partnerLogoMarquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  @keyframes partnerLogoCardIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -448,6 +665,15 @@
   .dashboard-gauge,
   .dashboard-status-pill,
   .dashboard-list-row,
+  .content-fade-in,
+  .skeleton-shimmer,
+  .nav-category-trigger,
+  .nav-mega-panel,
+  .nav-category-item,
+  .category-landing-card,
+  .partner-logo-track,
+  .partner-logo-card,
+  .partner-logo-ring,
   .animate-fade-in,
   .animate-slide-up {
     animation: none !important;
@@ -457,7 +683,17 @@
   .dashboard-card:hover,
   .dashboard-panel:hover,
   .dashboard-card:hover .dashboard-icon,
-  .dashboard-status-pill:hover {
+  .dashboard-status-pill:hover,
+  .nav-category-trigger:hover,
+  .nav-category-trigger:focus-visible,
+  .nav-category-item:hover,
+  .nav-category-item:focus-visible,
+  .category-landing-card:hover,
+  .category-landing-card:focus-visible,
+  .partner-logo-card:hover,
+  .partner-logo-card:focus-visible,
+  .partner-logo-card:hover .partner-logo-ring,
+  .partner-logo-card:focus-visible .partner-logo-ring {
     transform: none;
   }
 
