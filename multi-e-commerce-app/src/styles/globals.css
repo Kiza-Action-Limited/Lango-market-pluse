@@ -163,6 +163,7 @@
   .dashboard-shell {
     min-width: 0;
     overflow-x: hidden;
+    animation: dashboardFadeRise 0.42s ease-out both;
   }
 
   .dashboard-shell .overflow-x-auto {
@@ -175,6 +176,64 @@
 
   .dashboard-actionbar {
     @apply flex flex-wrap items-center gap-3;
+  }
+
+  .dashboard-card,
+  .dashboard-panel {
+    will-change: transform, box-shadow;
+    animation: dashboardFadeRise 0.38s ease-out both;
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      border-color 180ms ease,
+      background-color 180ms ease;
+  }
+
+  .dashboard-card:hover,
+  .dashboard-panel:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px -20px rgb(17 24 39 / 0.45);
+  }
+
+  .dashboard-icon {
+    animation: dashboardIconPulse 2.8s ease-in-out infinite;
+    transition: transform 180ms ease;
+  }
+
+  .dashboard-card:hover .dashboard-icon {
+    transform: scale(1.06);
+  }
+
+  .dashboard-progress-fill {
+    transform-origin: left center;
+    animation: dashboardProgressFill 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .dashboard-sparkline-area {
+    animation: dashboardChartFade 0.65s ease-out both;
+  }
+
+  .dashboard-sparkline-line {
+    stroke-dasharray: 160;
+    stroke-dashoffset: 160;
+    animation: dashboardDrawLine 0.9s ease-out 120ms both;
+  }
+
+  .dashboard-gauge {
+    animation: dashboardGaugePop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .dashboard-status-pill {
+    transition: transform 160ms ease, box-shadow 160ms ease;
+  }
+
+  .dashboard-status-pill:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px -16px rgb(17 24 39 / 0.45);
+  }
+
+  .dashboard-list-row {
+    animation: dashboardFadeRise 0.36s ease-out both;
   }
   
   .badge {
@@ -317,5 +376,92 @@
       transform: translateY(0);
       opacity: 1;
     }
+  }
+
+  @keyframes dashboardFadeRise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes dashboardProgressFill {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes dashboardDrawLine {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  @keyframes dashboardChartFade {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 0.65;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes dashboardGaugePop {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes dashboardIconPulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgb(249 115 22 / 0);
+    }
+    50% {
+      box-shadow: 0 0 0 6px rgb(249 115 22 / 0.08);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-shell,
+  .dashboard-card,
+  .dashboard-panel,
+  .dashboard-icon,
+  .dashboard-progress-fill,
+  .dashboard-sparkline-area,
+  .dashboard-sparkline-line,
+  .dashboard-gauge,
+  .dashboard-status-pill,
+  .dashboard-list-row,
+  .animate-fade-in,
+  .animate-slide-up {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .dashboard-card:hover,
+  .dashboard-panel:hover,
+  .dashboard-card:hover .dashboard-icon,
+  .dashboard-status-pill:hover {
+    transform: none;
+  }
+
+  .dashboard-sparkline-line {
+    stroke-dashoffset: 0;
   }
 }

@@ -7,6 +7,7 @@ const AuditLog = require('../../models/AuditLog.model');
 const Logistics = require('../../models/Logistics.model');
 const notificationService = require('../notification/notification.service');
 const escrowService = require('../order/escrow.service');
+const walletService = require('./wallet.service');
 const vertoClient = require('./vertoClient.service');
 const { getSafeVertoConfig, getVertoConfig } = require('../../config/verto');
 const { createVertoError } = require('./vertoAuth.service');
@@ -64,6 +65,13 @@ const buildCommissionBreakdown = (order) => {
     sellerAllocation,
     logisticsAllocation: logistics,
   };
+};
+
+const payoutWalletType = (role) => (role === 'buyer_refund' ? 'refund' : 'escrow_release');
+
+const payoutWalletDescription = (payout) => {
+  const role = String(payout.role || 'payout').replace(/_/g, ' ');
+  return `Verto ${role} payout for order ${payout.order}`;
 };
 
 const assertOrderPayable = async (orderId, userId) => {
@@ -538,6 +546,7 @@ class VertoPaymentService {
     });
 
     if (status === 'completed') {
+      await this.creditWalletForCompletedPayout(payout);
       await notificationService.create(recipient, {
         type: 'in_app',
         channel: 'payment',
@@ -548,6 +557,45 @@ class VertoPaymentService {
     }
 
     return { payout, providerResponse };
+  }
+
+  async creditWalletForCompletedPayout(payout) {
+    if (!payout || payout.status !== 'completed' || !payout.recipient || Number(payout.amount || 0) <= 0) {
+      return null;
+    }
+
+    const metadata = payout.metadata?.toObject?.() || payout.metadata || {};
+    if (metadata.walletCreditTransactionId) {
+      return null;
+    }
+
+    const reference = `VERTO_PAYOUT_${payout._id}`;
+    const credit = await walletService.creditWallet(
+      payout.recipient,
+      payout.amount,
+      reference,
+      payoutWalletDescription(payout),
+      {
+        type: payoutWalletType(payout.role),
+        orderId: payout.order,
+        metadata: {
+          provider: 'verto',
+          payoutId: payout._id,
+          payoutRole: payout.role,
+          payoutChannel: payout.channel,
+          providerPayoutReference: payout.providerPayoutReference,
+        },
+      }
+    );
+
+    payout.metadata = {
+      ...metadata,
+      walletCreditTransactionId: credit.transaction?._id?.toString(),
+      walletCreditAt: new Date().toISOString(),
+      walletId: credit.wallet?._id?.toString(),
+    };
+    await payout.save();
+    return credit;
   }
 
   async listPayouts(filters = {}) {

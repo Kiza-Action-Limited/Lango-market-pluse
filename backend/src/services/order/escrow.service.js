@@ -19,6 +19,12 @@ const SINKING_FUND_RATE = Number(process.env.SINKING_FUND_RATE || 0.10);
 
 const money = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 const isAdminRole = (role) => ['admin', 'ADMIN'].includes(role);
+const toEscrowPayoutStatus = (status) => {
+  const normalized = String(status || 'pending').toLowerCase();
+  if (normalized === 'submitted') return 'sent';
+  if (['pending', 'queued', 'sent', 'completed', 'failed'].includes(normalized)) return normalized;
+  return 'pending';
+};
 const httpError = (message, statusCode, details = {}) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -513,7 +519,7 @@ class EscrowService {
           recipient: recipient._id,
           role,
           amount: value,
-          status: existing.status,
+          status: toEscrowPayoutStatus(existing.status),
           requestedAt: existing.requestedAt,
           completedAt: existing.completedAt,
           providerTransactionId: existing.providerPayoutReference,
@@ -546,7 +552,7 @@ class EscrowService {
         recipient: recipient._id,
         role,
         amount: value,
-        status: payoutRecord.status,
+        status: toEscrowPayoutStatus(payoutRecord.status),
         requestedAt: payoutRecord.requestedAt || payoutRecord.createdAt,
         completedAt: payoutRecord.completedAt,
         providerTransactionId: payoutRecord.providerPayoutReference,
@@ -840,20 +846,44 @@ class EscrowService {
   }
 
   async getEscrowSummary(userId) {
-    const [held, released] = await Promise.all([
-      Escrow.aggregate([
-        { $match: { $or: [{ buyer: userId }, { seller: userId }], status: { $in: ['HELD', 'IN_TRANSIT', 'DELIVERED', 'DISPUTED'] } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]),
-      Escrow.aggregate([
-        { $match: { $or: [{ buyer: userId }, { seller: userId }], status: { $in: ['RELEASED', 'PARTIAL_REFUND'] } } },
-        { $group: { _id: null, total: { $sum: '$sellerPayout' } } },
-      ]),
+    const query = { $or: [{ buyer: userId }, { seller: userId }] };
+    const [heldEscrows, releasedEscrows] = await Promise.all([
+      Escrow.find({ ...query, status: { $in: ['HELD', 'IN_TRANSIT', 'DELIVERED', 'DISPUTED'] } })
+        .populate('order', 'totalAmount productSubtotal logisticsFee logisticsDistanceKm quantity unitPrice')
+        .populate('logistics', 'shippingCost routeInfo driver fleetOwner')
+        .lean(),
+      Escrow.find({ ...query, status: { $in: ['RELEASED', 'PARTIAL_REFUND'] } }).select('sellerPayout').lean(),
     ]);
 
+    const heldTotals = heldEscrows.reduce((acc, escrow) => {
+      const amount = money(escrow.amount);
+      const split = this.calculateSplit(amount, escrow.refundAmount || 0, 'solo', {
+        order: escrow.order || {},
+        logistics: escrow.logistics || {},
+      });
+
+      acc.totalInEscrow += amount;
+      acc.expectedSellerPayout += Number(escrow.sellerPayout || 0) > 0 ? money(escrow.sellerPayout) : split.sellerPayout;
+      acc.expectedLogisticsPayout += Number(escrow.driverPayout || 0) > 0 ? money(escrow.driverPayout) : split.driverB2cAmount;
+      acc.expectedPlatformFee += Number(escrow.platformFee || 0) > 0 ? money(escrow.platformFee) : split.platformFee;
+      acc.heldCount += 1;
+      return acc;
+    }, {
+      totalInEscrow: 0,
+      expectedSellerPayout: 0,
+      expectedLogisticsPayout: 0,
+      expectedPlatformFee: 0,
+      heldCount: 0,
+    });
+
     return {
-      totalInEscrow: held[0]?.total || 0,
-      totalReleased: released[0]?.total || 0,
+      totalInEscrow: money(heldTotals.totalInEscrow),
+      expectedSellerPayout: money(heldTotals.expectedSellerPayout),
+      expectedLogisticsPayout: money(heldTotals.expectedLogisticsPayout),
+      expectedPlatformFee: money(heldTotals.expectedPlatformFee),
+      heldCount: heldTotals.heldCount,
+      totalReleased: money(releasedEscrows.reduce((sum, escrow) => sum + Number(escrow.sellerPayout || 0), 0)),
+      releasedCount: releasedEscrows.length,
     };
   }
 

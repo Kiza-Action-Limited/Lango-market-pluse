@@ -180,6 +180,7 @@ class VertoWebhookService {
     if (!payout) return null;
 
     const status = String(payload.status || payload.payoutStatus || payload.data?.status || '').toLowerCase();
+    const previousStatus = payout.status;
     payout.providerStatus = status || payout.providerStatus;
     if (['completed', 'complete', 'success', 'successful', 'paid'].includes(status)) {
       payout.status = 'completed';
@@ -200,6 +201,12 @@ class VertoWebhookService {
       lastWebhookAt: new Date().toISOString(),
     };
     await payout.save();
+
+    if (payout.status === 'completed' && previousStatus !== 'completed') {
+      await vertoPaymentService.creditWalletForCompletedPayout(payout);
+    } else if (payout.status === 'completed') {
+      await vertoPaymentService.creditWalletForCompletedPayout(payout);
+    }
 
     if (payout.order) {
       await Payment.updateMany(

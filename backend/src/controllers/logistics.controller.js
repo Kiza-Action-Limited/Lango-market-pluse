@@ -3234,6 +3234,7 @@ exports.processQrScan = async (req, res, next) => {
 
     const userId = req.user._id || req.user.id;
     const userRole = req.user.role;
+    const deliveryScannedByBuyer = step === 'delivery' && logistics.buyer?._id?.toString() === userId.toString();
     
     // For delivery, either driver or buyer can scan
     if (step === 'delivery') {
@@ -3568,11 +3569,33 @@ exports.processQrScan = async (req, res, next) => {
       });
 
       if (escrowService && escrowService.releasePayment) {
-        escrowRelease = {
-          released: false,
-          releaseWindowActive: true,
-          releaseDue: logistics.escrowReleaseDue,
-        };
+        if (deliveryScannedByBuyer) {
+          try {
+            escrowRelease = await escrowService.releasePayment(logistics.order._id || logistics.order, {
+              releasedBy: userId,
+              forceRelease: false,
+              releaseMethod: 'buyer_delivery_qr',
+            });
+            if (escrowRelease?.released) {
+              logistics.status = 'auto_released';
+            }
+          } catch (releaseError) {
+            logger.warn('Buyer delivery QR accepted, but escrow release could not start:', releaseError);
+            escrowRelease = {
+              released: false,
+              releaseWindowActive: true,
+              releaseDue: logistics.escrowReleaseDue,
+              error: releaseError.message,
+              code: releaseError.code,
+            };
+          }
+        } else {
+          escrowRelease = {
+            released: false,
+            releaseWindowActive: true,
+            releaseDue: logistics.escrowReleaseDue,
+          };
+        }
       }
 
       const recipients = [];
@@ -3584,7 +3607,9 @@ exports.processQrScan = async (req, res, next) => {
           userIds: recipients,
           channels: ['push', 'sms'],
           title: '✅ Delivery confirmed',
-          body: `${logistics.cargoType || 'Cargo'} has been delivered successfully. Escrow remains protected during the review window.`,
+          body: escrowRelease?.released
+            ? `${logistics.cargoType || 'Cargo'} has been delivered successfully. Verto escrow release has started for seller and logistics payouts.`
+            : `${logistics.cargoType || 'Cargo'} has been delivered successfully. Escrow remains protected during the review window.`,
           data: { 
             shipmentId: logistics._id.toString(), 
             status: 'delivered',
@@ -3637,6 +3662,10 @@ exports.processQrScan = async (req, res, next) => {
           alreadyReleased: escrowRelease.alreadyReleased,
           split: escrowRelease.split,
           payouts: escrowRelease.payouts,
+          releaseWindowActive: escrowRelease.releaseWindowActive,
+          releaseDue: escrowRelease.releaseDue,
+          error: escrowRelease.error,
+          code: escrowRelease.code,
         } : null,
         dashboardNotifications: {
           sent: dashboardNotifications.length,

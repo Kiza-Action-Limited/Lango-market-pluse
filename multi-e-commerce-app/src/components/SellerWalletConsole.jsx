@@ -35,6 +35,7 @@ const SellerWalletConsole = ({ className = '' }) => {
     details: null,
     transactions: [],
     statement: null,
+    escrowSummary: null,
   });
   const [forms, setForms] = useState({
     withdrawAmount: '',
@@ -45,11 +46,12 @@ const SellerWalletConsole = ({ className = '' }) => {
     if (!isSeller) return;
     setLoading(true);
     try {
-      const [balanceRes, detailsRes, txRes, statementRes] = await Promise.all([
+      const [balanceRes, detailsRes, txRes, statementRes, escrowSummaryRes] = await Promise.all([
         paymentService.getWalletBalance().catch((error) => ({ __error: error })),
         paymentService.getWalletDetails().catch((error) => ({ __error: error })),
         paymentService.getWalletTransactions({ page: 1, limit: 5 }).catch((error) => ({ __error: error })),
         paymentService.getWalletStatement({ page: 1, limit: 5 }).catch((error) => ({ __error: error })),
+        paymentService.getEscrowSummary().catch((error) => ({ __error: error })),
       ]);
 
       setWalletState({
@@ -57,6 +59,7 @@ const SellerWalletConsole = ({ className = '' }) => {
         details: detailsRes?.__error ? null : (detailsRes?.wallet || detailsRes?.data || detailsRes || null),
         transactions: Array.isArray(txRes) ? txRes : (txRes?.transactions || txRes?.data?.transactions || txRes?.data || []),
         statement: statementRes?.__error ? null : (statementRes?.statement || statementRes?.data || statementRes || null),
+        escrowSummary: escrowSummaryRes?.__error ? null : (escrowSummaryRes?.summary || escrowSummaryRes?.data || escrowSummaryRes || null),
       });
     } catch (error) {
       toast.error(error?.response?.data?.message || 'Failed to load wallet data');
@@ -81,6 +84,10 @@ const SellerWalletConsole = ({ className = '' }) => {
   const pendingWithdrawals = walletState.transactions.filter((tx) => tx.type === 'withdrawal' && tx.status === 'pending');
   const walletStatement = walletState.statement || {};
   const statementRows = walletStatement.transactions || walletStatement.entries || walletStatement.items || [];
+  const escrowSummary = walletState.escrowSummary || {};
+  const vertoEscrowHeld = Number(escrowSummary.totalInEscrow || escrowSummary.heldAmount || 0);
+  const vertoSellerExpected = Number(escrowSummary.expectedSellerPayout || escrowSummary.totalInEscrow || 0);
+  const vertoReleased = Number(escrowSummary.totalReleased || 0);
 
   const updateForm = (field, value) => {
     setForms((prev) => ({ ...prev, [field]: value }));
@@ -123,14 +130,19 @@ const SellerWalletConsole = ({ className = '' }) => {
         </button>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-4">
         <div className="rounded-xl bg-[#FFF7ED] p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-[#9A3412]">Available to withdraw</p>
           <p className="mt-2 text-3xl font-bold text-[#111827]">{walletState.balance === null ? '-' : formatCurrency(availableBalance)}</p>
         </div>
+        <div className="rounded-xl bg-[#EFF6FF] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Verto escrow held</p>
+          <p className="mt-2 text-3xl font-bold text-[#111827]">{formatCurrency(vertoEscrowHeld)}</p>
+          <p className="mt-1 text-xs text-blue-700">Est. seller share {formatCurrency(vertoSellerExpected)}</p>
+        </div>
         <div className="rounded-xl bg-gray-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Locked escrow</p>
-          <p className="mt-2 text-3xl font-bold text-[#111827]">{formatCurrency(lockedBalance)}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Released from escrow</p>
+          <p className="mt-2 text-3xl font-bold text-[#111827]">{formatCurrency(vertoReleased)}</p>
         </div>
         <div className="rounded-xl bg-gray-50 p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Pending withdrawals</p>
@@ -197,7 +209,11 @@ const SellerWalletConsole = ({ className = '' }) => {
               <span className="font-semibold text-[#111827]">{formatCurrency(totalBalance)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-gray-500">Locked funds</span>
+              <span className="text-gray-500">Verto held escrow</span>
+              <span className="font-semibold text-[#111827]">{formatCurrency(vertoEscrowHeld)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">App locked funds</span>
               <span className="font-semibold text-[#111827]">{formatCurrency(lockedBalance)}</span>
             </div>
             <div className="flex items-center justify-between">
@@ -235,7 +251,9 @@ const SellerWalletConsole = ({ className = '' }) => {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <DetailTile label="Available Balance" value={formatCurrency(availableBalance)} tone="green" />
                 <DetailTile label="Total Balance" value={formatCurrency(totalBalance)} />
-                <DetailTile label="Locked Balance" value={formatCurrency(lockedBalance)} tone="orange" />
+                <DetailTile label="Verto Escrow Held" value={formatCurrency(vertoEscrowHeld)} tone="orange" />
+                <DetailTile label="Expected Seller Share" value={formatCurrency(vertoSellerExpected)} />
+                <DetailTile label="App Locked Balance" value={formatCurrency(lockedBalance)} />
                 <DetailTile label="Currency" value={walletDetails.currency || 'KES'} />
                 <DetailTile label="Wallet ID" value={walletDetails._id} mono />
                 <DetailTile label="Owner User ID" value={walletDetails.user} mono />

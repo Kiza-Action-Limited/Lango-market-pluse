@@ -16,14 +16,14 @@ export const Sparkline = ({ points = [], color = '#F97316', fill = '#FFEDD5' }) 
 
   return (
     <svg viewBox="0 0 100 40" className="h-12 w-full" preserveAspectRatio="none" aria-hidden="true">
-      <polygon points={area} fill={fill} opacity="0.65" />
-      <polyline points={coordinates} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      <polygon className="dashboard-sparkline-area" points={area} fill={fill} opacity="0.65" />
+      <polyline className="dashboard-sparkline-line" points={coordinates} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 };
 
 export const KpiCard = ({ icon: Icon, label, value, detail, trend, color = '#F97316', points }) => (
-  <div className="min-w-0 rounded-md border border-gray-200 bg-white p-3 shadow-sm sm:p-4">
+  <div className="dashboard-card min-w-0 rounded-md border border-gray-200 bg-white p-3 shadow-sm sm:p-4">
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <p className="truncate text-[11px] font-medium uppercase tracking-wide text-gray-500 sm:text-xs">{label}</p>
@@ -34,7 +34,7 @@ export const KpiCard = ({ icon: Icon, label, value, detail, trend, color = '#F97
         </div>
       </div>
       {Icon && (
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}18`, color }}>
+        <div className="dashboard-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `${color}18`, color }}>
           <Icon />
         </div>
       )}
@@ -46,7 +46,7 @@ export const KpiCard = ({ icon: Icon, label, value, detail, trend, color = '#F97
 );
 
 export const Panel = ({ title, action, children, className = '' }) => (
-  <section className={`min-w-0 rounded-md border border-gray-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}>
+  <section className={`dashboard-panel min-w-0 rounded-md border border-gray-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}>
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h2 className="min-w-0 truncate text-sm font-semibold text-[#111827]">{title}</h2>
       {action && <div className="shrink-0">{action}</div>}
@@ -65,7 +65,7 @@ export const ProgressRow = ({ label, value = 0, max = 100, color = '#F97316', de
         <span className="shrink-0 font-medium text-[#111827]">{detail || `${Math.round(pct)}%`}</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-gray-100">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+        <div className="dashboard-progress-fill h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
     </div>
   );
@@ -77,7 +77,7 @@ export const DonutGauge = ({ value = 0, label, color = '#16A34A', track = '#E5E7
   return (
     <div className="flex flex-col items-center justify-center">
       <div
-        className="grid h-32 w-32 place-items-center rounded-full"
+        className="dashboard-gauge grid h-32 w-32 place-items-center rounded-full"
         style={{ background: `conic-gradient(${color} ${pct * 3.6}deg, ${track} 0deg)` }}
       >
         <div className="grid h-24 w-24 place-items-center rounded-full bg-white">
@@ -99,15 +99,15 @@ export const StatusPill = ({ children, tone = 'gray' }) => {
     gray: 'bg-gray-100 text-gray-700',
   };
 
-  return <span className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.gray}`}><span className="truncate">{children}</span></span>;
+  return <span className={`dashboard-status-pill inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-medium ${tones[tone] || tones.gray}`}><span className="truncate">{children}</span></span>;
 };
 
 export const SalesByLocationPanel = ({ title = 'Sales by Location', subtitle = 'Income in the last 28 days', locations = [], action, className = '' }) => (
   <Panel title={title} action={action} className={className}>
     <p className="mb-4 text-xs text-gray-500">{subtitle}</p>
     <div className="space-y-4">
-      {locations.length ? locations.map((location) => (
-        <div key={location.label}>
+      {locations.length ? locations.map((location, index) => (
+        <div key={location.label} className="dashboard-list-row" style={{ animationDelay: `${index * 45}ms` }}>
           <div className="mb-1 flex items-center justify-between gap-3 text-xs">
             <span className="truncate font-medium text-[#111827]">{location.label}</span>
             <span className={`shrink-0 font-semibold ${String(location.trend || '').startsWith('-') ? 'text-red-600' : 'text-green-600'}`}>
@@ -134,8 +134,10 @@ export const StoreVisitsBySourcePanel = ({ sources = [], totalLabel = '0 Visitor
     </div>
     {hasSourceData ? (
       <div className="space-y-4">
-        {sources.map((source) => (
-          <ProgressRow key={source.label} label={source.label} value={source.value} max={100} color={source.color} detail={`${Math.round(source.value)}%`} />
+        {sources.map((source, index) => (
+          <div key={source.label} className="dashboard-list-row" style={{ animationDelay: `${index * 45}ms` }}>
+            <ProgressRow label={source.label} value={source.value} max={100} color={source.color} detail={`${Math.round(source.value)}%`} />
+          </div>
         ))}
       </div>
     ) : (
@@ -172,7 +174,7 @@ export const CustomerReviewsPanel = ({ title = 'Customer Reviews', summary, acti
         </div>
       </div>
       {latest ? (
-        <div className="mt-5 rounded-md border border-gray-100 bg-gray-50 p-4">
+        <div className="dashboard-list-row mt-5 rounded-md border border-gray-100 bg-gray-50 p-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
             <p className="min-w-0 truncate font-semibold text-[#111827]">{latest.title || 'Customer feedback'}</p>
             <span className="text-xs text-gray-500">{latest.date || ''}</span>
