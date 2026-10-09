@@ -17,6 +17,9 @@ class SMSService {
   async sendToPhone(phoneNumber, message) {
     try {
       if (!this.isConfigured()) {
+        if (process.env.NODE_ENV === 'production') {
+          return { success: false, message: 'SMS provider is not configured.' };
+        }
         logger.warn('Africa\'s Talking not configured. SMS queued in mock mode.', {
           messageLength: String(message || '').length,
         });

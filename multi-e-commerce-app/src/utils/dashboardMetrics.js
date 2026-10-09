@@ -170,14 +170,14 @@ export const buildStoreVisitSources = ({ orders = [], usersTotal = 0, productsTo
   const labels = ['Direct', 'Social', 'Email', 'Referrals', 'Other'];
   const colors = ['#F97316', '#3B82F6', '#16A34A', '#8B5CF6', '#6B7280'];
   const totalSourceCount = Array.from(sourceCounts.values()).reduce((sum, count) => sum + count, 0);
-  const fallback = [42, 24, 16, 11, 7];
   const totalVisitors = Math.max(Number(usersTotal) || 0, orders.length, productsTotal);
 
   return {
     totalLabel: formatCompactNumber(totalVisitors),
+    hasSourceData: totalSourceCount > 0,
     sources: labels.map((label, index) => ({
       label,
-      value: totalSourceCount ? ((sourceCounts.get(label) || 0) / totalSourceCount) * 100 : fallback[index],
+      value: totalSourceCount ? ((sourceCounts.get(label) || 0) / totalSourceCount) * 100 : 0,
       color: colors[index],
     })),
   };

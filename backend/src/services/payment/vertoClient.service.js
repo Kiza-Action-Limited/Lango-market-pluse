@@ -38,7 +38,10 @@ class VertoClientService {
       }
 
       throw createVertoError(
-        error.response?.data?.message || error.response?.data?.error || error.message || 'Verto request failed.',
+        error.response?.data?.message ||
+          error.response?.data?.error ||
+          error.response?.data?.detail ||
+          `Verto ${method.toUpperCase()} ${path} failed${status ? ` with HTTP ${status}` : ''}.`,
         'VERTO_PROVIDER_REQUEST_FAILED',
         status && status < 500 ? status : 502,
         {

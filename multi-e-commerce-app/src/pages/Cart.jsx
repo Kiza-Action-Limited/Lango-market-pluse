@@ -6,6 +6,7 @@ import { FaTrash, FaPlus, FaMinus, FaShoppingCart, FaStore, FaTruck, FaBrain, Fa
 import { formatCurrency } from '../utils/formatters';
 import { SHIPPING_COST } from '../utils/contants';
 import { getMinimumOrderQuantity, MQQ_TIERS } from '../utils/moq';
+import { PRODUCT_IMAGE_FALLBACK } from '../utils/imageFallback';
 
 const Cart = () => {
   const { cartItems, updateQuantity, removeFromCart, getCartTotal, loading } = useCart();
@@ -86,7 +87,7 @@ const Cart = () => {
                         <div className="flex gap-4">
                           <div className="w-20 h-20 bg-gray-100 rounded-lg overflow-hidden shrink-0">
                             <img
-                              src={item.image || 'https://via.placeholder.com/100'}
+                              src={item.image || PRODUCT_IMAGE_FALLBACK}
                               alt={item.name}
                               className="w-full h-full object-cover"
                             />

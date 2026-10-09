@@ -1,7 +1,8 @@
 const Transaction = require('../../models/Transaction.model');
 const Wallet = require('../../models/Wallet.model');
+const crypto = require('crypto');
 
-const makeReference = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const makeReference = (prefix) => `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
 class LedgerService {
   async holdInEscrow(orderId, buyerId, amount) {

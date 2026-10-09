@@ -1,6 +1,11 @@
 const randomId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const values = new Uint32Array(2);
+    crypto.getRandomValues(values);
+    return `${Date.now()}-${Array.from(values, (value) => value.toString(36)).join('')}`;
+  }
+  return `${Date.now()}`;
 };
 
 export const requireOrderReference = (orderId) => {

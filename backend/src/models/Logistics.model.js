@@ -13,6 +13,7 @@
  */
 
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 const User = require('./User.model');
 const Transaction = require('./Transaction.model');
 
@@ -46,13 +47,13 @@ const DIM_UNITS     = Object.freeze(['cm', 'in']);
 
 const generateTripId = () => {
   const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const random = crypto.randomBytes(4).toString('hex').toUpperCase();
   return `TRIP-${timestamp}-${random}`;
 };
 
 const generateBookingReference = () => {
   const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const random = crypto.randomBytes(4).toString('hex').toUpperCase();
   return `BOOK-${timestamp}-${random}`;
 };
 
@@ -497,7 +498,7 @@ logisticsSchema.pre('save', function (next) {
   if (!this.trackingNumber && this.status !== 'pending') {
     const prefix    = 'LMP';   // Lango MarketPulse
     const timestamp = Date.now().toString().slice(-8);
-    const random    = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    const random    = crypto.randomInt(0, 10000).toString().padStart(4, '0');
     this.trackingNumber = `${prefix}${timestamp}${random}`;
   }
   if (typeof next === 'function') next();

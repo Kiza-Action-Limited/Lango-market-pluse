@@ -507,13 +507,13 @@ const AdminProducts = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {filteredProducts.map((product) => {
+            {filteredProducts.map((product, index) => {
               const active = isProductActive(product);
               const stock = getStock(product);
               const id = getProductId(product);
               const image = getImage(product);
               return (
-                <article key={id || `${product.name}-${Math.random()}`} className="group overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-[#F97316]/30 hover:shadow-md">
+                <article key={id || `${product.name || 'product'}-${product.sku || product.slug || index}`} className="group overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-[#F97316]/30 hover:shadow-md">
                   <div className="flex gap-3 p-2.5">
                     <button
                       type="button"

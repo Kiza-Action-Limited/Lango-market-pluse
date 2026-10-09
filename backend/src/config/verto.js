@@ -40,6 +40,7 @@ const getVertoConfig = () => {
   const env = String(process.env.VERTO_ENV || (process.env.NODE_ENV === 'production' ? 'production' : 'sandbox')).trim().toLowerCase();
   const enabled = boolEnv('VERTO_ENABLED', Boolean(process.env.VERTO_CLIENT_ID && process.env.VERTO_API_KEY));
   const defaults = DEFAULT_HOSTS[env] || DEFAULT_HOSTS.sandbox;
+  const publicCertificate = readSecretMaterial('VERTO_PUBLIC_CERTIFICATE', 'VERTO_PUBLIC_CERTIFICATE_PATH');
 
   const config = {
     enabled,
@@ -58,8 +59,9 @@ const getVertoConfig = () => {
     tokenSkewSeconds: Number(process.env.VERTO_TOKEN_SKEW_SECONDS || 60),
     webhookUrl: process.env.VERTO_WEBHOOK_URL || '',
     webhookSecret: process.env.VERTO_WEBHOOK_VERIFICATION_SECRET || '',
-    publicCertificate: readSecretMaterial('VERTO_PUBLIC_CERTIFICATE', 'VERTO_PUBLIC_CERTIFICATE_PATH'),
+    publicCertificate,
     privateKey: readSecretMaterial('VERTO_PRIVATE_KEY', 'VERTO_PRIVATE_KEY_PATH'),
+    encryptApiKey: boolEnv('VERTO_ENCRYPT_API_KEY', Boolean(publicCertificate)),
     sourceWalletId: process.env.VERTO_SOURCE_WALLET_ID || '',
     targetWalletId: process.env.VERTO_TARGET_WALLET_ID || '',
     targetCompanyId: process.env.VERTO_TARGET_COMPANY_ID || '',
@@ -88,6 +90,7 @@ const validateVertoConfig = (config = getVertoConfig()) => {
 
   if (!config.clientId) errors.push('VERTO_CLIENT_ID is required when VERTO_ENABLED=true.');
   if (!config.apiKey) errors.push('VERTO_API_KEY is required when VERTO_ENABLED=true.');
+  if (/REPLACE_WITH|your_|\.{3,}/i.test(config.apiKey)) errors.push('VERTO_API_KEY must be the full Verto secret, not a placeholder or truncated value.');
   if (!config.companyBaseUrl || !config.paymentBaseUrl) errors.push('Verto company and payment base URLs are required.');
   if (!Number.isFinite(config.timeoutMs) || config.timeoutMs < 1000) errors.push('VERTO_REQUEST_TIMEOUT_MS must be at least 1000.');
 

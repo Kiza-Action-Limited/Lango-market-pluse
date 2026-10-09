@@ -4,6 +4,9 @@ const Logistics = require('../models/Logistics.model');
 const QRCode = require('qrcode');
 const { validationResult } = require('express-validator');
 const { hashToken } = require('../utils/hash');
+const crypto = require('crypto');
+
+const generateQrTokenValue = (type, orderId) => `${type}-${orderId}-${Date.now()}-${crypto.randomBytes(18).toString('base64url')}`;
 
 /**
  * Generate QR token for order pickup/delivery
@@ -47,7 +50,7 @@ exports.generateQRToken = async (req, res, next) => {
     }
 
     // Generate unique token
-    const token = `${type}-${orderId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const token = generateQrTokenValue(type, orderId);
 
     // Generate QR code
     const qrImage = await QRCode.toDataURL(token);
@@ -235,7 +238,7 @@ exports.resendQRToken = async (req, res, next) => {
     }
 
     // Generate new token
-    const newToken = `${oldToken.type}-${oldToken.order}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const newToken = generateQrTokenValue(oldToken.type, oldToken.order);
     const qrImage = await QRCode.toDataURL(newToken);
 
     const expiresAt = new Date();

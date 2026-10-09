@@ -31,8 +31,16 @@ const normalizeApiBaseUrl = (value = '', fallback = '/api') => {
   return trimmedValue.startsWith('/') ? trimmedValue : `/${trimmedValue}`;
 };
 
-const PRODUCTION_API_ORIGIN = 'https://lango-market-pluse-4fje.onrender.com';
-const defaultApiBaseUrl = import.meta.env.PROD ? `${PRODUCTION_API_ORIGIN}/api` : '/api';
+const getRequiredProductionApiUrl = () => {
+  const value = String(import.meta.env.VITE_API_URL || '').trim();
+  if (import.meta.env.PROD && !value) {
+    throw new Error('VITE_API_URL is required for production frontend builds.');
+  }
+  return value;
+};
+
+const configuredProductionApiUrl = getRequiredProductionApiUrl();
+const defaultApiBaseUrl = import.meta.env.PROD ? configuredProductionApiUrl : '/api';
 
 export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL || defaultApiBaseUrl);
 
@@ -47,7 +55,7 @@ export const getSocketUrl = () => {
   if (explicitSocketUrl) return trimTrailingSlash(explicitSocketUrl);
 
   if (!API_BASE_URL || API_BASE_URL.startsWith('/')) {
-    if (import.meta.env.PROD) return PRODUCTION_API_ORIGIN;
+    if (import.meta.env.PROD) return trimTrailingSlash(configuredProductionApiUrl.replace(/\/api(?:\/v\d+)?$/i, ''));
     return window.location.origin;
   }
 

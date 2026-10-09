@@ -13,6 +13,7 @@ import { paymentService } from '../services/paymentService';
 import { productService } from '../services/productService';
 import { logisticsService } from '../services/logisticsService';
 import { normalizeOrder, normalizeTracking } from '../utils/orderAdapter';
+import { PRODUCT_IMAGE_FALLBACK } from '../utils/imageFallback';
 import LogisticsEscrowFlow from '../components/logistics/LogisticsEscrowFlow';
 import QrHandshakePanel, { QrAuditTrail, QrTokenStatus } from '../components/logistics/QrHandshakePanel';
 import ProductReviewModal from '../components/ProductReviewModal';
@@ -1082,7 +1083,7 @@ const OrderTracking = () => {
                 <div key={item.id} className="flex flex-col gap-3 border-b border-gray-100 py-3 last:border-0 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
                     <img
-                      src={item.image || 'https://via.placeholder.com/50'}
+                      src={item.image || PRODUCT_IMAGE_FALLBACK}
                       alt={item.name}
                       className="h-14 w-14 shrink-0 rounded-lg object-cover"
                     />

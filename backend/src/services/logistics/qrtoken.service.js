@@ -1,6 +1,9 @@
 const QRToken = require('../../models/QRToken.model');
 const Order = require('../../models/Order.model');
 const { hashToken } = require('../../utils/hash');
+const crypto = require('crypto');
+
+const generateQrTokenValue = (type, orderId) => `${type}-${orderId}-${Date.now()}-${crypto.randomBytes(18).toString('base64url')}`;
 
 class QRTokenService {
   async generateToken(orderId, logisticsId, type, req) {
@@ -17,7 +20,7 @@ class QRTokenService {
     }
 
     // Generate new token
-    const token = `${type}-${orderId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const token = generateQrTokenValue(type, orderId);
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24);
 

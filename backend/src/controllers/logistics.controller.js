@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+
 /**
  * Lango MarketPulse — Logistics Controller
  * Kakuma–Kitale Corridor | Plan 4 "Mizigo"
@@ -4268,7 +4270,7 @@ exports.recordGroupTripPayment = async (req, res, next) => {
         currency: 'KES',
         paymentMethod: normalizedMethod,
         status: normalizedStatus === 'paid' ? 'completed' : 'pending',
-        transactionId: `GT-${groupTrip.tripId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        transactionId: `GT-${groupTrip.tripId}-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
         phoneNumber: participant.paymentPhone || undefined,
         description: `Group trip payment for ${groupTrip.routeLabel || groupTrip.tripId}`,
         paidAt: normalizedStatus === 'paid' ? now : undefined,

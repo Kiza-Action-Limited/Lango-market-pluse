@@ -38,8 +38,12 @@ const connectWithUri = async (uri, label) => {
 const connectDB = async () => {
   const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
   const localMongoUri = process.env.LOCAL_MONGODB_URI || DEFAULT_LOCAL_URI;
+  const isProduction = process.env.NODE_ENV === 'production';
 
   if (!mongoUri) {
+    if (isProduction) {
+      throw new Error('MONGODB_URI is required in production. Refusing local database fallback.');
+    }
     console.warn('MongoDB URI is missing. Trying local MongoDB fallback.');
     try {
       return await connectWithUri(localMongoUri, 'local fallback');
@@ -54,7 +58,7 @@ const connectDB = async () => {
   } catch (error) {
     console.warn(`MongoDB unavailable for configured URI ${redactMongoUri(mongoUri)}:`, error.message);
 
-    if (process.env.MONGODB_DISABLE_LOCAL_FALLBACK === 'true' || mongoUri === localMongoUri) {
+    if (isProduction || process.env.MONGODB_DISABLE_LOCAL_FALLBACK === 'true' || mongoUri === localMongoUri) {
       return false;
     }
 

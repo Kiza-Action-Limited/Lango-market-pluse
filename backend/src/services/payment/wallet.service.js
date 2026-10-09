@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 const Wallet = require('../../models/Wallet.model');
 const Transaction = require('../../models/Transaction.model');
 const WalletEntry = require('../../models/WalletEntry.model');
@@ -12,7 +13,7 @@ const normalizeAmount = (amount) => {
   return Math.round(value * 100) / 100;
 };
 
-const makeReference = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const makeReference = (prefix) => `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
 class WalletService {
   async getWallet(userId, session = null) {

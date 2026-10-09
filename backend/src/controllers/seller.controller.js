@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 const User = require('../models/User.model');
 const Product = require('../models/Product.model');
 const Order = require('../models/Order.model');
@@ -139,7 +140,7 @@ const generateJournalReference = (entryType) => {
     stock_adjustment: 'AJ',
   }[entryType] || 'JJ';
   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const random = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const random = crypto.randomBytes(3).toString('hex').toUpperCase();
   return `${prefix}-${datePart}-${random}`;
 };
 

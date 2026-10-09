@@ -5,11 +5,12 @@ import { FaCheckCircle, FaStar, FaStore } from 'react-icons/fa';
 import { orderService } from '../services/orderService';
 import { productService } from '../services/productService';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { PRODUCT_IMAGE_FALLBACK } from '../utils/imageFallback';
 
 const getImageUrl = (product = {}) => {
   const image = product.images?.[0];
-  if (!image) return 'https://via.placeholder.com/96';
-  return typeof image === 'string' ? image : image.url || 'https://via.placeholder.com/96';
+  if (!image) return PRODUCT_IMAGE_FALLBACK;
+  return typeof image === 'string' ? image : image.url || PRODUCT_IMAGE_FALLBACK;
 };
 
 const BuyerReviews = () => {

@@ -12,6 +12,7 @@ import ProductReviewModal from '../components/ProductReviewModal';
 import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import { clampToMinimumOrder, getMinimumOrderQuantity, MQQ_TIERS } from '../utils/moq';
+import { PRODUCT_IMAGE_FALLBACK } from '../utils/imageFallback';
 
 const getProductId = (product = {}) => product.id || product._id;
 
@@ -370,7 +371,7 @@ const ProductDetail = () => {
   const productImages = (product.images || [])
     .map((image) => (typeof image === 'string' ? image : image?.url))
     .filter(Boolean);
-  const safeProductImages = productImages.length ? productImages : ['https://via.placeholder.com/500'];
+  const safeProductImages = productImages.length ? productImages : [PRODUCT_IMAGE_FALLBACK];
   const availableStock = Number(product.stock ?? product.quantityAvailable ?? 0);
   const minOrderQty = getMinimumOrderQuantity(product);
   const isMqqRestricted = minOrderQty > 1;

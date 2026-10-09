@@ -1542,6 +1542,7 @@ const AdminDashboard = ({ section = 'dashboard' }) => {
               className="xl:col-span-4"
               sources={storeVisitSources.sources}
               totalLabel={storeVisitSources.totalLabel}
+              hasSourceData={storeVisitSources.hasSourceData}
             />
             <CustomerReviewsPanel
               className="xl:col-span-4"

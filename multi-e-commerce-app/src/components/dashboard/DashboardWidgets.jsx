@@ -126,17 +126,21 @@ export const SalesByLocationPanel = ({ title = 'Sales by Location', subtitle = '
   </Panel>
 );
 
-export const StoreVisitsBySourcePanel = ({ sources = [], totalLabel = '0 Visitors', className = '' }) => (
+export const StoreVisitsBySourcePanel = ({ sources = [], totalLabel = '0 Visitors', hasSourceData = true, className = '' }) => (
   <Panel title="Store Visits by Source" className={className}>
     <div className="mb-5 flex flex-wrap items-end gap-2">
       <span className="text-2xl font-bold text-[#111827] sm:text-3xl">{totalLabel}</span>
       <span className="pb-1 text-sm text-gray-500">Visitors</span>
     </div>
-    <div className="space-y-4">
-      {sources.map((source) => (
-        <ProgressRow key={source.label} label={source.label} value={source.value} max={100} color={source.color} detail={`${Math.round(source.value)}%`} />
-      ))}
-    </div>
+    {hasSourceData ? (
+      <div className="space-y-4">
+        {sources.map((source) => (
+          <ProgressRow key={source.label} label={source.label} value={source.value} max={100} color={source.color} detail={`${Math.round(source.value)}%`} />
+        ))}
+      </div>
+    ) : (
+      <p className="rounded-md bg-gray-50 p-4 text-sm text-gray-500">No source tracking data returned yet.</p>
+    )}
   </Panel>
 );
 

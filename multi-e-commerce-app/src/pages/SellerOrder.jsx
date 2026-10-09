@@ -22,6 +22,7 @@ import toast from 'react-hot-toast';
 import { formatCurrency } from '../utils/formatters';
 import { orderService } from '../services/orderService';
 import { logisticsService } from '../services/logisticsService';
+import { PRODUCT_IMAGE_FALLBACK } from '../utils/imageFallback';
 import LiveLogisticsMapPanel from '../components/logistics/LiveLogisticsMapPanel';
 import { QrAuditTrail, QrTokenStatus } from '../components/logistics/QrHandshakePanel';
 
@@ -1087,7 +1088,7 @@ const SellerOrders = () => {
         <div className="space-y-5">
           {orders.map((order) => {
             const orderId = getOrderId(order);
-            const image = order.product?.images?.[0]?.url || order.product?.images?.[0] || 'https://via.placeholder.com/50';
+            const image = order.product?.images?.[0]?.url || order.product?.images?.[0] || PRODUCT_IMAGE_FALLBACK;
             const isClosed = closedStatuses.has(order.status);
             const logistics = logisticsByOrder[orderId];
             const logisticsId = getLogisticsId(logistics);

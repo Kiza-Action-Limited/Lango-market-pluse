@@ -4,11 +4,12 @@ import { FaBell, FaBoxOpen, FaSearch, FaStore } from 'react-icons/fa';
 import { notificationService } from '../services/notificationService';
 import { productService } from '../services/productService';
 import { formatCurrency, formatDateTime } from '../utils/formatters';
+import { PRODUCT_IMAGE_FALLBACK } from '../utils/imageFallback';
 
 const getProductImage = (product = {}) => {
   const image = product.images?.[0];
-  if (!image) return 'https://via.placeholder.com/96';
-  return typeof image === 'string' ? image : image.url || 'https://via.placeholder.com/96';
+  if (!image) return PRODUCT_IMAGE_FALLBACK;
+  return typeof image === 'string' ? image : image.url || PRODUCT_IMAGE_FALLBACK;
 };
 
 const BuyerProductAlerts = () => {

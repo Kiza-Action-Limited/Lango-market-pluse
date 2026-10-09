@@ -145,7 +145,7 @@ NotificationSchema.pre('save', function (next) {
   if (!this.expiresAt) {
     this.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   }
-  next();
+  if (typeof next === 'function') next();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

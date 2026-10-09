@@ -5,6 +5,7 @@ import { FaEye, FaTruck, FaBox, FaClock, FaCheckCircle, FaBan, FaBrain, FaShield
 import { formatCurrency } from '../utils/formatters';
 import { orderService } from '../services/orderService';
 import { normalizeOrder } from '../utils/orderAdapter';
+import { PRODUCT_IMAGE_FALLBACK } from '../utils/imageFallback';
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
@@ -259,7 +260,7 @@ const Orders = () => {
                     <div key={item.id} className="flex justify-between items-center">
                       <div className="flex items-center space-x-3">
                         <img
-                          src={item.image || 'https://via.placeholder.com/50'}
+                          src={item.image || PRODUCT_IMAGE_FALLBACK}
                           alt={item.name}
                           className="w-12 h-12 object-cover rounded-lg"
                         />

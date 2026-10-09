@@ -14,6 +14,16 @@ import {
 
 const hasCoords = (coords) => Number.isFinite(Number(coords?.lat)) && Number.isFinite(Number(coords?.lng));
 
+const makeClientId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const values = new Uint32Array(2);
+    crypto.getRandomValues(values);
+    return `${Date.now()}-${Array.from(values, (value) => value.toString(36)).join('')}`;
+  }
+  return `${Date.now()}`;
+};
+
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : 'Pending');
 
 const formatDuration = (seconds) => {
@@ -161,7 +171,7 @@ const QrHandshakePanel = ({
   const addFailedScan = (message, details = {}) => {
     setFailedScans((current) => [
       {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id: makeClientId(),
         message,
         step,
         tokenPreview: token ? `${token.slice(0, 16)}...` : 'No token',

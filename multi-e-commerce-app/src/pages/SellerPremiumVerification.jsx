@@ -76,13 +76,9 @@ const SellerPremiumVerification = () => {
       multipart.append('planId', planId);
       multipart.append('licenseDocument', licenseFile);
 
-      try {
-        await api.post('/v1/seller/premium-verification', multipart, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-      } catch (apiError) {
-        // Keep local fallback so flow is not blocked when endpoint is not yet live.
-      }
+      await api.post('/v1/seller/premium-verification', multipart, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
 
       upsertPremiumProfileForUser(user, {
         storefrontName: form.storefrontName.trim(),

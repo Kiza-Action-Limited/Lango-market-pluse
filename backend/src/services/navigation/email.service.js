@@ -33,6 +33,9 @@ class EmailService {
   async sendEmail(to, subject, html) {
     try {
       if (!this.isConfigured || !this.transporter) {
+        if (process.env.NODE_ENV === 'production') {
+          return { success: false, message: 'Email provider is not configured.' };
+        }
         logger.warn(`Navigation email not configured. Would send to ${to}:`, subject);
         return { success: true, message: 'Email queued (mock mode)' };
       }

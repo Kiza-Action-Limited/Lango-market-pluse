@@ -38,15 +38,25 @@ const extractExpiry = (payload = {}, skewSeconds = 60) => {
   return Date.now() + Math.max(60, seconds - skewSeconds) * 1000;
 };
 
-const encryptApiKey = (apiKey, publicCertificate) => {
-  if (!publicCertificate) return apiKey;
+const buildAuthFailureMessage = (error) => {
+  const status = error.response?.status;
+  const providerMessage = error.response?.data?.message || error.response?.data?.error || error.response?.data?.detail;
+  if (status === 403 && /request blocked/i.test(String(providerMessage || ''))) {
+    return 'Verto blocked the auth request. For production, confirm the backend outbound IP is whitelisted by Verto, VERTO_ENV matches the key environment, and certificate-based login is enabled.';
+  }
+  return providerMessage || 'Verto login was rejected. Check VERTO_CLIENT_ID, the full VERTO_API_KEY secret, VERTO_ENV, and certificate-based auth settings.';
+};
+
+const encryptApiKey = (apiKey, publicCertificate, enabled = false) => {
+  if (!enabled || !publicCertificate) return apiKey;
+  const payload = `${apiKey}:${Date.now()}`;
   return crypto.publicEncrypt(
     {
       key: publicCertificate,
       padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
       oaepHash: 'sha512',
     },
-    Buffer.from(apiKey, 'utf8')
+    Buffer.from(payload, 'utf8')
   ).toString('base64');
 };
 
@@ -74,16 +84,30 @@ class VertoAuthService {
     const payload = {
       clientId: config.clientId,
       mode: 'apiKey',
-      apiKey: encryptApiKey(config.apiKey, config.publicCertificate),
+      apiKey: encryptApiKey(config.apiKey, config.publicCertificate, config.encryptApiKey),
     };
 
-    const response = await axios.post(`${config.companyBaseUrl}${config.loginPath}`, payload, {
-      timeout: config.timeoutMs,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-    });
+    let response;
+    try {
+      response = await axios.post(`${config.companyBaseUrl}${config.loginPath}`, payload, {
+        timeout: config.timeoutMs,
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (error) {
+      const status = error.response?.status;
+      throw createVertoError(
+        buildAuthFailureMessage(error),
+        'VERTO_AUTH_REJECTED',
+        status && status < 500 ? status : 502,
+        {
+          providerStatus: status,
+          providerCode: error.response?.data?.code,
+        }
+      );
+    }
 
     const token = extractToken(response.data);
     if (!token) {
