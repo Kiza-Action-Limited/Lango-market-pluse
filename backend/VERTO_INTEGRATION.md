@@ -14,6 +14,8 @@ VERTO_API_KEY=
 VERTO_COMPANY_API_BASE_URL=https://api-company-sandbox.vertofx.com
 VERTO_PAYMENT_API_BASE_URL=https://api-payment-sandbox.vertofx.com
 VERTO_WALLET_API_BASE_URL=https://api-wallet-sandbox.vertofx.com
+VERTO_COMPANY_ID=
+VERTO_WEBHOOK_PRIVATE_KEY_PATH=
 VERTO_PUBLIC_CERTIFICATE=
 VERTO_WEBHOOK_VERIFICATION_SECRET=
 VERTO_WEBHOOK_URL=https://lango-market-pluse-4fje.onrender.com/api/v1/payments/verto/webhook
@@ -46,7 +48,7 @@ Production must use `VERTO_ENV=production`, production hosts, production credent
 ## Safety Notes
 
 - Verto payment and payout records are stored on the existing `Payment` and `Payout` models.
-- Webhooks are signature-checked when a webhook secret or public certificate is configured, persisted through `CallbackEvent`, and processed idempotently.
+- Webhooks are verified with Verto's `auth-*` certificate headers using `VERTO_COMPANY_ID` and the private key downloaded from **Webhook certificates**. Alternatively, configure `VERTO_WEBHOOK_VERIFICATION_SECRET` only when the Verto subscription is set up to use HMAC. The API `VERTO_PUBLIC_CERTIFICATE` is for API-key encryption, not webhook verification. Events are persisted through `CallbackEvent` and processed idempotently.
 - Escrow/conditional release is not represented as available unless `VERTO_ESCROW_ENABLED=true`.
 - Payouts remain disabled unless `VERTO_PAYOUTS_ENABLED=true`.
 - The frontend only shows Verto as selectable when the backend reports it is configured and enabled.

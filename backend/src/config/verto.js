@@ -41,6 +41,7 @@ const getVertoConfig = () => {
   const enabled = boolEnv('VERTO_ENABLED', Boolean(process.env.VERTO_CLIENT_ID && process.env.VERTO_API_KEY));
   const defaults = DEFAULT_HOSTS[env] || DEFAULT_HOSTS.sandbox;
   const publicCertificate = readSecretMaterial('VERTO_PUBLIC_CERTIFICATE', 'VERTO_PUBLIC_CERTIFICATE_PATH');
+  const webhookPrivateKey = readSecretMaterial('VERTO_WEBHOOK_PRIVATE_KEY', 'VERTO_WEBHOOK_PRIVATE_KEY_PATH');
 
   const config = {
     enabled,
@@ -59,6 +60,8 @@ const getVertoConfig = () => {
     tokenSkewSeconds: Number(process.env.VERTO_TOKEN_SKEW_SECONDS || 60),
     webhookUrl: process.env.VERTO_WEBHOOK_URL || '',
     webhookSecret: process.env.VERTO_WEBHOOK_VERIFICATION_SECRET || '',
+    companyId: String(process.env.VERTO_COMPANY_ID || '').trim(),
+    webhookPrivateKey,
     publicCertificate,
     privateKey: readSecretMaterial('VERTO_PRIVATE_KEY', 'VERTO_PRIVATE_KEY_PATH'),
     encryptApiKey: boolEnv('VERTO_ENCRYPT_API_KEY', Boolean(publicCertificate)),
@@ -105,8 +108,8 @@ const validateVertoConfig = (config = getVertoConfig()) => {
     if (/sandbox/i.test(config.companyBaseUrl) || /sandbox/i.test(config.paymentBaseUrl)) {
       errors.push('Production Verto configuration cannot point at sandbox hosts.');
     }
-    if (!config.webhookSecret && !config.publicCertificate) {
-      errors.push('Production Verto webhooks require VERTO_WEBHOOK_VERIFICATION_SECRET or VERTO_PUBLIC_CERTIFICATE.');
+    if (!config.webhookSecret && !(config.webhookPrivateKey && config.companyId)) {
+      errors.push('Production Verto webhooks require VERTO_WEBHOOK_VERIFICATION_SECRET or both VERTO_COMPANY_ID and VERTO_WEBHOOK_PRIVATE_KEY.');
     }
   }
 
@@ -133,7 +136,14 @@ const getSafeVertoConfig = () => {
       escrow: config.enabled && validation.ok && config.escrowEnabled,
       splitPayouts: config.enabled && validation.ok && config.splitPayoutsEnabled,
     },
-    webhookConfigured: Boolean(config.webhookSecret || config.publicCertificate),
+    webhookConfigured: Boolean(config.webhookSecret || (config.webhookPrivateKey && config.companyId)),
+    webhookAuthMethod: config.webhookSecret
+      ? 'hmac'
+      : config.webhookPrivateKey && config.companyId
+        ? 'certificate'
+        : 'not_configured',
+    webhookCompanyIdConfigured: Boolean(config.companyId),
+    webhookPrivateKeyConfigured: Boolean(config.webhookPrivateKey),
     validationErrors: validation.ok ? [] : validation.errors,
   };
 };

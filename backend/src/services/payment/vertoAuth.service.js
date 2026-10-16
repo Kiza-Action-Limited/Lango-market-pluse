@@ -38,11 +38,14 @@ const extractExpiry = (payload = {}, skewSeconds = 60) => {
   return Date.now() + Math.max(60, seconds - skewSeconds) * 1000;
 };
 
-const buildAuthFailureMessage = (error) => {
+const buildAuthFailureMessage = (error, environment) => {
   const status = error.response?.status;
   const providerMessage = error.response?.data?.message || error.response?.data?.error || error.response?.data?.detail;
   if (status === 403 && /request blocked/i.test(String(providerMessage || ''))) {
-    return 'Verto blocked the auth request. For production, confirm the backend outbound IP is whitelisted by Verto, VERTO_ENV matches the key environment, and certificate-based login is enabled.';
+    if (environment === 'production') {
+      return 'Verto blocked the auth request. Confirm the production backend outbound IP is whitelisted, VERTO_ENV and credentials are for production, and certificate-based login is enabled.';
+    }
+    return 'Verto blocked the sandbox auth request. Confirm VERTO_ENV=sandbox, use sandbox-issued credentials and the certificate required for sandbox login, and ask Verto whether sandbox access requires IP allowlisting.';
   }
   return providerMessage || 'Verto login was rejected. Check VERTO_CLIENT_ID, the full VERTO_API_KEY secret, VERTO_ENV, and certificate-based auth settings.';
 };
@@ -99,7 +102,7 @@ class VertoAuthService {
     } catch (error) {
       const status = error.response?.status;
       throw createVertoError(
-        buildAuthFailureMessage(error),
+        buildAuthFailureMessage(error, config.env),
         'VERTO_AUTH_REJECTED',
         status && status < 500 ? status : 502,
         {

@@ -5,6 +5,7 @@ const Payout = require('../../models/Payout.model');
 const vertoPaymentService = require('./vertoPayment.service');
 const { getVertoConfig } = require('../../config/verto');
 const { sha256 } = require('../../utils/hash');
+const logger = require('../../utils/logger');
 const { createVertoError } = require('./vertoAuth.service');
 
 const getHeader = (headers, names) => {
@@ -27,17 +28,58 @@ const verifyHmac = ({ rawBody, signature, secret }) => {
   return timingSafeEqual(expected, normalized);
 };
 
-const verifyCertificateSignature = ({ rawBody, signature, publicCertificate }) => {
-  if (!signature || !publicCertificate) return false;
-  const payload = Buffer.from(String(signature).replace(/^sha(256|512)=/i, ''), 'base64');
+const decodeBase64 = (value) => {
+  const text = String(value || '');
+  if (!text || !/^[A-Za-z0-9+/]+={0,2}$/.test(text) || text.length % 4 !== 0) return null;
+  const decoded = Buffer.from(text, 'base64');
+  return decoded.toString('base64') === text ? decoded : null;
+};
 
-  return ['RSA-SHA256', 'RSA-SHA512'].some((algorithm) => {
-    try {
-      return crypto.verify(algorithm, Buffer.from(rawBody || '', 'utf8'), publicCertificate, payload);
-    } catch (error) {
-      return false;
+const isAcceptableUtcDay = (value, now = Date.now()) => {
+  const acceptedDays = [-1, 0, 1].map((offset) => (
+    String(new Date(now + offset * 24 * 60 * 60 * 1000).getUTCDate())
+  ));
+  return acceptedDays.some((day) => timingSafeEqual(day, value));
+};
+
+const verifyCertificateAuth = ({ headers, privateKey, companyId }) => {
+  if (!privateKey || !companyId) return false;
+
+  for (const [name, rawValue] of Object.entries(headers || {})) {
+    if (!name.toLowerCase().startsWith('auth-')) continue;
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+
+    for (const value of values) {
+      const ciphertext = decodeBase64(value);
+      if (!ciphertext) continue;
+
+      let plaintext;
+      try {
+        plaintext = crypto.privateDecrypt({
+          key: privateKey,
+          padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+          oaepHash: 'sha512',
+        }, ciphertext).toString('utf8');
+      } catch (error) {
+        continue;
+      }
+
+      const separator = plaintext.indexOf('||');
+      if (separator < 0) continue;
+
+      const encodedCompanyId = plaintext.slice(0, separator);
+      const decodedCompanyId = decodeBase64(encodedCompanyId);
+      if (!decodedCompanyId) continue;
+
+      const receivedCompanyId = decodedCompanyId.toString('utf8');
+      const utcDay = plaintext.slice(separator + 2);
+      if (timingSafeEqual(receivedCompanyId, companyId) && isAcceptableUtcDay(utcDay)) {
+        return true;
+      }
     }
-  });
+  }
+
+  return false;
 };
 
 const extractEventId = (payload = {}) => (
@@ -90,9 +132,22 @@ class VertoWebhookService {
       return true;
     }
 
-    if (config.publicCertificate && verifyCertificateSignature({ rawBody, signature, publicCertificate: config.publicCertificate })) {
+    if (verifyCertificateAuth({
+      headers: req.headers,
+      privateKey: config.webhookPrivateKey,
+      companyId: config.companyId,
+    })) {
       return true;
     }
+
+    logger.warn('Verto webhook authentication failed', {
+      requestId: req.id,
+      authHeaderNames: Object.keys(req.headers || {}).filter((name) => name.toLowerCase().startsWith('auth-')),
+      hmacSignaturePresent: Boolean(signature),
+      webhookCompanyIdConfigured: Boolean(config.companyId),
+      webhookPrivateKeyConfigured: Boolean(config.webhookPrivateKey),
+      webhookSecretConfigured: Boolean(config.webhookSecret),
+    });
 
     throw createVertoError('Invalid Verto webhook signature.', 'VERTO_WEBHOOK_SIGNATURE_INVALID', 401);
   }
