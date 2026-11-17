@@ -60,7 +60,6 @@ The biggest missing work is integration and contract completion:
    - Address book CRUD is not implemented in backend as a first-class API.
 
 7. Africa's Talking webhooks are not mounted.
-   - `backend/src/routes/webhooks/africastalking.webhook.js` exists.
    - `backend/src/app.js` mounts M-Pesa webhooks only.
    - Missing: `/webhooks/africastalking` or equivalent route mount for SMS delivery reports and inbound messages.
 
