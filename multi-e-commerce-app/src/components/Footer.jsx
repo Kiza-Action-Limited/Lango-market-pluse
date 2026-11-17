@@ -75,7 +75,7 @@ const Footer = () => {
         size="xl"
       >
         <iframe
-          src="https://docs.google.com/forms/d/e/1FAIpQLScMs7dM0U1vVmW41u_frc8PIRzoCDGT2VDmeWNrtxQnTH72UA/viewform?embedded=true"
+          src="https://forms.gle/ALuemjLyfdStg8gJA?embedded=true"
           title="Lango Market Pulse quick survey"
           className="h-[75vh] w-full border-0"
           loading="lazy"
