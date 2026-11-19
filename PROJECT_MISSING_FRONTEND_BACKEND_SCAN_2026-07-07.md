@@ -176,7 +176,7 @@ Missing:
 4. Add backend premium seller verification with admin approval and remove local-storage-only verification.
 5. Implement or remove speculative business/supplier/AI endpoints from `manufacturerService.js`.
 6. Replace stale `/profile/*` frontend service calls with real `/v1/auth/me` APIs or add address-book backend routes.
-7. Mount Africa's Talking webhooks.
+7. Mount Africa's Talking .
 8. Normalize order/payment/escrow/logistics statuses across models, controllers, and frontend UI.
 9. Add admin finance operations: failed callbacks, payout callbacks, queue health, reconciliation.
 10. Complete Mizigo logistics: cross-dock entity, first-mile/long-haul legs, hub operator board, automatic pooling.

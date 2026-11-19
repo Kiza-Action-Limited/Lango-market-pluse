@@ -37,7 +37,7 @@ const Footer = () => {
                   onClick={() => setIsSurveyOpen(true)}
                   className="text-left text-gray-400 hover:text-white"
                 >
-                  Quick Survey
+                  Retailers Registry
                 </button>
               </li>
             </ul>
@@ -71,12 +71,12 @@ const Footer = () => {
       <Modal
         isOpen={isSurveyOpen}
         onClose={() => setIsSurveyOpen(false)}
-        title="Quick Survey"
+        title="Retailers Registry"
         size="xl"
       >
         <iframe
           src="https://forms.gle/ALuemjLyfdStg8gJA?embedded=true"
-          title="Lango Market Pulse quick survey"
+          title="Lango Market Pulse retailers registry"
           className="h-[75vh] w-full border-0"
           loading="lazy"
         />
